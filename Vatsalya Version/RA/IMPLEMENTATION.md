@@ -114,7 +114,46 @@ default per `retrieval-architecture.md`), only `ingest.py`'s
 model interface is pluggable, nothing else in this folder assumes Ollama
 specifically.
 
-### 5. Concurrency and context length
+### 5. Per-document error tracking, no soft fallbacks
+
+`ingest.py` inserts documents one at a time (concurrency capped by
+`asyncio.Semaphore(LLM_MAX_ASYNC)`) instead of one batched `rag.ainsert()`
+call over the whole list. This was a deliberate change: a single batched
+call gives no visibility into which specific SKU failed if something goes
+wrong mid-batch, and doesn't let you distinguish "everything succeeded"
+from "most things succeeded." Per-document insertion means every attempted
+SKU ends the run in exactly one of three accounted-for states: succeeded,
+failed (with its exception captured and printed), or skipped upstream (no
+usable description, counted by `load_documents.build_documents()` and
+reported, not silently dropped).
+
+`ingest.py` exits non-zero and prints every failed `sku_id` with its error
+if anything failed — it never continues past a failure by substituting a
+placeholder/empty value for that SKU. The same discipline applies
+elsewhere in this folder:
+
+- `load_documents.load_md_blocks()` raises `CorpusParseError` immediately
+  if a block in `flipkart_lightrag_corpus.md` doesn't have a parseable
+  `Product ID:` or `## Description` section, rather than skipping the
+  malformed block silently. A missing description is an expected,
+  already-known data gap (mirrors `flipkart_to_lightrag.py`'s own
+  `empty_description_count`); a missing `Product ID:` line is not
+  expected and means the corpus format changed or the file is corrupt —
+  those are different failure classes and are handled differently on
+  purpose.
+- `query.py` requires an explicit question argument and exits with a
+  usage message if none is given, instead of silently querying a
+  default/placeholder question.
+
+**If you extend this folder**: don't add a `.get(key, default)` or
+`try/except: pass` pattern that quietly substitutes a value when data is
+missing or a call fails. Either the missing/failed case is an expected,
+already-counted condition (like empty descriptions) — surface the count
+explicitly to the caller — or it's unexpected and should raise/hard-fail
+loudly with enough context (which SKU, what error) to debug it, not get
+papered over with a default.
+
+### 6. Concurrency and context length
 
 - `LLM_MAX_ASYNC` / `EMBEDDING_MAX_ASYNC` (`config.py`, default 4) —
   concurrent requests LightRAG issues to Ollama. Only actually

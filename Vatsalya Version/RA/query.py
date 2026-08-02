@@ -22,7 +22,10 @@ from ingest import build_rag
 
 
 async def main():
-    question = " ".join(sys.argv[1:]) or "What kinds of footwear are in this catalog?"
+    if len(sys.argv) < 2:
+        print("Usage: python query.py \"your question here\"", file=sys.stderr)
+        sys.exit(1)
+    question = " ".join(sys.argv[1:])
 
     rag = await build_rag()
     context = await rag.aquery(

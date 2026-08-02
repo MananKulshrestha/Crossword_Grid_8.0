@@ -163,6 +163,28 @@ batch works end-to-end.
 Storage is written to `RA/lightrag_storage/` (graph, vector DB, KV store —
 all local files, no external DB required).
 
+Documents are inserted one at a time (concurrency capped at
+`LLM_MAX_ASYNC`), not as a single batched call — each SKU's success or
+failure is tracked individually. At the end you get an explicit summary:
+
+```
+=== Ingestion summary ===
+Attempted:            150
+Succeeded:            148
+Failed:               2
+Skipped (no desc.):   0
+Storage:              /path/to/RA/lightrag_storage
+
+Failed sku_ids:
+  SBEEH3QGU7MFYJFY: TimeoutError(...)
+  ...
+```
+
+If anything failed, the script exits non-zero and lists exactly which
+`sku_id`s failed and why — it does **not** substitute a placeholder/empty
+entry for a failed document and continue as if nothing happened. Re-run
+`ingest.py` to retry; there's no partial-failure state hidden anywhere.
+
 ## 4. Query
 
 ```bash
@@ -194,7 +216,16 @@ pulls any missing models, then runs the requested step.
   `flipkart_lightrag_corpus.md` — no structured fields folded in. See
   `../IMPLEMENTATION.md` for why the RAG corpus stays free-text-only, and
   `IMPLEMENTATION.md` (this folder) for what was built here specifically.
-- Products with no description are skipped (2 in the current dataset).
+- Products with no description are **counted and reported**, not silently
+  dropped — `build_documents()` returns the skip count explicitly and
+  `ingest.py` prints it in the summary (2 in the current dataset). A
+  malformed corpus block (missing `Product ID:` or `## Description`)
+  raises `CorpusParseError` immediately rather than being skipped — that's
+  treated as a real data-integrity bug, not an expected gap.
+- No soft fallbacks/defaults on data: `query.py` requires an explicit
+  question argument (errors with a usage message otherwise, no default
+  question substituted), and a failed ingestion never gets replaced with
+  placeholder content — see the ingestion summary behavior above.
 - This folder currently implements **only** the semantic/graph retrieval
   branch. SQL hard-filtering and BM25 lexical search (the other two
   branches in `retrieval-architecture.md`'s design) are not built here yet.
