@@ -27,7 +27,12 @@ Implement these ports in the owning services:
 - `RecoveryEventPort.record`: persist the sanitized event in the shared `recovery_events` table/outbox.
 - `RecoveryCircuitPort`: optional Tier 2 circuit state/metrics.
 
-The included `GeminiGemmaGateway` is pinned to Google's hosted `gemma-4-26b-a4b-it` model. Configure `FKGRID_GEMINI_API_KEY` outside Git and run `python scripts/smoke_gemma4.py` for a redacted diagnostic workflow check. Set `FKGRID_GEMMA_SMOKE_MODE=production` to verify the binding 1,800 ms timeout/fallback. See `docs/gemini-gemma4-integration.md`.
+The default provider-backed adapter is `DeepInfraGemmaGateway`, pinned to
+DeepInfra's OpenAI-compatible `google/gemma-4-26B-A4B-it` model. Configure
+`FKGRID_DEEPINFRA_API_KEY` (or `DEEPINFRA_API_KEY`/`DEEPINFRA_TOKEN`) outside
+Git and run `python scripts/smoke_gemma4.py` for a redacted diagnostic workflow
+check. Set `FKGRID_GEMMA_SMOKE_MODE=production` to verify the binding 1,800 ms
+timeout/fallback. See `docs/deepinfra-gemma4-integration.md`.
 
 The query layer expects the catalog-language owner’s `lexicon_mappings` table and the catalog/taxonomy owner’s versioned vocabulary. The included migration creates the recovery-owned event and materialized allowed-concept contracts; it does not provision or migrate the rest of the application database.
 
@@ -41,7 +46,7 @@ Run it from the repository root:
 uv run uvicorn fkgrid.api.main:app --host 127.0.0.1 --port 8000
 ```
 
-Open [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs). `GET /v1/query-recovery/example` returns a complete request body that can be pasted into the POST operation. If `FKGRID_GEMINI_API_KEY` or `GEMINI_API_KEY` is configured, the default app uses the Gemma 4 26B planner with demo in-memory catalog seams; otherwise it uses a deterministic demo planner. Real DB/retrieval adapters can be injected through `create_app(RecoveryApiDependencies(...))` later.
+Open [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs). `GET /v1/query-recovery/example` returns a complete request body that can be pasted into the POST operation. If `FKGRID_DEEPINFRA_API_KEY`, `DEEPINFRA_API_KEY`, or `DEEPINFRA_TOKEN` is configured, the default app uses the DeepInfra Gemma 4 26B planner with demo in-memory catalog seams; otherwise it uses a deterministic demo planner. Real DB/retrieval adapters can be injected through `create_app(RecoveryApiDependencies(...))` later.
 
 ## Local contract checks
 

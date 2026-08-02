@@ -1,17 +1,22 @@
-"""Live, redacted Gemma 4 26B planner/workflow smoke test.
+"""Live, redacted DeepInfra Gemma 4 26B planner/workflow smoke test.
 
-Run with ``PYTHONPATH=src`` and ``FKGRID_GEMINI_API_KEY`` or the official
-``GEMINI_API_KEY`` environment variable set. The key is never printed or
-written by this script. Diagnostic mode uses a longer timeout to prove the
-provider path; production mode exercises the binding 1,800 ms safe fallback.
+Run with ``PYTHONPATH=src`` and ``FKGRID_DEEPINFRA_API_KEY``,
+``DEEPINFRA_API_KEY``, or the official ``DEEPINFRA_TOKEN`` environment
+variable set. The key is never printed or written by this script. Diagnostic
+mode uses a longer timeout to prove the provider path; production mode
+exercises the binding 1,800 ms safe fallback.
 """
 
 from __future__ import annotations
 
 import os
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
+from fkgrid.query_recovery.adapters.deepinfra import (
+    DEEPINFRA_GEMMA_4_26B_A4B_IT,
+    build_deepinfra_gemma4_recovery_planner,
+)
 from fkgrid.query_recovery.adapters.in_memory import (
     InMemoryApprovedExpansions,
     InMemoryRecoveryConstraints,
@@ -19,7 +24,6 @@ from fkgrid.query_recovery.adapters.in_memory import (
     ScriptedRetrieval,
     SequenceIds,
 )
-from fkgrid.query_recovery.adapters.gemini import build_gemma4_recovery_planner
 from fkgrid.query_recovery.domain import (
     BaselineSignals,
     CompatibilityTuple,
@@ -45,7 +49,7 @@ class LiveClock:
         return time.monotonic_ns() // 1_000_000
 
     def now_utc(self) -> datetime:
-        return datetime.now(timezone.utc)
+        return datetime.now(UTC)
 
 
 def make_context() -> RecoveryContext:
@@ -60,7 +64,7 @@ def make_context() -> RecoveryContext:
         gate_policy_version="gate-smoke",
         recovery_policy_version="recovery-policy-v1",
         recovery_prompt_version="recovery-v1",
-        recovery_model_alias="gemma-4-26b-a4b-it",
+        recovery_model_alias=DEEPINFRA_GEMMA_4_26B_A4B_IT,
     )
     state = QueryState(
         query_terms=["formal wear"],
@@ -104,7 +108,7 @@ def make_context() -> RecoveryContext:
 
 def main() -> int:
     context = make_context()
-    planner = build_gemma4_recovery_planner()
+    planner = build_deepinfra_gemma4_recovery_planner()
     production_mode = os.environ.get("FKGRID_GEMMA_SMOKE_MODE", "diagnostic") == "production"
     default_timeout = "1800" if production_mode else "5000"
     timeout_ms = max(
@@ -181,29 +185,32 @@ def main() -> int:
             "PROVIDER_UNAVAILABLE",
             "NETWORK_ERROR",
         }
-        if not event.planner_called or not set(event.planner_validation_codes) <= safe_provider_codes:
+        if (
+            not event.planner_called
+            or not set(event.planner_validation_codes) <= safe_provider_codes
+        ):
             print(
-                "GEMMA4_PRODUCTION_FAILED "
+                "DEEPINFRA_GEMMA4_PRODUCTION_FAILED "
                 f"codes={','.join(event.planner_validation_codes[:8]) or 'PLANNER_NOT_CALLED'}"
             )
             return 1
         print(
-            f"GEMMA4_PRODUCTION_SAFE_FALLBACK outcome={response.outcome.value} "
+            f"DEEPINFRA_GEMMA4_PRODUCTION_SAFE_FALLBACK outcome={response.outcome.value} "
             f"planner_called={event.planner_called} retrieval_runs={event.retrieval_run_count} "
             f"latency_ms={event.added_latency_ms} codes={','.join(event.planner_validation_codes)}"
         )
         return 0
     if not event.planner_called or event.planner_validation_codes:
         print(
-            "GEMMA4_WORKFLOW_FAILED "
+            "DEEPINFRA_GEMMA4_WORKFLOW_FAILED "
             f"codes={','.join(event.planner_validation_codes[:8]) or 'PLANNER_NOT_CALLED'}"
         )
         return 1
     if event.retrieval_run_count > 3:
-        print("GEMMA4_WORKFLOW_FAILED codes=RETRIEVAL_RUN_BUDGET")
+        print("DEEPINFRA_GEMMA4_WORKFLOW_FAILED codes=RETRIEVAL_RUN_BUDGET")
         return 1
     print(
-        f"GEMMA4_WORKFLOW_OK outcome={response.outcome.value} "
+        f"DEEPINFRA_GEMMA4_WORKFLOW_OK outcome={response.outcome.value} "
         f"planner_called={event.planner_called} retrieval_runs={event.retrieval_run_count} "
         f"latency_ms={event.added_latency_ms}"
     )

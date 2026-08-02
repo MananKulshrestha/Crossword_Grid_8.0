@@ -2,25 +2,22 @@
 
 from __future__ import annotations
 
-import os
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-from ..query_recovery.adapters.gemini import (
-    GEMMA_4_26B_A4B_IT,
-    GeminiGemmaConfig,
-    build_gemma4_recovery_planner,
+from ..query_recovery.adapters.deepinfra import (
+    DEEPINFRA_GEMMA_4_26B_A4B_IT,
+    DeepInfraGemmaConfig,
+    build_deepinfra_gemma4_recovery_planner,
 )
 from ..query_recovery.adapters.in_memory import (
     InMemoryApprovedExpansions,
     InMemoryRecoveryConstraints,
     InMemoryRecoveryEvents,
-    ScriptedRetrieval,
     SequenceIds,
 )
 from ..query_recovery.domain import (
-    CompatibilityTuple,
     ConceptType,
     RecoveryConstraint,
     RetrievalRun,
@@ -38,7 +35,7 @@ class ApiClock:
         return time.monotonic_ns() // 1_000_000
 
     def now_utc(self) -> datetime:
-        return datetime.now(timezone.utc)
+        return datetime.now(UTC)
 
 
 class DemoPlanner:
@@ -165,14 +162,14 @@ def build_demo_dependencies(
 
 
 def build_default_dependencies() -> RecoveryApiDependencies:
-    """Use Gemma when configured, otherwise keep Swagger usable offline.
+    """Use DeepInfra Gemma when configured, otherwise keep Swagger usable offline.
 
     Only the planner is provider-backed here. Catalog/retrieval/lexicon data
     remains demo in-memory data until the owning DB adapters are injected.
     """
 
     try:
-        config = GeminiGemmaConfig.from_env()
+        config = DeepInfraGemmaConfig.from_env()
     except ValueError:
         return build_demo_dependencies()
 
@@ -182,7 +179,7 @@ def build_default_dependencies() -> RecoveryApiDependencies:
         expansions=InMemoryApprovedExpansions(),
         constraints=InMemoryRecoveryConstraints(_demo_constraints()),
         retrieval=DemoRetrieval(),
-        planner=build_gemma4_recovery_planner(config=config),
+        planner=build_deepinfra_gemma4_recovery_planner(config=config),
         events=events,
         clock=clock,
     )
@@ -194,8 +191,8 @@ def build_default_dependencies() -> RecoveryApiDependencies:
     )
     return RecoveryApiDependencies(
         workflow=workflow,
-        mode="gemma4",
-        planner_model=GEMMA_4_26B_A4B_IT,
+        mode="deepinfra-gemma4",
+        planner_model=DEEPINFRA_GEMMA_4_26B_A4B_IT,
         data_mode="demo-in-memory",
     )
 

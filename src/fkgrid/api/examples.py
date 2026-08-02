@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from ..query_recovery.adapters.deepinfra import DEEPINFRA_GEMMA_4_26B_A4B_IT
 from ..query_recovery.confidence import assess_retrieval_confidence
 from ..query_recovery.domain import (
     CompatibilityTuple,
@@ -25,7 +26,7 @@ def build_example_request() -> RecoveryRequest:
         gate_policy_version="gate-swagger-demo",
         recovery_policy_version="recovery-policy-v1",
         recovery_prompt_version="recovery-v1",
-        recovery_model_alias="gemma-4-26b-a4b-it",
+        recovery_model_alias=DEEPINFRA_GEMMA_4_26B_A4B_IT,
     )
     state = QueryState(
         query_terms=["formal wear"],

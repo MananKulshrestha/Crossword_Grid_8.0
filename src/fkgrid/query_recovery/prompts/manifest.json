@@ -5,9 +5,9 @@
       "path": "recovery_v1.md",
       "model_schema": "RecoveryPlannerOutputV1",
       "sha256": "84619ef8c9676880f7dc06896a48b2e475d49a95187bae8e7a3e054836279d48",
-      "provider": "google-gemini-api",
-      "model_alias": "gemma-4-26b-a4b-it",
-      "thinking_level": "minimal"
+      "provider": "deepinfra-openai-compatible",
+      "model_alias": "google/gemma-4-26B-A4B-it",
+      "structured_output": "json_object"
     }
   }
 }
