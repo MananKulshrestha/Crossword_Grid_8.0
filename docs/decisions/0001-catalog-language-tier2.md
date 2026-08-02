@@ -14,6 +14,9 @@ automatic lexicon activation.
   seven-day-capable evidence windows, and no source concentration above 40%.
 - Proposer and critic are separate tool-less structured calls. The critic emits
   concern codes only.
+- The default FastAPI assembly uses Gemma for both calls through a provider-neutral
+  adapter. Ollama is the default local transport (`gemma3:27b`); an OpenAI-compatible
+  transport and exact model alias can be selected through environment settings.
 - Canonical target IDs come only from `CanonicalVocabularyPort`.
 - DB schema/queries are a handoff to the database owner; this branch does not run
   migrations or create a connection.
@@ -22,7 +25,6 @@ automatic lexicon activation.
 
 ## Deferred decisions
 
-Provider/model alias, credentials/cost cap, SQLAlchemy transaction implementation,
+Gemma hosting alias/credentials/cost cap, SQLAlchemy transaction implementation,
 review UI/authentication, catalog vocabulary materialization, and deployment
 artifact storage are intentionally left behind ports.
-

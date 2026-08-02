@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from fkgrid.api.main import app
+from fkgrid.api.container import create_demo_container
+from fkgrid.api.main import app, create_app
 
-client = TestClient(app)
+client = TestClient(create_app(create_demo_container()))
 
 
 def workflow_payload() -> dict[str, object]:
@@ -30,6 +31,7 @@ def workflow_payload() -> dict[str, object]:
 
 
 def test_health_ready_and_openapi_are_available() -> None:
+    assert app.state.catalog_language.mode == "gemma"
     assert client.get("/health").json()["status"] == "ok"
     ready = client.get("/ready")
     assert ready.status_code == 200

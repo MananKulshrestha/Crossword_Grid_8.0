@@ -8,7 +8,7 @@ from typing import Annotated
 from fastapi import Body, Depends, FastAPI, HTTPException, Request, status
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 
-from fkgrid.api.container import CatalogLanguageApiContainer, create_demo_container
+from fkgrid.api.container import CatalogLanguageApiContainer, create_gemma_container
 from fkgrid.domain.catalog_language import (
     EvidenceWindow,
     LexiconCompatibility,
@@ -150,16 +150,16 @@ catalog_language_container_dependency = Depends(get_container)
 
 
 def create_app(container: CatalogLanguageApiContainer | None = None) -> FastAPI:
-    """Create an app with injected adapters or deterministic demo defaults."""
+    """Create an app with injected adapters or the real Gemma default."""
 
-    selected_container = container or create_demo_container()
+    selected_container = container or create_gemma_container()
     app = FastAPI(
         title="FK GRiD Catalog Language API",
         summary="Swagger-accessible Tier 2 evidence-driven lexicon operations",
         description=(
             "Offline/admin-facing API for the Catalog Language Tier 2 workflow. "
-            "The default app uses deterministic demo adapters; production callers "
-            "must inject database, model, retrieval, review, and activation adapters."
+            "The default app uses Gemma for proposer and critic calls; production callers "
+            "must inject database, retrieval, review, and activation adapters."
         ),
         version="0.1.0",
         docs_url="/docs",
@@ -180,12 +180,13 @@ def create_app(container: CatalogLanguageApiContainer | None = None) -> FastAPI:
 
     @app.get("/ready", response_model=ApiStatus, tags=["system"])
     def ready() -> ApiStatus:
+        is_ready, detail = selected_container.check_readiness()
         return ApiStatus(
             service="fkgrid-catalog-language",
-            status="ready" if selected_container.ready else "not_ready",
+            status="ready" if is_ready else "not_ready",
             mode=selected_container.mode,
-            ready=selected_container.ready,
-            detail=selected_container.readiness_detail,
+            ready=is_ready,
+            detail=detail,
         )
 
     @app.get(
@@ -218,9 +219,12 @@ def create_app(container: CatalogLanguageApiContainer | None = None) -> FastAPI:
             Body(
                 ...,
                 openapi_examples={
-                    "demo": {
-                        "summary": "Deterministic local demo",
-                        "description": "Matches the default demo container versions.",
+                    "gemma": {
+                        "summary": "Gemma local run",
+                        "description": (
+                            "Requires the configured Gemma model, default gemma3:27b, "
+                            "to be available from the provider."
+                        ),
                         "value": WORKFLOW_EXAMPLE,
                     }
                 },
@@ -228,10 +232,11 @@ def create_app(container: CatalogLanguageApiContainer | None = None) -> FastAPI:
         ],
         container: CatalogLanguageApiContainer = catalog_language_container_dependency,
     ) -> LexiconWorkflowResult:
-        if not container.ready:
+        is_ready, detail = container.check_readiness()
+        if not is_ready:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="catalog-language dependencies are not ready",
+                detail=detail,
             )
         try:
             return container.workflow.run(request.to_domain())
@@ -267,11 +272,6 @@ def create_app(container: CatalogLanguageApiContainer | None = None) -> FastAPI:
         ],
         container: CatalogLanguageApiContainer = catalog_language_container_dependency,
     ) -> LexiconLookupResult:
-        if not container.ready:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="catalog-language dependencies are not ready",
-            )
         return container.lookup.lookup_expansions(request)
 
     return app

@@ -1,0 +1,294 @@
+"""Gemma model adapter for Ollama and OpenAI-compatible local runtimes.
+
+The workflow owns all authority and validation.  This adapter only sends the
+versioned proposer/critic prompt, requests structured JSON, and converts the
+provider response into the provider-neutral ``CatalogLanguageModelPort``
+contract.  It never selects IDs, calls tools, or activates a lexicon.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+from dataclasses import dataclass
+from time import perf_counter
+from typing import Literal, cast
+
+import httpx
+from pydantic import SecretStr
+
+from fkgrid.adapters.catalog_language.prompts import PromptRegistry
+from fkgrid.catalog_language.serialization import canonical_json_bytes, sha256_hex
+from fkgrid.domain.catalog_language import (
+    CriticDraft,
+    MappingDraft,
+    ModelCallRequest,
+    ModelCallResponse,
+    ModelStatus,
+)
+from fkgrid.ports.catalog_language import CatalogLanguageModelPort
+
+GemmaProvider = Literal["ollama", "openai_compatible"]
+
+
+@dataclass(frozen=True, slots=True)
+class GemmaModelSettings:
+    """Runtime configuration for a locally hosted Gemma model."""
+
+    provider: GemmaProvider = "ollama"
+    base_url: str = "http://127.0.0.1:11434"
+    model_name: str = "gemma3:27b"
+    api_key: SecretStr | None = None
+    readiness_timeout_seconds: float = 2.0
+    max_output_tokens: int = 384
+
+    def __post_init__(self) -> None:
+        if not self.base_url.strip():
+            raise ValueError("Gemma base_url must not be empty")
+        if not self.model_name.strip():
+            raise ValueError("Gemma model_name must not be empty")
+        if self.readiness_timeout_seconds <= 0:
+            raise ValueError("readiness_timeout_seconds must be positive")
+        if not 32 <= self.max_output_tokens <= 2_048:
+            raise ValueError("max_output_tokens must be between 32 and 2048")
+
+    @classmethod
+    def from_environment(cls) -> GemmaModelSettings:
+        provider = os.getenv("FKGRID_GEMMA_PROVIDER", "ollama")
+        if provider not in {"ollama", "openai_compatible"}:
+            raise ValueError("FKGRID_GEMMA_PROVIDER must be ollama or openai_compatible")
+        provider_value = cast(GemmaProvider, provider)
+        default_base_url = (
+            "http://127.0.0.1:11434" if provider == "ollama" else "http://127.0.0.1:1234/v1"
+        )
+        raw_key = os.getenv("FKGRID_GEMMA_API_KEY")
+        return cls(
+            provider=provider_value,
+            base_url=os.getenv("FKGRID_GEMMA_BASE_URL", default_base_url).rstrip("/"),
+            model_name=os.getenv("FKGRID_GEMMA_MODEL", "gemma3:27b"),
+            api_key=SecretStr(raw_key) if raw_key else None,
+            readiness_timeout_seconds=float(os.getenv("FKGRID_GEMMA_READY_TIMEOUT_S", "2")),
+            max_output_tokens=int(os.getenv("FKGRID_GEMMA_MAX_OUTPUT_TOKENS", "384")),
+        )
+
+
+class GemmaCatalogLanguageModel(CatalogLanguageModelPort):
+    """Call Gemma with strict local parsing and bounded request deadlines."""
+
+    def __init__(
+        self,
+        settings: GemmaModelSettings,
+        *,
+        prompt_registry: PromptRegistry | None = None,
+        transport: httpx.BaseTransport | None = None,
+    ) -> None:
+        self.settings = settings
+        self.prompt_registry = prompt_registry or PromptRegistry()
+        self._transport = transport
+
+    def readiness(self) -> tuple[bool, str]:
+        """Return a safe readiness result without exposing provider failures."""
+
+        try:
+            with httpx.Client(
+                timeout=self.settings.readiness_timeout_seconds,
+                transport=self._transport,
+            ) as client:
+                response = client.get(self._models_url())
+            if response.status_code >= 400:
+                return False, f"Gemma provider returned HTTP {response.status_code}"
+            payload = response.json()
+            available = self._available_models(payload)
+            if self.settings.model_name not in available:
+                names = ", ".join(available[:8]) or "none"
+                return (
+                    False,
+                    f"Gemma model '{self.settings.model_name}' is not available; found: {names}",
+                )
+            return True, f"Gemma model '{self.settings.model_name}' is ready"
+        except httpx.TimeoutException:
+            return False, "Gemma provider readiness timed out"
+        except (httpx.HTTPError, ValueError, TypeError, KeyError):
+            return False, "Gemma provider is unavailable"
+
+    def propose_canonical_mapping(self, request: ModelCallRequest) -> ModelCallResponse:
+        return self._complete(request, MappingDraft)
+
+    def critique_mapping(self, request: ModelCallRequest) -> ModelCallResponse:
+        return self._complete(request, CriticDraft)
+
+    def _complete(
+        self,
+        request: ModelCallRequest,
+        payload_type: type[MappingDraft] | type[CriticDraft],
+    ) -> ModelCallResponse:
+        started = perf_counter()
+        input_hash = sha256_hex(request.input_payload)
+        try:
+            prompt = self._render_prompt(request)
+            response = self._post(request, prompt, payload_type)
+            content = self._extract_content(response.json())
+            parsed = json.loads(content)
+            payload = payload_type.model_validate_json(canonical_json_bytes(parsed))
+            return ModelCallResponse(
+                call_id=request.call_id,
+                status=ModelStatus.OK,
+                payload=payload,
+                input_hash=input_hash,
+                output_hash=sha256_hex(parsed),
+                model_alias=self.settings.model_name,
+                latency_ms=max(0, int((perf_counter() - started) * 1000)),
+            )
+        except httpx.TimeoutException:
+            return self._failure(
+                request, input_hash, ModelStatus.TIMEOUT, "PROVIDER_TIMEOUT", True, started
+            )
+        except httpx.HTTPStatusError as exc:
+            status, code, retryable = self._http_failure(exc.response.status_code)
+            return self._failure(request, input_hash, status, code, retryable, started)
+        except httpx.HTTPError:
+            return self._failure(
+                request,
+                input_hash,
+                ModelStatus.UNAVAILABLE,
+                "PROVIDER_UNAVAILABLE",
+                True,
+                started,
+            )
+        except (json.JSONDecodeError, TypeError, ValueError, KeyError, IndexError):
+            return self._failure(
+                request,
+                input_hash,
+                ModelStatus.INVALID_OUTPUT,
+                "OUTPUT_SCHEMA_INVALID",
+                False,
+                started,
+            )
+
+    def _post(
+        self,
+        request: ModelCallRequest,
+        prompt: str,
+        payload_type: type[MappingDraft] | type[CriticDraft],
+    ) -> httpx.Response:
+        headers = {"Content-Type": "application/json"}
+        if self.settings.api_key is not None:
+            headers["Authorization"] = f"Bearer {self.settings.api_key.get_secret_value()}"
+        schema = payload_type.model_json_schema()
+        if self.settings.provider == "ollama":
+            url = f"{self.settings.base_url}/api/chat"
+            body = {
+                "model": self.settings.model_name,
+                "messages": [{"role": "user", "content": prompt}],
+                "stream": False,
+                "format": schema,
+                "options": {"temperature": 0, "num_predict": self.settings.max_output_tokens},
+            }
+        else:
+            url = f"{self.settings.base_url}/chat/completions"
+            body = {
+                "model": self.settings.model_name,
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0,
+                "max_tokens": self.settings.max_output_tokens,
+                "stream": False,
+                "response_format": {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": request.output_schema_version,
+                        "strict": True,
+                        "schema": schema,
+                    },
+                },
+            }
+        with httpx.Client(
+            timeout=max(0.001, request.deadline_ms / 1000),
+            transport=self._transport,
+        ) as client:
+            response = client.post(url, headers=headers, json=body)
+            response.raise_for_status()
+            return response
+
+    def _render_prompt(self, request: ModelCallRequest) -> str:
+        prompt = self.prompt_registry.read(request.prompt_id)
+        placeholder = (
+            "{{canonical_proposer_input_json}}"
+            if request.logical_call == "propose_canonical_mapping"
+            else "{{canonical_critic_input_json}}"
+        )
+        if placeholder not in prompt:
+            raise ValueError("prompt placeholder is missing")
+        return prompt.replace(
+            placeholder,
+            canonical_json_bytes(request.input_payload).decode("utf-8"),
+        )
+
+    def _models_url(self) -> str:
+        return (
+            f"{self.settings.base_url}/api/tags"
+            if self.settings.provider == "ollama"
+            else f"{self.settings.base_url}/models"
+        )
+
+    def _available_models(self, payload: object) -> list[str]:
+        if not isinstance(payload, dict):
+            raise TypeError("model list response must be an object")
+        values = payload.get("models", [])
+        if not isinstance(values, list):
+            raise TypeError("model list must be an array")
+        names: list[str] = []
+        for value in values:
+            if isinstance(value, dict):
+                name = value.get("name") or value.get("model") or value.get("id")
+                if isinstance(name, str):
+                    names.append(name)
+        return names
+
+    @staticmethod
+    def _extract_content(payload: object) -> str:
+        if not isinstance(payload, dict):
+            raise TypeError("provider response must be an object")
+        message: object
+        if "message" in payload:
+            message = payload["message"]
+        else:
+            choices = payload.get("choices")
+            if not isinstance(choices, list) or not choices:
+                raise KeyError("provider response has no choices")
+            choice = choices[0]
+            if not isinstance(choice, dict):
+                raise TypeError("provider choice must be an object")
+            message = choice.get("message")
+        if not isinstance(message, dict) or not isinstance(message.get("content"), str):
+            raise TypeError("provider message content must be a string")
+        content = message["content"].strip()
+        if content.startswith("```"):
+            content = content.removeprefix("```").removeprefix("json").removesuffix("```").strip()
+        return content
+
+    @staticmethod
+    def _http_failure(code: int) -> tuple[ModelStatus, str, bool]:
+        if code == 429:
+            return ModelStatus.RATE_LIMITED, "PROVIDER_RATE_LIMITED", True
+        if code >= 500:
+            return ModelStatus.UNAVAILABLE, "PROVIDER_SERVER_ERROR", True
+        return ModelStatus.ERROR, "PROVIDER_REQUEST_REJECTED", False
+
+    def _failure(
+        self,
+        request: ModelCallRequest,
+        input_hash: str,
+        status: ModelStatus,
+        code: str,
+        retryable: bool,
+        started: float,
+    ) -> ModelCallResponse:
+        return ModelCallResponse(
+            call_id=request.call_id,
+            status=status,
+            input_hash=input_hash,
+            model_alias=self.settings.model_name,
+            latency_ms=max(0, int((perf_counter() - started) * 1000)),
+            validation_codes=[code],
+            retryable=retryable,
+        )

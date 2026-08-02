@@ -8,6 +8,7 @@ connects to a database or external provider.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Literal
@@ -30,6 +31,7 @@ from fkgrid.adapters.catalog_language.runtime import (
     RuntimeLexiconSnapshot,
 )
 from fkgrid.adapters.model.fake import FakeCatalogLanguageModel
+from fkgrid.adapters.model.gemma import GemmaCatalogLanguageModel, GemmaModelSettings
 from fkgrid.domain.catalog_language import (
     CanonicalVocabularySnapshot,
     EvidenceBand,
@@ -48,7 +50,7 @@ from fkgrid.domain.catalog_language import (
 from fkgrid.ports.catalog_language import LexiconLookupPort
 from fkgrid.workflows.catalog_language import CatalogLanguageTier2Workflow
 
-ApiMode = Literal["demo", "configured"]
+ApiMode = Literal["demo", "gemma", "configured"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,6 +66,12 @@ class CatalogLanguageApiContainer:
     mode: ApiMode
     ready: bool = True
     readiness_detail: str = "configured adapters are available"
+    readiness_probe: Callable[[], tuple[bool, str]] | None = None
+
+    def check_readiness(self) -> tuple[bool, str]:
+        if self.readiness_probe is not None:
+            return self.readiness_probe()
+        return self.ready, self.readiness_detail
 
 
 def demo_compatibility() -> LexiconCompatibility:
@@ -174,4 +182,52 @@ def create_demo_container() -> CatalogLanguageApiContainer:
         lookup=lookup,
         mode="demo",
         readiness_detail="deterministic demo adapters active; no database or provider configured",
+    )
+
+
+def create_gemma_container(
+    settings: GemmaModelSettings | None = None,
+) -> CatalogLanguageApiContainer:
+    """Assemble the real Gemma path with local contract fixtures.
+
+    Evidence, vocabulary, retrieval, regression, review, and activation remain
+    explicit injected seams until their owners wire production infrastructure.
+    The proposer and critic are real Gemma calls; there is no fake-model
+    fallback in this container.
+    """
+
+    compatibility = demo_compatibility()
+    vocabulary = demo_vocabulary(compatibility)
+    model = GemmaCatalogLanguageModel(settings or GemmaModelSettings.from_environment())
+    workflow = CatalogLanguageTier2Workflow(
+        evidence=FakeEvidenceAggregation([demo_evidence()]),
+        vocabulary=FakeVocabulary(vocabulary),
+        targets=InMemoryTargetRetriever(),
+        active_lexicon=FakeActiveLexicon(),
+        model=model,
+        regression=PassingRegression(),
+        shadow=PassingShadow(),
+        review=ApprovingReview(),
+        activation=CompareAndSwapActivation(compatibility.lexicon_version),
+        clock=FakeClock(datetime(2026, 8, 2, tzinfo=UTC)),
+        ids=SequentialIds(),
+        trace_sink=InMemoryTrace(),
+    )
+    lookup = DeterministicLexiconLookup(
+        RuntimeLexiconSnapshot(
+            lexicon_version=compatibility.lexicon_version,
+            compatibility=compatibility,
+            mappings=(demo_mapping(compatibility),),
+        )
+    )
+    return CatalogLanguageApiContainer(
+        workflow=workflow,
+        lookup=lookup,
+        mode="gemma",
+        ready=False,
+        readiness_detail=(
+            f"Gemma provider configured for '{model.settings.model_name}'; "
+            "readiness not checked yet"
+        ),
+        readiness_probe=model.readiness,
     )

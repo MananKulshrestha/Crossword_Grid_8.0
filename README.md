@@ -57,14 +57,31 @@ and activation CAS both succeed.
 
 The FastAPI delivery layer is available at `src/fkgrid/api/main.py`. It is an
 additive adapter over the existing workflow and deterministic runtime lookup;
-the default app uses clearly labelled in-memory demo adapters so it can be
-tested before the database and provider owners finish their integrations.
+the default app sends proposer and critic calls to the configured Gemma model.
+The fake model remains available only when tests explicitly inject the demo
+container.
 
 From the repository root, run:
 
 ```text
 python -m uvicorn fkgrid.api.main:app --app-dir src --host 127.0.0.1 --port 8000
 ```
+
+The default provider is Ollama at `http://127.0.0.1:11434` with model
+`gemma3:27b`. Set these variables before starting the server if your Gemma
+runtime uses another alias or an OpenAI-compatible endpoint:
+
+```powershell
+$env:FKGRID_GEMMA_PROVIDER = "ollama"
+$env:FKGRID_GEMMA_BASE_URL = "http://127.0.0.1:11434"
+$env:FKGRID_GEMMA_MODEL = "gemma3:27b"
+```
+
+For an OpenAI-compatible local server, use `FKGRID_GEMMA_PROVIDER=\"openai_compatible\"`,
+set `FKGRID_GEMMA_BASE_URL` to its `/v1` URL, and set `FKGRID_GEMMA_MODEL` to the
+exact loaded Gemma alias. The app reports the configured model at `/ready` and
+returns `503` for workflow calls when that model is not available; it never
+silently falls back to the fake model.
 
 Then open [Swagger UI](http://127.0.0.1:8000/docs). The useful routes are:
 
@@ -75,11 +92,12 @@ Then open [Swagger UI](http://127.0.0.1:8000/docs). The useful routes are:
 - `POST /api/v1/catalog-language/lookup` — runs the existing model-free deterministic
   active-lexicon lookup.
 
-The Swagger examples use `cat-demo-1` / `tax-demo-1` / `lex-demo-1` and do not
-create a database, persist a proposal, call a network provider, or represent
+The Swagger examples use local fixture versions `cat-demo-1` / `tax-demo-1` /
+`lex-demo-1`, but proposer and critic decisions are made by the configured
+Gemma model. They do not create a database, persist a proposal, or represent
 live catalogue truth. For production, construct `CatalogLanguageApiContainer`
-with the database, retrieval, model, review, activation, and artifact adapters;
-the HTTP contracts do not need to change.
+with the database, retrieval, review, activation, and artifact adapters; the
+HTTP contracts do not need to change.
 
 ## Local checks
 

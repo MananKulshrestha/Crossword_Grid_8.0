@@ -93,9 +93,17 @@ query, validator, workflow budget, artifact format, or provider boundary.
 - Candidate regression/shadow reports and candidate mappings must all carry the same
   candidate version. If a persistence adapter drops that linkage, an old report could
   incorrectly authorize a newer candidate.
-- The FastAPI default container is intentionally deterministic and in-memory. It is
-  useful for Swagger contract testing but must never be mistaken for production
-  catalog, evidence, review, activation, or live-commerce truth.
+- The FastAPI default container uses a real Gemma proposer/critic over local
+  in-memory evidence/vocabulary/review fixtures. Those fixtures are useful for
+  model-path testing but must never be mistaken for production catalog,
+  evidence, review, activation, or live-commerce truth.
+- Gemma model aliases differ between Ollama (`gemma3:27b`) and OpenAI-compatible
+  runtimes (`google/gemma-3-27b-it` or another loaded alias). A wrong alias must
+  remain a visible readiness failure rather than silently selecting another model.
+- The verified local Ollama store currently contains only `llama3.2:1b`; the API
+  correctly reports Gemma as not ready and does not substitute that model. A live
+  Gemma test therefore requires an explicit model pull or a configured remote/local
+  Gemma endpoint with enough memory and latency budget.
 - The demo activation adapter keeps compare-and-swap state for the process lifetime;
   a second Swagger run using the original active version can correctly return an
   activation conflict. Production persistence must retain the same CAS semantics
