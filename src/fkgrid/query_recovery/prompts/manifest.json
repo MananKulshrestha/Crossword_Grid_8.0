@@ -1,0 +1,10 @@
+{
+  "schema_version": "prompt-manifest-v1",
+  "prompts": {
+    "recovery-v1": {
+      "path": "recovery_v1.md",
+      "model_schema": "RecoveryPlannerOutputV1",
+    "sha256": "1651a9faade53e7cb513fddbbf13d82c37f28b20df4a231cc695985376c79a75"
+    }
+  }
+}
