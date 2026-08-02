@@ -9,6 +9,11 @@ from fkgrid.query_recovery.adapters.model_gateway import (
     GatewayReply,
     SharedGatewayRecoveryPlanner,
 )
+from fkgrid.query_recovery.adapters.gemini import (
+    GEMMA_4_26B_A4B_IT,
+    GeminiGemmaConfig,
+    GeminiGemmaGateway,
+)
 from fkgrid.query_recovery.domain import (
     CompatibilityTuple,
     ConceptType,
@@ -30,6 +35,20 @@ class RecordingGateway:
     def complete_json(self, **kwargs):
         self.calls.append(kwargs)
         return GatewayReply(status="OK", json_text=self.json_text, token_count=42, latency_ms=8)
+
+
+class FakeHttpResponse:
+    def __init__(self, payload: dict[str, object]) -> None:
+        self.body = json.dumps(payload).encode("utf-8")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+    def read(self) -> bytes:
+        return self.body
 
 
 class ModelGatewayTests(unittest.TestCase):
@@ -111,6 +130,71 @@ class ModelGatewayTests(unittest.TestCase):
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         digest = hashlib.sha256(prompt_path.read_bytes()).hexdigest()
         self.assertEqual(manifest["prompts"]["recovery-v1"]["sha256"], digest)
+
+    def test_gemini_adapter_filters_thought_parts_and_keeps_secret_out_of_repr(self) -> None:
+        context = self.make_context()
+        output = RecoveryRewritePlan(
+            added_concept_ids=["concept-1"],
+            interpretation_label="safe label",
+            preserved_hard_filter_hash=context.hard_filter_hash,
+        )
+        calls: list[object] = []
+
+        def opener(request, **kwargs):
+            calls.append((request, kwargs))
+            return FakeHttpResponse(
+                {
+                    "candidates": [
+                        {
+                            "content": {
+                                "parts": [
+                                    {"text": "hidden thought", "thought": True},
+                                    {"text": output.model_dump_json()},
+                                ]
+                            }
+                        }
+                    ],
+                    "usageMetadata": {"totalTokenCount": 17},
+                }
+            )
+
+        config = GeminiGemmaConfig.from_env({"FKGRID_GEMINI_API_KEY": "test-secret"})
+        gateway = GeminiGemmaGateway(config=config, opener=opener)
+        reply = gateway.complete_json(
+            prompt_version="recovery-v1",
+            model_alias=GEMMA_4_26B_A4B_IT,
+            system_prompt="system",
+            user_json="{}",
+            schema_name="RecoveryPlannerOutputV1",
+            timeout_ms=500,
+            tools=(),
+        )
+        self.assertEqual(reply.status, "OK")
+        self.assertEqual(reply.json_text, output.model_dump_json())
+        self.assertEqual(reply.token_count, 17)
+        self.assertNotIn("test-secret", repr(config))
+        request, _kwargs = calls[0]
+        self.assertEqual(request.full_url, f"https://generativelanguage.googleapis.com/v1beta/models/{GEMMA_4_26B_A4B_IT}:generateContent")
+        self.assertEqual(request.get_header("X-goog-api-key"), "test-secret")
+        payload = json.loads(request.data.decode("utf-8"))
+        self.assertEqual(payload["generationConfig"]["thinkingConfig"]["thinkingLevel"], "minimal")
+        self.assertNotIn("tools", payload)
+
+    def test_gemini_adapter_rejects_tools_without_network_call(self) -> None:
+        calls: list[object] = []
+        config = GeminiGemmaConfig.from_env({"FKGRID_GEMINI_API_KEY": "test-secret"})
+        gateway = GeminiGemmaGateway(config=config, opener=lambda *_args, **_kwargs: calls.append(True))
+        reply = gateway.complete_json(
+            prompt_version="recovery-v1",
+            model_alias=GEMMA_4_26B_A4B_IT,
+            system_prompt="system",
+            user_json="{}",
+            schema_name="RecoveryPlannerOutputV1",
+            timeout_ms=500,
+            tools=("lookup",),
+        )
+        self.assertEqual(reply.error_code, "TOOLS_NOT_ALLOWED")
+        self.assertEqual(calls, [])
 
 
 if __name__ == "__main__":

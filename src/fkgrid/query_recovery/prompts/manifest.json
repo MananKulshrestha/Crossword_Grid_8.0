@@ -4,7 +4,10 @@
     "recovery-v1": {
       "path": "recovery_v1.md",
       "model_schema": "RecoveryPlannerOutputV1",
-    "sha256": "1651a9faade53e7cb513fddbbf13d82c37f28b20df4a231cc695985376c79a75"
+      "sha256": "ba97dc320af861ba6975289c9e45c50b317694fc6816cec234254bfd3a7544de",
+      "provider": "google-gemini-api",
+      "model_alias": "gemma-4-26b-a4b-it",
+      "thinking_level": "minimal"
     }
   }
 }

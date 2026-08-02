@@ -19,6 +19,10 @@ This is a handoff risk register for the Tier 2 implementation. It is intentional
 13. **Model gateway boundary.** Provider SDK types must stop at the shared gateway adapter. Structured JSON validation is not authorization: semantic ID, version, hash, scope, capability, and hard-filter validation must still run after provider parsing.
 14. **Circuit and deadline clocks.** Recovery must use the injected monotonic clock, not wall time or provider timestamps. A circuit-open or deadline-exhausted response must preserve baseline/no-match safely, never begin a late planner call.
 15. **Event privacy.** Recovery events may include opaque IDs, hashes, versions, counts, and validation codes. They must not include raw messages, memory/purchase context, bearer tokens, prompts, provider errors, secrets, or chain of thought.
+16. **Gemma response parts.** Gemma 4 can return thought and answer parts separately. The Gemini adapter must discard thought parts and pass only non-thought JSON to the strict union parser; changing this extraction can leak reasoning or accept the wrong text.
+17. **Gemma provider latency.** A live Gemma 4 26B call can exceed the 1.8-second recovery budget even with minimal thinking and a small output cap. The workflow must preserve its timeout/no-safe fallback instead of adding retries or silently increasing the shopper-turn budget.
+18. **Provider JSON mode is not semantic validation.** The Gemini JSON MIME setting controls syntax, not allowed IDs or action semantics. Keep the local Pydantic parse plus hard-filter, scope, version, and allowlist validation.
+19. **Credential source precedence.** `FKGRID_GEMINI_API_KEY` and `GEMINI_API_KEY` are process inputs only. Never persist, log, include in events, put either value into a prompt, or commit an environment file containing either value.
 
 ## Likely future bugs and latency risks
 
