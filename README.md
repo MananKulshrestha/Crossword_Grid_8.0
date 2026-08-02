@@ -17,7 +17,7 @@ their adapters.
   provenance-safe context refs, and current-session fallback;
 - tool-less structured model gateway with versioned prompts, one sanitized repair
   attempt, semantic validation, deterministic exact-grammar fallback, a fake
-  provider, and an OpenAI-compatible Gemma 4 12B adapter;
+  provider, and a provider-neutral Gemma 4 adapter;
 - explicit routing for search/refine, details, compare, availability, show
   cart, atomic typed cart drafts, explicit cited research, reset, help, bounded
   recovery, clarification, suggestions, idempotency, optimistic versions, and
@@ -36,8 +36,8 @@ orchestrator hands the final typed `ShopperResponse` plus its safe trace to
 `MarkdownPipelinePort.handoff`; another owner converts that typed response to
 escaped markdown for rendering.
 
-Gemma is configured by alias only. The default alias is
-`google/gemma-4-12B-it`; supply `FKGRID_MODEL_ENDPOINT` and
+Gemma is configured by alias only. The default hosted alias is
+`gemma-4-26b-a4b-it`; supply `FKGRID_MODEL_ENDPOINT` and
 `FKGRID_MODEL_API_KEY` through the environment, or inject an
 OpenAI-compatible transport into `Gemma4ModelAdapter`. Set
 `FKGRID_MODEL_PROTOCOL=gemini` for Google’s native `generateContent` endpoint;

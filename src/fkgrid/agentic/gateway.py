@@ -434,10 +434,10 @@ class GeminiGenerateContentTransport:
 
 
 class Gemma4ModelAdapter:
-    """Gemma 4 12B adapter through an injected OpenAI-compatible transport."""
+    """Gemma 4 adapter through an injected provider transport."""
 
     provider_name = "gemma-openai-compatible"
-    default_model_alias = "google/gemma-4-12B-it"
+    default_model_alias = "gemma-4-26b-a4b-it"
 
     def __init__(
         self,

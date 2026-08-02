@@ -85,7 +85,7 @@ from .validation import (
 
 @dataclass(frozen=True)
 class OrchestratorConfig:
-    model_alias: str = "google/gemma-4-12B-it"
+    model_alias: str = "gemma-4-26b-a4b-it"
     intent_budget_ms: int = 1800
     enhancement_budget_ms: int = 75
     local_tool_budget_ms: int = 300

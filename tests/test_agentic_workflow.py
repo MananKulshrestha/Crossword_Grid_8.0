@@ -61,7 +61,7 @@ def compatibility() -> CompatibilityTuple:
         rank_policy_version="rank-v1",
         gate_policy_version="gate-v1",
         intent_prompt_version="1",
-        intent_model_alias="google/gemma-4-12B-it",
+        intent_model_alias="gemma-4-26b-a4b-it",
         response_template_version="response-v1",
         commerce_policy_version="commerce-v1",
         research_policy_version="research-v1",
@@ -69,7 +69,7 @@ def compatibility() -> CompatibilityTuple:
         memory_schema_version="memory-v1",
         query_enhancement_policy_version="enhancement-v1",
         research_prompt_version="1",
-        research_model_alias="google/gemma-4-12B-it",
+        research_model_alias="gemma-4-26b-a4b-it",
     )
 
 
@@ -404,7 +404,7 @@ class AgenticWorkflowTests(unittest.TestCase):
                 "FKGRID_MODEL_API_KEY": "test-only",
             }
         )
-        self.assertEqual(adapter.model_alias, "google/gemma-4-12B-it")
+        self.assertEqual(adapter.model_alias, "gemma-4-26b-a4b-it")
 
         google_adapter = Gemma4ModelAdapter.from_environment(
             environment={
@@ -435,7 +435,7 @@ class AgenticWorkflowTests(unittest.TestCase):
         with patch("fkgrid.agentic.gateway.urlopen", return_value=Response()) as opener:
             output = transport.post_json(
                 {
-                    "model": "google/gemma-4-12B-it",
+                    "model": "gemma-4-26b-a4b-it",
                     "messages": [
                         {"role": "system", "content": "system"},
                         {"role": "user", "content": "user"},
