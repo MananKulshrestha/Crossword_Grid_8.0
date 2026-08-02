@@ -93,12 +93,23 @@ def test_guided_endpoint_accepts_clean_query_input_and_uses_same_workflow() -> N
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "COMPLETED"
-    assert body["decisions"][0]["source_form"] == "sneakers"
-    assert body["activation"]["activated"] is True
-    assert any(
-        event["step"] == "propose_canonical_mapping" and event["status"] == "OK"
-        for event in body["trace"]
-    )
+    assert body["input"] == {
+        "term": "sneakers",
+        "locale": "en-IN",
+        "category": "footwear",
+        "attribute_id": None,
+    }
+    assert body["output"]["normalized_query"] == "sneakers"
+    assert body["output"]["expanded_to"][0]["source_form"] == "sneakers"
+    assert body["output"]["expanded_to"][0]["target_id"] == "athletic-shoes"
+    assert body["model"] == {
+        "mode": "demo",
+        "active": False,
+        "proposer_status": "OK",
+        "critic_status": "OK",
+    }
+    assert body["gates"]["activated"] is True
+    assert body["gates"]["activation"] == "ACTIVATED"
     second_response = client.post(
         "/api/v1/catalog-language/tier2/guided-run",
         params={"term": "trainers", "locale": "en-IN", "category": "footwear"},
@@ -106,11 +117,10 @@ def test_guided_endpoint_accepts_clean_query_input_and_uses_same_workflow() -> N
     second_body = second_response.json()
     assert second_response.status_code == 200
     assert second_body["status"] == "COMPLETED"
+    assert second_body["gates"]["candidate_version"] != body["gates"]["candidate_version"]
     assert (
-        second_body["candidate"]["parent_lexicon_version"]
-        == body["activation"]["active_lexicon_version"]
+        second_body["gates"]["active_lexicon_version"] == second_body["gates"]["candidate_version"]
     )
-    assert second_body["candidate"]["candidate_version"] != body["candidate"]["candidate_version"]
 
 
 def test_invalid_strict_body_is_rejected_before_workflow_execution() -> None:

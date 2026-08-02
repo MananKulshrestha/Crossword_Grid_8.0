@@ -10,16 +10,23 @@ from fastapi import Body, Depends, FastAPI, HTTPException, Query, Request, statu
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 
 from fkgrid.api.container import CatalogLanguageApiContainer, create_gemma_container
+from fkgrid.catalog_language.normalization import normalize_surface_form
 from fkgrid.domain.catalog_language import (
     CATALOG_LANGUAGE_DEFAULT_MODEL_DEADLINE_MS,
     CATALOG_LANGUAGE_MODEL_MAX_DEADLINE_MS,
+    EvidenceBand,
     EvidenceWindow,
+    ExpansionAction,
     GuidedLexiconRunRequest,
     LexiconCompatibility,
     LexiconLookupRequest,
     LexiconLookupResult,
+    LexiconScope,
     LexiconWorkflowRequest,
     LexiconWorkflowResult,
+    MappingDirection,
+    MappingKind,
+    TargetType,
 )
 from fkgrid.workflows.catalog_language import (
     CATALOG_LANGUAGE_CAPABILITIES,
@@ -116,6 +123,119 @@ class CapabilitiesResponse(BaseModel):
     forbidden_capabilities: list[str]
 
 
+class GuidedInputSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    term: str
+    locale: str
+    category: str | None = None
+    attribute_id: str | None = None
+
+
+class GuidedExpansion(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    mapping_id: str
+    source_form: str
+    normalized_form: str
+    target_type: TargetType
+    target_id: str
+    mapping_kind: MappingKind
+    direction: MappingDirection
+    expansion_action: ExpansionAction
+    scope: LexiconScope
+    evidence_band: EvidenceBand
+
+
+class GuidedExpansionOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    normalized_query: str
+    expanded_to: list[GuidedExpansion] = Field(default_factory=list, max_length=5)
+
+
+class GuidedModelSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    mode: str
+    active: bool
+    proposer_status: str
+    critic_status: str
+
+
+class GuidedGateSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    candidate_version: str | None = None
+    validation: str
+    regression: str
+    shadow: str
+    review: str
+    activation: str
+    activated: bool
+    active_lexicon_version: str | None = None
+
+
+class GuidedRunResponse(BaseModel):
+    """Compact presentation model for the guided Swagger route."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    run_id: str
+    status: str
+    input: GuidedInputSummary
+    output: GuidedExpansionOutput
+    model: GuidedModelSummary
+    gates: GuidedGateSummary
+    warnings: list[str] = Field(default_factory=list, max_length=32)
+
+
+GUIDED_RESPONSE_EXAMPLE = {
+    "run_id": "guided-example-001",
+    "status": "COMPLETED",
+    "input": {
+        "term": "sneakers",
+        "locale": "en-IN",
+        "category": "footwear",
+        "attribute_id": None,
+    },
+    "output": {
+        "normalized_query": "sneakers",
+        "expanded_to": [
+            {
+                "mapping_id": "mapping-0005",
+                "source_form": "sneakers",
+                "normalized_form": "sneakers",
+                "target_type": "TAXONOMY_NODE",
+                "target_id": "athletic-shoes",
+                "mapping_kind": "SYNONYM",
+                "direction": "QUERY_TO_CANONICAL",
+                "expansion_action": "CANONICAL_SYNONYM",
+                "scope": {"locale": "en-IN", "taxonomy_node_id": "footwear"},
+                "evidence_band": "MEDIUM",
+            }
+        ],
+    },
+    "model": {
+        "mode": "gemma",
+        "active": True,
+        "proposer_status": "OK",
+        "critic_status": "OK",
+    },
+    "gates": {
+        "candidate_version": "lexicon-candidate-0005",
+        "validation": "VALID",
+        "regression": "PASSED",
+        "shadow": "PASSED",
+        "review": "APPROVED",
+        "activation": "ACTIVATED",
+        "activated": True,
+        "active_lexicon_version": "lexicon-candidate-0005",
+    },
+    "warnings": [],
+}
+
+
 WORKFLOW_EXAMPLE = {
     "run_id": "swagger-demo-run-001",
     "evidence_window": {
@@ -172,6 +292,81 @@ OPENAPI_TAGS = [
     },
     {"name": "system", "description": "Health and readiness probes."},
 ]
+
+
+def _trace_status(result: LexiconWorkflowResult, step: str) -> str:
+    statuses = [event.status for event in result.trace if event.step == step]
+    return statuses[-1] if statuses else "NOT_RUN"
+
+
+def _guided_response(
+    request: GuidedLexiconRunRequest,
+    result: LexiconWorkflowResult,
+    container: CatalogLanguageApiContainer,
+) -> GuidedRunResponse:
+    proposed_ids = {
+        decision.mapping_id for decision in result.decisions if decision.mapping_id is not None
+    }
+    mappings = (
+        [mapping for mapping in result.candidate.mappings if mapping.mapping_id in proposed_ids]
+        if result.candidate is not None
+        else []
+    )
+    activation = result.activation
+    review = result.review
+    return GuidedRunResponse(
+        run_id=result.run_id,
+        status=result.status.value,
+        input=GuidedInputSummary(
+            term=request.term,
+            locale=request.locale,
+            category=request.taxonomy_node_id,
+            attribute_id=request.attribute_id,
+        ),
+        output=GuidedExpansionOutput(
+            normalized_query=normalize_surface_form(request.term, request.locale),
+            expanded_to=[
+                GuidedExpansion(
+                    mapping_id=mapping.mapping_id,
+                    source_form=mapping.surface_form,
+                    normalized_form=mapping.normalized_form,
+                    target_type=mapping.target_type,
+                    target_id=mapping.target_id,
+                    mapping_kind=mapping.mapping_kind,
+                    direction=mapping.direction,
+                    expansion_action=mapping.expansion_action,
+                    scope=mapping.scope,
+                    evidence_band=mapping.evidence_band,
+                )
+                for mapping in mappings
+            ],
+        ),
+        model=GuidedModelSummary(
+            mode=container.mode,
+            active=container.mode == "gemma",
+            proposer_status=_trace_status(result, "propose_canonical_mapping"),
+            critic_status=_trace_status(result, "critique_mapping"),
+        ),
+        gates=GuidedGateSummary(
+            candidate_version=(result.candidate.candidate_version if result.candidate else None),
+            validation=_trace_status(result, "validate_mapping"),
+            regression=_trace_status(result, "run_lexicon_regression"),
+            shadow=_trace_status(result, "shadow_evaluate_lexicon"),
+            review=(
+                "APPROVED"
+                if review is not None and review.approved
+                else "REJECTED"
+                if review is not None
+                else "NOT_RUN"
+            ),
+            activation=_trace_status(result, "activate_lexicon_version"),
+            activated=activation.activated if activation is not None else False,
+            active_lexicon_version=(
+                activation.active_lexicon_version if activation is not None else None
+            ),
+        ),
+        warnings=list(result.warnings),
+    )
 
 
 def get_container(request: Request) -> CatalogLanguageApiContainer:
@@ -243,7 +438,7 @@ def create_app(container: CatalogLanguageApiContainer | None = None) -> FastAPI:
 
     @app.post(
         "/api/v1/catalog-language/tier2/guided-run",
-        response_model=LexiconWorkflowResult,
+        response_model=GuidedRunResponse,
         status_code=status.HTTP_200_OK,
         tags=["guided-demo"],
         summary="Guided run — enter a query term without editing JSON",
@@ -255,6 +450,12 @@ def create_app(container: CatalogLanguageApiContainer | None = None) -> FastAPI:
             "the configured Gemma model; local fixture adapters stand in for the future DB "
             "and artifact owners."
         ),
+        responses={
+            status.HTTP_200_OK: {
+                "description": "Compact guided result with the query expansion and workflow gates.",
+                "content": {"application/json": {"example": GUIDED_RESPONSE_EXAMPLE}},
+            }
+        },
     )
     def run_guided(
         term: Annotated[
@@ -308,7 +509,7 @@ def create_app(container: CatalogLanguageApiContainer | None = None) -> FastAPI:
             ),
         ] = CATALOG_LANGUAGE_MODEL_MAX_DEADLINE_MS,
         container: CatalogLanguageApiContainer = catalog_language_container_dependency,
-    ) -> LexiconWorkflowResult:
+    ) -> GuidedRunResponse:
         is_ready, detail = container.check_readiness()
         if not is_ready:
             raise HTTPException(
@@ -330,7 +531,8 @@ def create_app(container: CatalogLanguageApiContainer | None = None) -> FastAPI:
             critic_deadline_ms=critic_deadline_ms,
         )
         try:
-            return container.run_guided(request)
+            result = container.run_guided(request)
+            return _guided_response(request, result, container)
         except Exception as exc:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

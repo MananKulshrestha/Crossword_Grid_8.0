@@ -110,6 +110,10 @@ and fill in `term`, `locale`, and `category` (the included fixture uses
 `footwear`). It generates the run ID, compatibility tuple, evidence window,
 and policy versions for you, then sends your term through the same proposer,
 critic, validation, regression, review, and activation workflow.
+The response is intentionally compact: look under `output.expanded_to` to see
+the normalized query, target IDs, mapping type, expansion action, scope, and
+evidence band. The `model` and `gates` sections show whether Gemma ran and
+which deterministic gates passed.
 
 The useful routes are:
 

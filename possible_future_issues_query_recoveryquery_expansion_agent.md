@@ -129,6 +129,18 @@ query, validator, workflow budget, artifact format, or provider boundary.
   its active-version pointer forward between them. The in-memory pointer is not a
   concurrency or durability boundary; production UI needs a current-version refresh,
   idempotency, and database-backed activation CAS before concurrent operators use it.
+- The compact guided Swagger response is a presentation projection, not a second
+  workflow result. If domain decision or trace names change, the projection can show
+  `NOT_RUN` or omit an expansion unless its adapter mapping and contract tests are
+  updated together.
+- The guided response exposes opaque target IDs and status/gate summaries by design.
+  Adding human labels, full evidence, or raw model output later must preserve the
+  existing grounding, privacy, and payload-size boundaries; dumping the advanced
+  workflow result back into this route would recreate the discoverability problem.
+- The OpenAPI example is maintained separately from the live Gemma output. It is
+  documentation-only and may use a different valid fixture target, so tests should
+  validate the response shape and invariants rather than compare live model wording
+  or exact target selection to the example.
 
 ## Open handoff questions
 
