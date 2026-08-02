@@ -46,3 +46,17 @@ WORKING_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "lightrag
 # --- Test batch ---------------------------------------------------------
 # Start small -- entity/relation extraction is one LLM call per chunk.
 BATCH_SIZE = 150
+
+# --- Entity extraction scope ---------------------------------------------
+# LightRAG's default entity extraction is generic (person, organization,
+# location, event...) which is the wrong ontology for a product catalog.
+# Constrain it to the retrieval-architecture doc's schema so the graph only
+# accumulates entity types a shopping query can actually use.
+ENTITY_TYPES = [
+    "PRODUCT",
+    "BRAND",
+    "CATEGORY",
+    "MATERIAL",
+    "OCCASION",
+    "STYLE",
+]

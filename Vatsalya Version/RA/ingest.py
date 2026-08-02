@@ -20,6 +20,7 @@ from config import (
     EMBED_DIM,
     EMBED_MODEL,
     EMBEDDING_MAX_ASYNC,
+    ENTITY_TYPES,
     LLM_MAX_ASYNC,
     LLM_MODEL,
     NUM_CTX,
@@ -57,6 +58,7 @@ async def build_rag():
             ),
         ),
         embedding_func_max_async=EMBEDDING_MAX_ASYNC,
+        addon_params={"entity_types": ENTITY_TYPES},
     )
     await rag.initialize_storages()
     await initialize_pipeline_status()

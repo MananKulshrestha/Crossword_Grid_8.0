@@ -1,9 +1,21 @@
 # RA — LightRAG over the Flipkart catalog
 
-Builds a LightRAG index (knowledge graph + vector DB, local file storage)
-from `../flipkart_lightrag_corpus.md` (descriptions) and
-`../flipkart_catalog_structured.jsonl` (brand/category/price facts), then
-queries it in `mix` mode.
+Builds a LightRAG index (knowledge graph + vector DB, local file storage —
+NanoVectorDB + NetworkX, no Qdrant for now, this is the testing/prototype
+tier) from `../flipkart_lightrag_corpus.md` only, then queries it in
+`mix` mode. This implements the semantic/graph retrieval branch described
+in `retrieval-architecture.md` — see `IMPLEMENTATION.md` for exactly what
+was built, why, and what a future SQL/BM25 integration needs to plug into.
+
+**Corpus is description-only, by design.** `load_documents.py` feeds
+LightRAG exactly `product_name + description` per SKU, identical to what's
+in `flipkart_lightrag_corpus.md` — no brand/category/material/price
+folded in. Those already live in `product_metadata`
+(`../flipkart_metadata.sql`) and are never duplicated into the text
+corpus; LightRAG's own entity extraction is what's responsible for
+pulling brand/category/material *out of* the description text, scoped to
+a fixed entity-type list (see below) rather than guessed structured
+fields fed in ahead of time.
 
 ## How the text turns into a graph
 
@@ -38,9 +50,13 @@ product's description + a short facts line). For each document:
    brand/product nodes), then merges both result sets before the LLM
    synthesizes an answer.
 
-So: more distinct entities per doc (brand, category, material) → richer
-graph. Pure free-text descriptions alone under-produce graph edges, which
-is why `load_documents.py` prepends the short facts line.
+So: entities/relations come entirely from what the LLM extracts out of the
+description text — nothing is pre-seeded. Extraction is constrained to a
+fixed entity-type list (`ENTITY_TYPES` in `config.py`: `PRODUCT`, `BRAND`,
+`CATEGORY`, `MATERIAL`, `OCCASION`, `STYLE`) passed via LightRAG's
+`addon_params={"entity_types": [...]}`, so the graph doesn't fill up with
+LightRAG's generic default ontology (person, organization, location,
+event...), which is the wrong shape for a product catalog.
 
 ## Estimated time (150-product test batch)
 
@@ -155,6 +171,11 @@ python query.py "What waterproof footwear brands are available?"
 
 Uses `mode="mix"` — combines the knowledge graph (entities like brand/
 category and their relations) with vector similarity search over chunks.
+Runs with `only_need_context=True`, so it prints the raw retrieved
+context (chunks/entities/relationships + source SKU references), not an
+LLM-generated prose answer — this matches what a `search_catalog`
+integration would actually consume; response generation belongs to the
+outer chat layer, not this retrieval step.
 
 ## Run everything with one command
 
@@ -169,11 +190,11 @@ pulls any missing models, then runs the requested step.
 
 ## Notes
 
-- `load_documents.py` joins each product's cleaned description (from the
-  `.md` corpus) with a short structured "facts" line (brand, category,
-  subcategory, material, prices) pulled from the `.jsonl`. This facts line
-  exists only to give the graph extractor concrete entities to anchor
-  on — it deliberately does not include everything from the structured
-  record (see `../IMPLEMENTATION.md` for why the RAG corpus stays
-  free-text-first).
+- `load_documents.py` reads `product_name + description` straight out of
+  `flipkart_lightrag_corpus.md` — no structured fields folded in. See
+  `../IMPLEMENTATION.md` for why the RAG corpus stays free-text-only, and
+  `IMPLEMENTATION.md` (this folder) for what was built here specifically.
 - Products with no description are skipped (2 in the current dataset).
+- This folder currently implements **only** the semantic/graph retrieval
+  branch. SQL hard-filtering and BM25 lexical search (the other two
+  branches in `retrieval-architecture.md`'s design) are not built here yet.

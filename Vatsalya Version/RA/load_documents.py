@@ -1,77 +1,57 @@
-"""Builds the text documents fed into LightRAG, by joining:
-  - the free-text description from flipkart_lightrag_corpus.md
-  - a short structured "facts" line from flipkart_catalog_structured.jsonl
+"""Builds the text documents fed into LightRAG.
 
-The facts line exists purely so LightRAG's entity/relation extraction has
-concrete entities (brand, category) to anchor the knowledge graph on --
-descriptions alone tend to under-produce graph structure. Keep it short;
-the full structured record already lives in SQL/JSONL and shouldn't be
-duplicated here.
+Per the retrieval-architecture doc, the text corpus is description-only,
+by design, and is shared identically across every text-search branch
+(BM25 and LightRAG alike) -- structured facts (brand, category, material,
+price, stock, rating) live in `product_metadata` / the JSONL and are never
+duplicated into this corpus. LightRAG's own extraction step is responsible
+for pulling brand/category/material entities out of the description text
+itself (see ENTITY_TYPES / addon_params in ingest.py) -- we don't help it
+by pre-seeding structured fields into the input text.
+
+This reads flipkart_lightrag_corpus.md directly and parses out exactly the
+same per-SKU (product_name, description) pairs that build_lightrag_block
+in flipkart_to_lightrag.py produced -- no second source of truth for what
+"the text corpus" contains.
 """
 
-import json
 import re
 
-from config import SOURCE_JSONL, SOURCE_MD
-
-
-def load_structured_records():
-    records = {}
-    with open(SOURCE_JSONL, "r", encoding="utf-8") as f:
-        for line in f:
-            record = json.loads(line)
-            if record.get("sku_id"):
-                records[record["sku_id"]] = record
-    return records
+from config import SOURCE_MD
 
 
 def load_md_blocks():
+    """Returns a list of (sku_id, product_name, description) tuples, in
+    file order, parsed from flipkart_lightrag_corpus.md."""
     with open(SOURCE_MD, "r", encoding="utf-8") as f:
         content = f.read()
     blocks = content.split("\n\n---\n\n")
-    parsed = {}
+    parsed = []
     for block in blocks:
+        name_match = re.search(r"^# Product:\s*(.+)$", block, re.MULTILINE)
         id_match = re.search(r"^Product ID:\s*(.+)$", block, re.MULTILINE)
         desc_match = re.search(r"## Description\n(.*)", block, re.DOTALL)
         if not id_match:
             continue
         sku_id = id_match.group(1).strip()
+        product_name = name_match.group(1).strip() if name_match else ""
         description = desc_match.group(1).strip() if desc_match else ""
-        parsed[sku_id] = description
+        parsed.append((sku_id, product_name, description))
     return parsed
-
-
-def build_facts_line(record):
-    parts = [f"Product: {record.get('product_name') or 'Unknown'}"]
-    if record.get("brand"):
-        parts.append(f"Brand: {record['brand']}")
-    if record.get("category"):
-        parts.append(f"Category: {record['category']}")
-    if record.get("subcategory_path"):
-        parts.append(f"Subcategory: {record['subcategory_path']}")
-    if record.get("material"):
-        parts.append(f"Material: {record['material']}")
-    if record.get("retail_price") is not None:
-        parts.append(f"Retail Price: {record['retail_price']}")
-    if record.get("discounted_price") is not None:
-        parts.append(f"Discounted Price: {record['discounted_price']}")
-    return " | ".join(parts)
 
 
 def build_documents(limit=None):
     """Returns a list of (sku_id, document_text) tuples, ready for
-    LightRAG.insert(). Skips products with no description -- nothing for
-    the graph/vector store to usefully index."""
-    structured = load_structured_records()
-    descriptions = load_md_blocks()
-
+    LightRAG.insert(). document_text is exactly `product_name +
+    description`, matching flipkart_lightrag_corpus.md's own per-SKU
+    block content -- no structured fields folded in. Skips products with
+    no description -- nothing for the graph/vector store to usefully
+    index there."""
     documents = []
-    for sku_id, record in structured.items():
-        description = descriptions.get(sku_id, "")
+    for sku_id, product_name, description in load_md_blocks():
         if not description or description == "(No description available)":
             continue
-        facts = build_facts_line(record)
-        text = f"{facts}\n\n{description}"
+        text = f"{product_name}\n\n{description}" if product_name else description
         documents.append((sku_id, text))
         if limit and len(documents) >= limit:
             break
