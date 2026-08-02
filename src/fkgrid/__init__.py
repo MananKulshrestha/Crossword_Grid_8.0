@@ -1,2 +1,1 @@
 """FK GRiD application package."""
-

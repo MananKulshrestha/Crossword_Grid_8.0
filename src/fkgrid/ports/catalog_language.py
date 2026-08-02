@@ -14,7 +14,6 @@ from fkgrid.domain.catalog_language import (
     ActivationReceipt,
     ActivationRequest,
     CanonicalVocabularySnapshot,
-    CriticDraft,
     EvidenceGroup,
     EvidenceWindow,
     LexiconCandidateVersion,
@@ -22,7 +21,6 @@ from fkgrid.domain.catalog_language import (
     LexiconLookupRequest,
     LexiconLookupResult,
     LexiconMapping,
-    MappingDraft,
     ModelCallRequest,
     ModelCallResponse,
     RegressionCase,
@@ -71,9 +69,7 @@ class ActiveLexiconPort(Protocol):
 
 
 class CatalogLanguageModelPort(Protocol):
-    def propose_canonical_mapping(
-        self, request: ModelCallRequest
-    ) -> ModelCallResponse: ...
+    def propose_canonical_mapping(self, request: ModelCallRequest) -> ModelCallResponse: ...
 
     def critique_mapping(self, request: ModelCallRequest) -> ModelCallResponse: ...
 
@@ -112,4 +108,3 @@ class TraceSinkPort(Protocol):
 
 class LexiconLookupPort(Protocol):
     def lookup_expansions(self, request: LexiconLookupRequest) -> LexiconLookupResult: ...
-

@@ -61,6 +61,19 @@ query, validator, workflow budget, artifact format, or provider boundary.
   proposal cannot accidentally activate with its batch.
 - Query expansion can improve zero-result counts while lowering precision/NDCG. Shadow
   evaluation must measure irrelevant-result increase and protected-query regressions.
+- Strict Pydantic models reject provider enum strings when passed as Python dictionaries;
+  every configured adapter must parse provider JSON through the JSON boundary before
+  semantic validation, and never construct domain enums by permissive coercion.
+- Candidate mappings must be rewritten to the candidate lexicon version before checksum,
+  review, artifact, or activation. Leaving the parent version on a new mapping creates
+  a runtime compatibility mismatch immediately after a successful activation.
+- Morphological clusters may contain multiple normalized forms. The proposer must return
+  the normalized form of the exact supplied source phrase, while the cluster representative
+  is only grouping context; conflating these can reject safe spelling variants or merge
+  their Boolean meaning.
+- Review evidence IDs and target IDs are allowlisted input data. A model response that
+  cites a valid-looking but unsupplied evidence/target ID must be rejected even if the
+  rest of the JSON is schema-valid.
 
 ## Open handoff questions
 
@@ -71,4 +84,3 @@ query, validator, workflow budget, artifact format, or provider boundary.
 - Which retrieval/evaluation owner supplies regression and shadow fixtures, labels, and
   release thresholds for each launch category and locale?
 - Which reviewer roles/identity service enforce independent approval and publication?
-

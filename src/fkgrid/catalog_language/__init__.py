@@ -2,9 +2,9 @@
 
 from fkgrid.domain.catalog_language import (
     CatalogLanguageRun,
-    LexiconMapping,
     LexiconLookupRequest,
     LexiconLookupResult,
+    LexiconMapping,
     LexiconWorkflowRequest,
     LexiconWorkflowResult,
 )
@@ -17,4 +17,3 @@ __all__ = [
     "LexiconWorkflowRequest",
     "LexiconWorkflowResult",
 ]
-

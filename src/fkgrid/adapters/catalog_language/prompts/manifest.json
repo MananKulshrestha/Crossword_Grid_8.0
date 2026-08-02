@@ -1,0 +1,16 @@
+{
+  "catalog_language_proposer_v1": {
+    "file": "catalog_language_proposer_v1.md",
+    "version": "1",
+    "input_schema": "CatalogLanguageProposerInputV1",
+    "output_schema": "MappingDraftV1",
+    "file_sha256": "1694492b627839824b0e56d883b062e99a078def7591c175e67783bc2fd349dc"
+  },
+  "catalog_language_critic_v1": {
+    "file": "catalog_language_critic_v1.md",
+    "version": "1",
+    "input_schema": "CatalogLanguageCriticInputV1",
+    "output_schema": "CriticDraftV1",
+    "file_sha256": "ac1a4d3e460d11cc92bfc73fd1013217fca296fd8136217c7a9b9aa6927b8078"
+  }
+}

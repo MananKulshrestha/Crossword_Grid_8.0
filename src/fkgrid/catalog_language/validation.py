@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fkgrid.catalog_language.normalization import normalize_surface_form
 from fkgrid.domain.catalog_language import (
@@ -17,23 +17,36 @@ from fkgrid.domain.catalog_language import (
     MappingKind,
     MappingStatus,
     ReviewRoute,
-    TargetType,
     ValidationReport,
 )
 
-
 _SAFE_ACTIONS = {
-    MappingKind.MISSPELLING: {ExpansionAction.SPELLING_NORMALIZATION, ExpansionAction.CANONICAL_SYNONYM},
-    MappingKind.ABBREVIATION: {ExpansionAction.CANONICAL_SYNONYM, ExpansionAction.CLARIFICATION_CANDIDATE},
+    MappingKind.MISSPELLING: {
+        ExpansionAction.SPELLING_NORMALIZATION,
+        ExpansionAction.CANONICAL_SYNONYM,
+    },
+    MappingKind.ABBREVIATION: {
+        ExpansionAction.CANONICAL_SYNONYM,
+        ExpansionAction.CLARIFICATION_CANDIDATE,
+    },
     MappingKind.SYNONYM: {ExpansionAction.CANONICAL_SYNONYM, ExpansionAction.SOFT_RANK_BOOST},
-    MappingKind.COLLOQUIAL: {ExpansionAction.CANONICAL_SYNONYM, ExpansionAction.CLARIFICATION_CANDIDATE},
-    MappingKind.UNIT_ALIAS: {ExpansionAction.SPELLING_NORMALIZATION, ExpansionAction.CLARIFICATION_CANDIDATE},
+    MappingKind.COLLOQUIAL: {
+        ExpansionAction.CANONICAL_SYNONYM,
+        ExpansionAction.CLARIFICATION_CANDIDATE,
+    },
+    MappingKind.UNIT_ALIAS: {
+        ExpansionAction.SPELLING_NORMALIZATION,
+        ExpansionAction.CLARIFICATION_CANDIDATE,
+    },
     MappingKind.ATTRIBUTE_PARAPHRASE: {
         ExpansionAction.SOFT_RANK_BOOST,
         ExpansionAction.EXPLICIT_FILTER_AFTER_CONFIRMATION,
         ExpansionAction.CLARIFICATION_CANDIDATE,
     },
-    MappingKind.COMPOUND: {ExpansionAction.CLARIFICATION_CANDIDATE, ExpansionAction.SOFT_RANK_BOOST},
+    MappingKind.COMPOUND: {
+        ExpansionAction.CLARIFICATION_CANDIDATE,
+        ExpansionAction.SOFT_RANK_BOOST,
+    },
 }
 
 
@@ -122,7 +135,9 @@ def validate_mapping(
         (
             item
             for item in vocabulary.items
-            if item.target_type == draft.target_type and item.target_id == draft.target_id and item.active
+            if item.target_type == draft.target_type
+            and item.target_id == draft.target_id
+            and item.active
         ),
         None,
     )
@@ -138,10 +153,15 @@ def validate_mapping(
         codes.append("COMPOUND_SEMANTICS_REQUIRED")
     if draft.scope.locale != target.scope.locale if target else False:
         codes.append("LOCALE_SCOPE_MISMATCH")
-    if target and draft.scope.attribute_id and target.scope.attribute_id not in {
-        None,
-        draft.scope.attribute_id,
-    }:
+    if (
+        target
+        and draft.scope.attribute_id
+        and target.scope.attribute_id
+        not in {
+            None,
+            draft.scope.attribute_id,
+        }
+    ):
         codes.append("ATTRIBUTE_SCOPE_MISMATCH")
     for mapping in existing_mappings:
         if (
@@ -149,10 +169,7 @@ def validate_mapping(
             and mapping.normalized_form == draft.normalized_form
             and mapping.locale == draft.scope.locale
             and mapping.scope == draft.scope
-            and (
-                mapping.target_id != draft.target_id
-                or mapping.target_type != draft.target_type
-            )
+            and (mapping.target_id != draft.target_id or mapping.target_type != draft.target_type)
         ):
             codes.append("INCOMPATIBLE_SCOPE_COLLISION")
     if not evidence_ids:
@@ -162,7 +179,7 @@ def validate_mapping(
 
     if codes:
         return ValidationReport(valid=False, codes=sorted(set(codes)))
-    timestamp = now or datetime.now(timezone.utc)
+    timestamp = now or datetime.now(UTC)
     mapping = LexiconMapping(
         mapping_id=mapping_id,
         surface_form=draft.source_form,
@@ -183,4 +200,3 @@ def validate_mapping(
         created_at=timestamp,
     )
     return ValidationReport(valid=True, codes=[], mapping=mapping)
-

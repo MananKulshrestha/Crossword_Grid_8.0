@@ -7,8 +7,8 @@ the offline workflow, its ports, the artifact builder, and runtime lookup.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from enum import Enum
+from datetime import UTC, datetime
+from enum import StrEnum
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -20,7 +20,7 @@ class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, validate_assignment=True)
 
 
-class MappingKind(str, Enum):
+class MappingKind(StrEnum):
     SYNONYM = "SYNONYM"
     ABBREVIATION = "ABBREVIATION"
     MISSPELLING = "MISSPELLING"
@@ -30,7 +30,7 @@ class MappingKind(str, Enum):
     COMPOUND = "COMPOUND"
 
 
-class MappingStatus(str, Enum):
+class MappingStatus(StrEnum):
     DRAFT = "DRAFT"
     IN_REVIEW = "IN_REVIEW"
     APPROVED = "APPROVED"
@@ -38,13 +38,13 @@ class MappingStatus(str, Enum):
     RETIRED = "RETIRED"
 
 
-class EvidenceBand(str, Enum):
+class EvidenceBand(StrEnum):
     LOW = "LOW"
     MEDIUM = "MEDIUM"
     APPROVED_HIGH = "APPROVED_HIGH"
 
 
-class ExpansionAction(str, Enum):
+class ExpansionAction(StrEnum):
     CANONICAL_SYNONYM = "CANONICAL_SYNONYM"
     SPELLING_NORMALIZATION = "SPELLING_NORMALIZATION"
     SOFT_RANK_BOOST = "SOFT_RANK_BOOST"
@@ -52,18 +52,18 @@ class ExpansionAction(str, Enum):
     EXPLICIT_FILTER_AFTER_CONFIRMATION = "EXPLICIT_FILTER_AFTER_CONFIRMATION"
 
 
-class TargetType(str, Enum):
+class TargetType(StrEnum):
     TAXONOMY_NODE = "TAXONOMY_NODE"
     ATTRIBUTE = "ATTRIBUTE"
     BRAND = "BRAND"
     CONTROLLED_VALUE = "CONTROLLED_VALUE"
 
 
-class MappingDirection(str, Enum):
+class MappingDirection(StrEnum):
     QUERY_TO_CANONICAL = "QUERY_TO_CANONICAL"
 
 
-class EvidenceSourceClass(str, Enum):
+class EvidenceSourceClass(StrEnum):
     ZERO_RESULT = "ZERO_RESULT"
     LOW_CONFIDENCE = "LOW_CONFIDENCE"
     RECOVERY = "RECOVERY"
@@ -72,13 +72,13 @@ class EvidenceSourceClass(str, Enum):
     CURATED = "CURATED"
 
 
-class ReviewRoute(str, Enum):
+class ReviewRoute(StrEnum):
     BATCH = "BATCH"
     INDIVIDUAL = "INDIVIDUAL"
     REJECT = "REJECT"
 
 
-class WorkflowStatus(str, Enum):
+class WorkflowStatus(StrEnum):
     COMPLETED = "COMPLETED"
     INSUFFICIENT_EVIDENCE = "INSUFFICIENT_EVIDENCE"
     NO_PROPOSALS = "NO_PROPOSALS"
@@ -89,7 +89,7 @@ class WorkflowStatus(str, Enum):
     FAILED_SAFE = "FAILED_SAFE"
 
 
-class ModelStatus(str, Enum):
+class ModelStatus(StrEnum):
     OK = "OK"
     INVALID_OUTPUT = "INVALID_OUTPUT"
     TIMEOUT = "TIMEOUT"
@@ -102,6 +102,7 @@ class LexiconCompatibility(StrictModel):
     catalog_version: str = Field(min_length=1, max_length=128)
     taxonomy_version: str = Field(min_length=1, max_length=128)
     category_schema_version: str = Field(min_length=1, max_length=128)
+    lexicon_version: str = Field(min_length=1, max_length=128)
     normalizer_version: str = Field(min_length=1, max_length=128)
     mapping_schema_version: str = Field(min_length=1, max_length=128)
     rank_policy_version: str = Field(min_length=1, max_length=128)
@@ -152,7 +153,7 @@ class EvidenceGroup(StrictModel):
     privacy_safe: Literal[True] = True
 
     @model_validator(mode="after")
-    def validate_counts(self) -> "EvidenceGroup":
+    def validate_counts(self) -> EvidenceGroup:
         if self.recovery_success_count > self.support_count:
             raise ValueError("recovery_success_count cannot exceed support_count")
         if self.first_observed_at > self.last_observed_at:
@@ -163,15 +164,20 @@ class EvidenceGroup(StrictModel):
 class EvidenceWindow(StrictModel):
     window_start: datetime
     window_end: datetime
+    min_observation_days: int = Field(default=7, ge=1, le=365)
     min_support_count: int = Field(default=5, ge=1, le=1_000_000)
     min_distinct_source_groups: int = Field(default=5, ge=1, le=1_000_000)
     min_source_classes: int = Field(default=2, ge=1, le=6)
     max_source_concentration: float = Field(default=0.4, gt=0.0, le=1.0)
 
     @model_validator(mode="after")
-    def validate_window(self) -> "EvidenceWindow":
+    def validate_window(self) -> EvidenceWindow:
         if self.window_start >= self.window_end:
             raise ValueError("window_start must be before window_end")
+        if (
+            self.window_end - self.window_start
+        ).total_seconds() < self.min_observation_days * 86_400:
+            raise ValueError("evidence window is shorter than the minimum observation period")
         return self
 
 
@@ -213,7 +219,7 @@ class MappingDraft(StrictModel):
     compound_semantics: Literal["NONE", "AND", "OR"] = "NONE"
 
     @model_validator(mode="after")
-    def validate_selection(self) -> "MappingDraft":
+    def validate_selection(self) -> MappingDraft:
         fields = (
             self.source_form,
             self.normalized_form,
@@ -490,5 +496,4 @@ class CatalogLanguageRun(StrictModel):
 def utc_now() -> datetime:
     """Small injectable-default helper for callers that need a timestamp."""
 
-    return datetime.now(timezone.utc)
-
+    return datetime.now(UTC)

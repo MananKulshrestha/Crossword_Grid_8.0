@@ -8,7 +8,6 @@ from dataclasses import dataclass
 
 from fkgrid.domain.catalog_language import SurfaceFormCluster
 
-
 _WHITESPACE = re.compile(r"\s+")
 _PUNCTUATION = re.compile(r"[^\w+&.]", re.UNICODE)
 _TOKEN = re.compile(r"[\w+&.]+", re.UNICODE)
@@ -106,7 +105,10 @@ def cluster_surface_forms(
     """
 
     normalized = sorted(
-        ((normalize_surface_form(form, locale, config), form, count) for form, count in surface_forms),
+        (
+            (normalize_surface_form(form, locale, config), form, count)
+            for form, count in surface_forms
+        ),
         key=lambda value: (value[0], value[1]),
     )
     groups: list[list[tuple[str, str, int]]] = []
@@ -142,7 +144,9 @@ def protected_ranges(text: str) -> tuple[tuple[int, int], ...]:
 
 
 def overlaps_protected(start: int, end: int, ranges: tuple[tuple[int, int], ...]) -> bool:
-    return any(start < protected_end and end > protected_start for protected_start, protected_end in ranges)
+    return any(
+        start < protected_end and end > protected_start for protected_start, protected_end in ranges
+    )
 
 
 def cluster_from_groups(
@@ -173,4 +177,3 @@ def cluster_from_groups(
             )
         )
     return clusters
-

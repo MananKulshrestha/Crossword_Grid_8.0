@@ -231,4 +231,3 @@ class CatalogLanguageQueries:
         RECORD_REVIEW,
         ACTIVATE_CAS,
     )
-
