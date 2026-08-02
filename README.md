@@ -27,7 +27,7 @@ Implement these ports in the owning services:
 - `RecoveryEventPort.record`: persist the sanitized event in the shared `recovery_events` table/outbox.
 - `RecoveryCircuitPort`: optional Tier 2 circuit state/metrics.
 
-The included `GeminiGemmaGateway` is pinned to Google's hosted `gemma-4-26b-a4b-it` model. Configure `FKGRID_GEMINI_API_KEY` outside Git and run `python scripts/smoke_gemma4.py` for a redacted live planner check. See `docs/gemini-gemma4-integration.md`.
+The included `GeminiGemmaGateway` is pinned to Google's hosted `gemma-4-26b-a4b-it` model. Configure `FKGRID_GEMINI_API_KEY` outside Git and run `python scripts/smoke_gemma4.py` for a redacted diagnostic workflow check. Set `FKGRID_GEMMA_SMOKE_MODE=production` to verify the binding 1,800 ms timeout/fallback. See `docs/gemini-gemma4-integration.md`.
 
 The query layer expects the catalog-language owner’s `lexicon_mappings` table and the catalog/taxonomy owner’s versioned vocabulary. The included migration creates the recovery-owned event and materialized allowed-concept contracts; it does not provision or migrate the rest of the application database.
 

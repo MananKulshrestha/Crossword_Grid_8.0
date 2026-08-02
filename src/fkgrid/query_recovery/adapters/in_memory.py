@@ -126,6 +126,7 @@ class FakePlanner:
         self.tokens = tokens
         self.latency_ms = latency_ms
         self.calls = 0
+        self.timeouts: list[int] = []
         self.last_context: RecoveryContext | None = None
 
     def plan(
@@ -135,6 +136,7 @@ class FakePlanner:
         timeout_ms: int,
     ) -> tuple[RecoveryPlannerOutput | None, list[str], int, int]:
         self.calls += 1
+        self.timeouts.append(timeout_ms)
         self.last_context = context
         return self.output, list(self.codes), self.tokens, self.latency_ms
 

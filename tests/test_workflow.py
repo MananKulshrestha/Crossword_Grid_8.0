@@ -232,6 +232,7 @@ class RecoveryWorkflowTests(unittest.TestCase):
         )
         self.assertEqual(response.outcome, RecoveryOutcome.RECOVERED_TIER2)
         self.assertEqual(planner.calls, 1)
+        self.assertEqual(planner.timeouts, [1550])
         self.assertEqual(retrieval.calls, ["TIER2_GENERATIVE"])
         self.assertTrue(response.event.planner_called)
         self.assertEqual(response.event.retrieval_run_count, 2)

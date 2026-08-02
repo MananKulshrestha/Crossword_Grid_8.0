@@ -24,5 +24,14 @@ thought and answer parts; only non-thought text is passed to the strict local
 `RecoveryPlannerOutput` validator. Provider failures return sanitized status
 codes and preserve the recovery workflow's baseline/no-safe behavior.
 
+The smoke script has two modes. The default diagnostic mode allows up to five
+seconds to prove the provider and workflow path. The measured hosted calls in
+this environment were approximately 4.4–4.7 seconds. Set
+`FKGRID_GEMMA_SMOKE_MODE=production` to exercise the binding 1,800 ms recovery
+deadline; it correctly times out and returns a safe clarification/fallback
+without retrying. Do not increase the production deadline merely to hide this
+provider latency; use a faster approved endpoint or a separately approved
+budget change after evaluation.
+
 The API key, provider SDK objects, raw response, raw prompt, and model thought
 content do not cross the `StructuredModelGateway` boundary.

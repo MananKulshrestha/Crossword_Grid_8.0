@@ -37,6 +37,9 @@ from .validation import (
 )
 
 
+PLANNER_POST_CALL_RESERVE_MS = 250
+
+
 class QueryRecoveryWorkflow:
     """Run the only permitted recovery graph.
 
@@ -299,7 +302,10 @@ class QueryRecoveryWorkflow:
             approved_suggestions=expansions[:3],
         )
         planner_called = True
-        planner_timeout = max(1, self._remaining(request, started_ms) - 50)
+        planner_timeout = max(
+            1,
+            self._remaining(request, started_ms) - PLANNER_POST_CALL_RESERVE_MS,
+        )
         try:
             planner_output, planner_codes, _tokens, _latency = self.tools.plan_constrained_repair(
                 context,
