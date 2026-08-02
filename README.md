@@ -48,6 +48,8 @@ uv run uvicorn fkgrid.api.main:app --host 127.0.0.1 --port 8000
 
 Open [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs). `GET /v1/query-recovery/example` returns a complete request body that can be pasted into the POST operation. If `FKGRID_DEEPINFRA_API_KEY`, `DEEPINFRA_API_KEY`, or `DEEPINFRA_TOKEN` is configured, the default app uses the DeepInfra Gemma 4 26B planner with demo in-memory catalog seams; otherwise it uses a deterministic demo planner. Real DB/retrieval adapters can be injected through `create_app(RecoveryApiDependencies(...))` later.
 
+For an actathon-friendly experience, open `/demo` on the same host. It provides one query box and three intentionally small mock filters (`In stock only`, `Cotton`, and `Under ₹2,000`). Submitting the form calls `POST /v1/query-recovery/demo-turn`, which translates those values into the canonical request and runs the same recovery workflow without requiring anyone to edit the full schema by hand.
+
 ## Local contract checks
 
 The package has no required database or provider. With Python 3.12 and Pydantic installed:

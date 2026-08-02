@@ -5,8 +5,16 @@ from __future__ import annotations
 from typing import Literal
 
 from fastapi import Body, FastAPI, HTTPException, Request, status
+from fastapi.responses import HTMLResponse
 
 from ..query_recovery.domain import RecoveryRequest, RecoveryResponse, StrictModel
+from .demo import (
+    DemoRecoveryInput,
+    DemoRecoveryResponse,
+    build_demo_recovery_request,
+    build_demo_recovery_response,
+)
+from .demo_ui import DEMO_PAGE
 from .dependencies import RecoveryApiDependencies, build_default_dependencies
 from .examples import build_example_request
 from .schemas import ApiRecoveryRequest
@@ -34,6 +42,18 @@ class CapabilitiesResponse(StrictModel):
     planner_model: str
     data_mode: str
     endpoints: list[str]
+
+
+_RUN_TURN_BODY = Body(
+    ...,
+    openapi_examples={
+        "demo_clarification": {
+            "summary": "Ambiguous category with two allowed concepts",
+            "description": "Copy the response from GET /v1/query-recovery/example.",
+            "value": build_example_request().model_dump(mode="json"),
+        }
+    },
+)
 
 
 def create_app(dependencies: RecoveryApiDependencies | None = None) -> FastAPI:
@@ -92,8 +112,54 @@ def create_app(dependencies: RecoveryApiDependencies | None = None) -> FastAPI:
                 "GET /readyz",
                 "GET /v1/query-recovery/example",
                 "POST /v1/query-recovery/turn",
+                "GET /demo",
+                "POST /v1/query-recovery/demo-turn",
             ],
         )
+
+    @application.get(
+        "/demo",
+        response_class=HTMLResponse,
+        include_in_schema=False,
+    )
+    def demo_page() -> HTMLResponse:
+        """Serve the small actathon input surface without changing API contracts."""
+
+        return HTMLResponse(DEMO_PAGE)
+
+    @application.post(
+        "/v1/query-recovery/demo-turn",
+        tags=["actathon-demo"],
+        response_model=DemoRecoveryResponse,
+        response_model_exclude_none=False,
+        status_code=status.HTTP_200_OK,
+        summary="Run recovery from a simple query and three visible filters",
+        description=(
+            "Actathon-friendly input adapter. It translates the query and a few "
+            "explicit mock filters into the canonical RecoveryRequest, then runs "
+            "the same bounded QueryRecoveryWorkflow used by the full API."
+        ),
+    )
+    def run_demo_turn(
+        request: Request,
+        payload: DemoRecoveryInput,
+    ) -> DemoRecoveryResponse:
+        current: RecoveryApiDependencies = request.app.state.recovery_dependencies
+        if not current.ready:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={"code": "RECOVERY_API_NOT_READY"},
+            )
+        try:
+            canonical_request = build_demo_recovery_request(payload)
+            result = current.workflow.run(canonical_request)
+            return build_demo_recovery_response(payload, result)
+        except Exception as exc:  # noqa: BLE001 - sanitize the delivery boundary
+            del exc
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={"code": "RECOVERY_UNAVAILABLE"},
+            ) from None
 
     @application.get(
         "/v1/query-recovery/example",
@@ -120,16 +186,7 @@ def create_app(dependencies: RecoveryApiDependencies | None = None) -> FastAPI:
     )
     def run_turn(
         request: Request,
-        payload: ApiRecoveryRequest = Body(
-            ...,
-            openapi_examples={
-                "demo_clarification": {
-                    "summary": "Ambiguous category with two allowed concepts",
-                    "description": "Copy the response from GET /v1/query-recovery/example.",
-                    "value": build_example_request().model_dump(mode="json"),
-                }
-            },
-        ),
+        payload: ApiRecoveryRequest = _RUN_TURN_BODY,
     ) -> RecoveryResponse:
         current: RecoveryApiDependencies = request.app.state.recovery_dependencies
         if not current.ready:
