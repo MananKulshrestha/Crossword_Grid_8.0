@@ -40,11 +40,13 @@ short transactions, unique idempotency constraints, append-only case events,
 and the repository's shared canonical IDs/version tuple. The catalog owner must
 provide immutable event-time snapshots. A provider-neutral `QualityClassifier`
 port is implemented by the offline fake and by the optional
-`Gemma4QualityClassifier` Google REST adapter. The live adapter uses
-`gemma-4-26b-a4b-it`, sends one redacted packet with no tools, requests JSON,
-and strictly revalidates citations and fields. Operations must approve/activate
-policy and queue configuration. API/UI owners should expose typed inputs and
-redacted traces only.
+`Gemma4QualityClassifier` adapter. The default live transport uses DeepInfra's
+OpenAI-compatible API with the exact `google/gemma-4-26B-A4B-it` model ID,
+sends one redacted packet with no tools, requests strict JSON Schema output, and
+strictly revalidates citations and fields. An explicit Gemini compatibility
+transport is retained behind `FKGRID_GEMMA_PROVIDER=gemini`. Operations must
+approve/activate policy and queue configuration. API/UI owners should expose
+typed inputs and redacted traces only.
 
 No database, provider, network queue, API server, or UI is started by this
 package. Tests are offline and deterministic.
@@ -87,10 +89,13 @@ files, persisted, logged, or included in traces. The database owner still
 supplies persistence and migration adapters.
 
 The FastAPI demo uses the deterministic classifier by default. To opt into the
-Gemma adapter explicitly, set `FKGRID_USE_GEMMA=true` together with the
-runtime-only `FKGRID_GEMMA_API_KEY` before starting Uvicorn.
+DeepInfra-backed Gemma adapter explicitly, set `FKGRID_USE_GEMMA=true`,
+`FKGRID_GEMMA_PROVIDER=deepinfra`, and the runtime-only
+`FKGRID_DEEPINFRA_API_KEY` before starting Uvicorn. The model defaults to
+`google/gemma-4-26B-A4B-it`; override it only when the operator has approved a
+different compatible model.
 
-For an authorized local smoke test, inject `FKGRID_GEMMA_API_KEY` from the
+For an authorized local smoke test, inject `FKGRID_DEEPINFRA_API_KEY` from the
 operator's secret manager for the process only, instantiate the classifier, and
 run one representative `EvidencePacket`. Do not put the key in `.env`, shell
 history, fixtures, traces, or command arguments; clear the process variable

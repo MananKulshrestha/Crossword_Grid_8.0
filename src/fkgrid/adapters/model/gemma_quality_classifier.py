@@ -1,8 +1,10 @@
-"""Bounded Google Gemma 4 adapter for the Quality Sentinel classifier port.
+"""Bounded Gemma 4 adapter for the Quality Sentinel classifier port.
 
 The adapter sends one redacted evidence projection, registers no tools, requests
-JSON, and revalidates the response before returning the domain proposal.
-Provider credentials are accepted only at runtime and are held as ``SecretStr``.
+strict structured JSON, and revalidates the response before returning the domain
+proposal. DeepInfra's OpenAI-compatible transport is the default; the Google
+Gemini transport remains available as an explicit compatibility option. Provider
+credentials are accepted only at runtime and are held as ``SecretStr``.
 """
 
 from __future__ import annotations
@@ -27,9 +29,13 @@ from fkgrid.domain.quality import (
 )
 from fkgrid.ports.quality import QualityClassifier
 
-DEFAULT_MODEL_ALIAS = "gemma-4-26b-a4b-it"
+DEFAULT_MODEL_ALIAS = "google/gemma-4-26B-A4B-it"
 DEFAULT_PROMPT_VERSION = "quality_v1"
-DEFAULT_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+DEFAULT_DEEPINFRA_ENDPOINT = "https://api.deepinfra.com/v1/openai/chat/completions"
+DEFAULT_GEMINI_ENDPOINT = (
+    "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+)
+DEFAULT_ENDPOINT = DEFAULT_DEEPINFRA_ENDPOINT
 DEFAULT_TIMEOUT_MS = 1_800
 MAX_OUTPUT_TOKENS = 600
 
@@ -69,7 +75,8 @@ class GeminiGenerateContentTransport:
         response_schema: dict[str, Any],
         timeout_ms: int,
     ) -> str:
-        endpoint = self.endpoint.replace("{model}", quote(model_alias, safe="-_."))
+        google_model_alias = model_alias.rsplit("/", maxsplit=1)[-1].lower()
+        endpoint = self.endpoint.replace("{model}", quote(google_model_alias, safe="-_."))
         payload = {
             "systemInstruction": {"parts": [{"text": system_prompt}]},
             "contents": [{"role": "user", "parts": [{"text": user_prompt}]}],
@@ -97,6 +104,63 @@ class GeminiGenerateContentTransport:
         except (HTTPError, URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
             raise GemmaQualityModelError("GEMMA_PROVIDER_UNAVAILABLE") from exc
         return _extract_text(provider_response)
+
+
+class DeepInfraChatCompletionsTransport:
+    """DeepInfra's OpenAI-compatible chat-completions transport."""
+
+    def __init__(self, endpoint: str, api_key: SecretStr) -> None:
+        parsed = urlparse(endpoint)
+        if parsed.scheme != "https" or not parsed.netloc:
+            raise ValueError("DEEPINFRA_ENDPOINT_MUST_USE_HTTPS")
+        normalized_endpoint = endpoint.rstrip("/")
+        if normalized_endpoint.endswith("/v1/openai"):
+            normalized_endpoint += "/chat/completions"
+        self.endpoint = normalized_endpoint
+        self._api_key = api_key
+
+    def generate(
+        self,
+        *,
+        model_alias: str,
+        system_prompt: str,
+        user_prompt: str,
+        response_schema: dict[str, Any],
+        timeout_ms: int,
+    ) -> str:
+        payload = {
+            "model": model_alias,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "temperature": 0.0,
+            "max_tokens": MAX_OUTPUT_TOKENS,
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "quality_assessment",
+                    "strict": True,
+                    "schema": response_schema,
+                },
+            },
+        }
+        body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        request = Request(
+            self.endpoint,
+            data=body,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {self._api_key.get_secret_value()}",
+            },
+            method="POST",
+        )
+        try:
+            with urlopen(request, timeout=max(timeout_ms / 1000, 0.05)) as response:  # nosec B310
+                provider_response = json.loads(response.read().decode("utf-8"))
+        except (HTTPError, URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
+            raise GemmaQualityModelError("DEEPINFRA_PROVIDER_UNAVAILABLE") from exc
+        return _extract_openai_text(provider_response)
 
 
 class QualityPrompt:
@@ -145,6 +209,17 @@ def _extract_text(provider_response: Any) -> str:
     if not text.strip():
         raise GemmaQualityModelError("GEMMA_RESPONSE_EMPTY")
     return text
+
+
+def _extract_openai_text(provider_response: Any) -> str:
+    try:
+        choices = provider_response["choices"]
+        content = choices[0]["message"]["content"]
+    except (KeyError, IndexError, TypeError) as exc:
+        raise GemmaQualityModelError("DEEPINFRA_RESPONSE_INVALID") from exc
+    if not isinstance(content, str) or not content.strip():
+        raise GemmaQualityModelError("DEEPINFRA_RESPONSE_EMPTY")
+    return content
 
 
 def _safe_catalog_value(value: Any) -> Any:
@@ -208,7 +283,7 @@ def _packet_payload(packet: EvidencePacket) -> dict[str, Any]:
 
 
 def _response_schema(packet: EvidencePacket) -> dict[str, Any]:
-    """Build the smallest Gemini-compatible schema for this packet's allowlist."""
+    """Build the smallest provider-compatible schema for this packet's allowlist."""
 
     return {
         "type": "object",
@@ -279,10 +354,26 @@ class Gemma4QualityClassifier(QualityClassifier):
         prompt: QualityPrompt | None = None,
     ) -> Gemma4QualityClassifier:
         values = os.environ if environment is None else environment
-        api_key = values.get("FKGRID_GEMMA_API_KEY") or values.get("GEMINI_API_KEY")
+        provider = values.get("FKGRID_GEMMA_PROVIDER", "deepinfra").casefold()
+        if provider not in {"deepinfra", "gemini"}:
+            raise ValueError("GEMMA_PROVIDER_UNSUPPORTED")
+        if provider == "deepinfra":
+            api_key = (
+                values.get("FKGRID_DEEPINFRA_API_KEY")
+                or values.get("DEEPINFRA_API_KEY")
+                or values.get("FKGRID_GEMMA_API_KEY")
+            )
+        else:
+            api_key = values.get("FKGRID_GEMMA_API_KEY") or values.get("GEMINI_API_KEY")
         if not api_key:
             raise ValueError("GEMMA_API_KEY_REQUIRED")
-        endpoint = values.get("FKGRID_GEMMA_ENDPOINT", DEFAULT_ENDPOINT)
+        endpoint = values.get("FKGRID_GEMMA_ENDPOINT")
+        if not endpoint:
+            endpoint = (
+                values.get("FKGRID_DEEPINFRA_ENDPOINT", DEFAULT_DEEPINFRA_ENDPOINT)
+                if provider == "deepinfra"
+                else values.get("FKGRID_GEMINI_ENDPOINT", DEFAULT_GEMINI_ENDPOINT)
+            )
         model_alias = values.get("FKGRID_GEMMA_MODEL_ALIAS", DEFAULT_MODEL_ALIAS)
         prompt_version = values.get("FKGRID_GEMMA_PROMPT_VERSION", DEFAULT_PROMPT_VERSION)
         timeout_text = values.get("FKGRID_GEMMA_TIMEOUT_MS", str(DEFAULT_TIMEOUT_MS))
@@ -290,8 +381,13 @@ class Gemma4QualityClassifier(QualityClassifier):
             timeout_ms = int(timeout_text)
         except ValueError as exc:
             raise ValueError("QUALITY_CLASSIFIER_TIMEOUT_INVALID") from exc
+        transport: QualityModelTransport
+        if provider == "deepinfra":
+            transport = DeepInfraChatCompletionsTransport(endpoint, SecretStr(api_key))
+        else:
+            transport = GeminiGenerateContentTransport(endpoint, SecretStr(api_key))
         return cls(
-            GeminiGenerateContentTransport(endpoint, SecretStr(api_key)),
+            transport,
             prompt=prompt,
             model_alias=model_alias,
             prompt_version=prompt_version,

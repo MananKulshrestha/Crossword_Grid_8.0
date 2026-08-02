@@ -9,6 +9,7 @@ import pytest
 from fkgrid.adapters.model import gemma_quality_classifier as adapter
 from fkgrid.adapters.model.gemma_quality_classifier import (
     DEFAULT_MODEL_ALIAS,
+    DeepInfraChatCompletionsTransport,
     GeminiGenerateContentTransport,
     Gemma4QualityClassifier,
     GemmaQualityModelError,
@@ -118,12 +119,26 @@ def test_gemma_classifier_rejects_extra_fields_and_foreign_citations() -> None:
 
 def test_from_environment_uses_runtime_key_without_persisting_configuration() -> None:
     classifier = Gemma4QualityClassifier.from_environment(
-        environment={"FKGRID_GEMMA_API_KEY": "runtime-only", "FKGRID_GEMMA_TIMEOUT_MS": "1500"}
+        environment={
+            "FKGRID_DEEPINFRA_API_KEY": "runtime-only",
+            "FKGRID_GEMMA_TIMEOUT_MS": "1500",
+        }
     )
 
     assert classifier.model_alias == DEFAULT_MODEL_ALIAS
     assert classifier.timeout_ms == 1500
     assert "runtime-only" not in repr(classifier)
+    assert isinstance(classifier.transport, DeepInfraChatCompletionsTransport)
+
+
+def test_from_environment_keeps_gemini_as_explicit_compatibility_provider() -> None:
+    classifier = Gemma4QualityClassifier.from_environment(
+        environment={
+            "FKGRID_GEMMA_PROVIDER": "gemini",
+            "FKGRID_GEMMA_API_KEY": "runtime-only",
+        }
+    )
+
     assert isinstance(classifier.transport, GeminiGenerateContentTransport)
 
 
@@ -155,6 +170,49 @@ def test_google_transport_uses_header_auth_and_structured_json(
         adapter.SecretStr("runtime-only"),
     )
     response = transport.generate(
+        model_alias="gemma-4-26b-a4b-it",
+        system_prompt="system",
+        user_prompt="user",
+        response_schema={"type": "object"},
+        timeout_ms=1200,
+    )
+
+    request = captured["request"]
+    body = json.loads(request.data)
+    assert request.full_url.endswith("models/gemma-4-26b-a4b-it:generateContent")
+    assert request.get_header("X-goog-api-key") == "runtime-only"
+    assert body["generationConfig"]["responseFormat"]["text"]["mimeType"] == "application/json"
+    assert json.loads(response)["issue_class"] == "LISTING_CONTENT_MISMATCH"
+
+
+def test_deepinfra_transport_uses_bearer_auth_and_json_schema(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeResponse:
+        def __enter__(self) -> FakeResponse:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return json.dumps(
+                {"choices": [{"message": {"content": json.dumps(valid_response())}}]}
+            ).encode()
+
+    captured: dict[str, Any] = {}
+
+    def fake_urlopen(request: Any, timeout: float) -> FakeResponse:
+        captured["request"] = request
+        captured["timeout"] = timeout
+        return FakeResponse()
+
+    monkeypatch.setattr(adapter, "urlopen", fake_urlopen)
+    transport = DeepInfraChatCompletionsTransport(
+        "https://api.deepinfra.com/v1/openai",
+        adapter.SecretStr("runtime-only"),
+    )
+    response = transport.generate(
         model_alias=DEFAULT_MODEL_ALIAS,
         system_prompt="system",
         user_prompt="user",
@@ -164,7 +222,9 @@ def test_google_transport_uses_header_auth_and_structured_json(
 
     request = captured["request"]
     body = json.loads(request.data)
-    assert request.full_url.endswith(f"models/{DEFAULT_MODEL_ALIAS}:generateContent")
-    assert request.get_header("X-goog-api-key") == "runtime-only"
-    assert body["generationConfig"]["responseFormat"]["text"]["mimeType"] == "application/json"
+    assert request.full_url.endswith("/v1/openai/chat/completions")
+    assert request.get_header("Authorization") == "Bearer runtime-only"
+    assert body["model"] == DEFAULT_MODEL_ALIAS
+    assert body["response_format"]["type"] == "json_schema"
+    assert body["response_format"]["json_schema"]["strict"] is True
     assert json.loads(response)["issue_class"] == "LISTING_CONTENT_MISMATCH"
