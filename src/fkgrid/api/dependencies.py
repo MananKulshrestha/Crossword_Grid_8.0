@@ -18,13 +18,17 @@ from ..query_recovery.adapters.in_memory import (
     SequenceIds,
 )
 from ..query_recovery.domain import (
+    ApprovedExpansion,
     ConceptType,
+    EvidenceBand,
+    ExpansionAction,
+    MappingType,
     RecoveryConstraint,
     RetrievalRun,
 )
 from ..query_recovery.ports import ClosedCircuitPort, RecoveryPlannerPort
 from ..query_recovery.tools import RecoveryTools
-from ..query_recovery.validation import hard_filter_hash, query_state_hash
+from ..query_recovery.validation import hard_filter_hash, normalize_term, query_state_hash
 from ..query_recovery.workflow import QueryRecoveryWorkflow
 
 
@@ -38,19 +42,51 @@ class ApiClock:
         return datetime.now(UTC)
 
 
+@dataclass(frozen=True)
+class DemoSemanticFamily:
+    """A small approved semantic family used only by the Swagger demo seam."""
+
+    key: str
+    aliases: tuple[str, ...]
+    product_id: str
+    interpretation: str
+
+
+_DEMO_SEMANTIC_FAMILIES = (
+    DemoSemanticFamily(
+        key="sports-shoes",
+        aliases=("trainers", "sports shoes", "athletic shoes", "running shoes"),
+        product_id="demo-sports-shoe-1",
+        interpretation="trainers / sports shoes / athletic shoes",
+    ),
+    DemoSemanticFamily(
+        key="footwear",
+        aliases=("shoes", "footwear", "sneakers"),
+        product_id="demo-footwear-1",
+        interpretation="shoes / footwear",
+    ),
+)
+
+
 class DemoPlanner:
     """Deterministic fallback when no provider credential is configured."""
 
     def plan(self, *, context, timeout_ms: int):
         del timeout_ms
-        if len(context.allowed_concepts) >= 2:
+        unresolved = {normalize_term(term) for term in context.unresolved_terms}
+        if unresolved.intersection({"formal", "wear", "formal wear"}):
             from ..query_recovery.domain import RecoveryClarificationPlan
 
+            option_ids = [
+                concept.concept_id
+                for concept in context.allowed_concepts
+                if concept.concept_id in {"demo-shirts", "demo-blazers"}
+            ]
             return (
                 RecoveryClarificationPlan(
-                    option_ids=[concept.concept_id for concept in context.allowed_concepts[:2]],
+                    option_ids=option_ids,
                     target_field="category",
-                    reason="The demo query has two possible category interpretations.",
+                    reason="Formal wear can refer to more than one approved category.",
                     preserved_hard_filter_hash=context.hard_filter_hash,
                 ),
                 [],
@@ -77,18 +113,28 @@ class DemoRetrieval:
         self.calls: list[str] = []
 
     def search(self, *, query_state, query_terms, compatibility, run_kind, remaining_ms):
-        del query_terms, remaining_ms
+        del remaining_ms
         self.calls.append(run_kind)
+        normalized_terms = {normalize_term(term) for term in query_terms}
+        family = next(
+            (
+                candidate
+                for candidate in _DEMO_SEMANTIC_FAMILIES
+                if normalized_terms.intersection(candidate.aliases)
+            ),
+            None,
+        )
         return RetrievalRun(
-            run_id=f"demo-{run_kind.lower()}",
+            run_id=f"demo-{run_kind.lower()}-{family.key if family else 'no-match'}",
             query_state_hash=query_state_hash(query_state),
             hard_filter_hash=hard_filter_hash(query_state),
             compatibility=compatibility,
-            eligible_count=1,
-            top_score=0.8,
-            top_score_margin=0.2,
-            required_criteria_coverage=1.0,
-            result_product_ids=["demo-product-1"],
+            eligible_count=1 if family else 0,
+            top_score=0.86 if family else None,
+            top_score_margin=0.22 if family else None,
+            required_criteria_coverage=1.0 if family else None,
+            result_product_ids=[family.product_id] if family else [],
+            interpretation_family=family.interpretation if family else None,
         )
 
 
@@ -126,6 +172,81 @@ def _demo_constraints() -> list[RecoveryConstraint]:
             canonical_term="blazers",
             **versions,
         ),
+        RecoveryConstraint(
+            concept_id="demo-footwear",
+            concept_type=ConceptType.TAXONOMY,
+            label="Footwear",
+            canonical_term="footwear",
+            **versions,
+        ),
+        RecoveryConstraint(
+            concept_id="demo-sports-shoes",
+            concept_type=ConceptType.TAXONOMY,
+            label="Sports shoes",
+            canonical_term="sports shoes",
+            **versions,
+        ),
+        RecoveryConstraint(
+            concept_id="demo-athletic-shoes",
+            concept_type=ConceptType.TAXONOMY,
+            label="Athletic shoes",
+            canonical_term="athletic shoes",
+            **versions,
+        ),
+    ]
+
+
+def _demo_expansions() -> list[ApprovedExpansion]:
+    versions = {
+        "catalog_version": "catalog-swagger-demo",
+        "taxonomy_version": "taxonomy-swagger-demo",
+        "category_schema_version": "schema-swagger-demo",
+        "lexicon_version": "lexicon-swagger-demo",
+    }
+    common = {
+        "concept_type": ConceptType.TAXONOMY,
+        "mapping_type": MappingType.ALIAS,
+        "expansion_action": ExpansionAction.CANONICAL_SYNONYM,
+        "evidence_band": EvidenceBand.APPROVED_HIGH,
+        **versions,
+    }
+    return [
+        ApprovedExpansion(
+            mapping_id="demo-shoes-to-footwear",
+            normalized_form="shoes",
+            original_form="shoes",
+            canonical_target_id="demo-footwear",
+            canonical_label="footwear",
+            priority=100,
+            **common,
+        ),
+        ApprovedExpansion(
+            mapping_id="demo-trainers-to-sports-shoes",
+            normalized_form="trainers",
+            original_form="trainers",
+            canonical_target_id="demo-sports-shoes",
+            canonical_label="sports shoes",
+            priority=100,
+            **common,
+        ),
+        ApprovedExpansion(
+            mapping_id="demo-sneakers-to-sports-shoes",
+            normalized_form="sneakers",
+            original_form="sneakers",
+            canonical_target_id="demo-sports-shoes",
+            canonical_label="sports shoes",
+            priority=100,
+            **common,
+        ),
+        ApprovedExpansion(
+            mapping_id="demo-athletic-to-athletic-shoes",
+            normalized_form="athletic",
+            original_form="athletic",
+            canonical_target_id="demo-athletic-shoes",
+            canonical_label="athletic shoes",
+            priority=100,
+            **common,
+        ),
     ]
 
 
@@ -140,7 +261,7 @@ def build_demo_dependencies(
     clock = ApiClock()
     events = InMemoryRecoveryEvents()
     tools = RecoveryTools(
-        expansions=InMemoryApprovedExpansions(),
+        expansions=InMemoryApprovedExpansions(_demo_expansions()),
         constraints=InMemoryRecoveryConstraints(_demo_constraints()),
         retrieval=DemoRetrieval(),
         planner=planner_port or DemoPlanner(),
@@ -176,7 +297,7 @@ def build_default_dependencies() -> RecoveryApiDependencies:
     clock = ApiClock()
     events = InMemoryRecoveryEvents()
     tools = RecoveryTools(
-        expansions=InMemoryApprovedExpansions(),
+        expansions=InMemoryApprovedExpansions(_demo_expansions()),
         constraints=InMemoryRecoveryConstraints(_demo_constraints()),
         retrieval=DemoRetrieval(),
         planner=build_deepinfra_gemma4_recovery_planner(config=config),

@@ -53,7 +53,7 @@ DEMO_PAGE = r'''<!doctype html>
   <main>
     <div class="eyebrow">FK GRiD · Query Recovery Agent</div>
     <h1>Describe what you want. We’ll recover the query safely.</h1>
-    <p class="lede">A lightweight actathon surface over the real confidence-gated workflow. Type a shopping request, add a few mock catalogue filters, and inspect whether the agent rewrites, clarifies, or safely abstains.</p>
+    <p class="lede">A lightweight actathon surface over the real confidence-gated workflow. Type a shopping request, add a few mock catalogue filters, and inspect whether approved semantic recovery finds meaning, a genuine ambiguity is surfaced, or recovery safely abstains.</p>
     <div class="layout">
       <section class="card">
         <form id="recovery-form">
@@ -77,6 +77,7 @@ DEMO_PAGE = r'''<!doctype html>
           <div id="outcome" class="outcome"></div>
           <h2 id="headline"></h2>
           <div id="summary" class="small"></div>
+          <div id="semantic" class="small"></div>
           <div id="filters" class="chips"></div>
           <div id="clarification" hidden>
             <h3>What the agent needs from you</h3>
@@ -127,6 +128,7 @@ DEMO_PAGE = r'''<!doctype html>
         text(document.getElementById('outcome'), recovery.outcome);
         text(document.getElementById('headline'), recovery.interpretation_label || recovery.terminal_state.replaceAll('_', ' '));
         text(document.getElementById('summary'), `${data.query} · ${recovery.event.retrieval_run_count} retrieval run(s) · ${recovery.event.added_latency_ms} ms`);
+        text(document.getElementById('semantic'), recovery.selected_run?.interpretation_family ? `Semantic family: ${recovery.selected_run.interpretation_family}` : '');
         const filterHost = document.getElementById('filters');
         filterHost.replaceChildren();
         data.filters.forEach((label) => { const chip = document.createElement('span'); chip.className = 'chip'; chip.textContent = label; filterHost.appendChild(chip); });

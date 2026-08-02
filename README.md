@@ -50,6 +50,8 @@ Open [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs). `GET /v1/query-re
 
 For an actathon-friendly experience, open `/demo` on the same host. It provides one query box and three intentionally small mock filters (`In stock only`, `Cotton`, and `Under ₹2,000`). Submitting the form calls `POST /v1/query-recovery/demo-turn`, which translates those values into the canonical request and runs the same recovery workflow without requiring anyone to edit the full schema by hand.
 
+The Swagger demo includes approved semantic examples so changing the query changes the recovery result: `shoes` recovers to the footwear family and `trainers` recovers through the sports-shoes family (`trainers / sports shoes / athletic shoes`) without asking a chat-style clarification. `formal wear` remains a deliberate clarification example because Shirts and Blazers are genuinely different allowed categories. These are deterministic demo lexicon/retrieval seams; production catalog, lexicon, retrieval, session, memory, cart, and purchase-context adapters plug into the existing ports.
+
 ## Local contract checks
 
 The package has no required database or provider. With Python 3.12 and Pydantic installed:

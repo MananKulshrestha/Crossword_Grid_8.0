@@ -14,6 +14,7 @@ from .domain import (
     ExpansionAction,
     GateDecision,
     PlannerAction,
+    RecoveryClarificationPlan,
     RecoveryConstraint,
     RecoveryEvent,
     RecoveryNoSafePlan,
@@ -21,8 +22,6 @@ from .domain import (
     RecoveryPlan,
     RecoveryRequest,
     RecoveryResponse,
-    RecoveryRewritePlan,
-    RecoveryClarificationPlan,
     RetrievalRun,
     ToolReceipt,
 )
@@ -35,7 +34,6 @@ from .validation import (
     validate_planner_plan,
     validate_recovery_context,
 )
-
 
 PLANNER_POST_CALL_RESERVE_MS = 250
 
@@ -150,7 +148,10 @@ class QueryRecoveryWorkflow:
                 mapping_ids=[item.mapping_id for item in direct_expansions],
                 added_concept_ids=[item.canonical_target_id for item in direct_expansions],
                 added_query_terms=[item.canonical_label for item in direct_expansions],
-                interpretation_label="Approved catalog-language expansion",
+                interpretation_label=(
+                    "Approved semantic expansion: "
+                    + ", ".join(item.canonical_label for item in direct_expansions)
+                ),
                 preserved_hard_filter_hash=before_hash,
             )
             issues = validate_internal_rewrite_plan(direct_plan, request, concepts_by_id)
