@@ -17,7 +17,7 @@ their adapters.
   provenance-safe context refs, and current-session fallback;
 - tool-less structured model gateway with versioned prompts, one sanitized repair
   attempt, semantic validation, deterministic exact-grammar fallback, a fake
-  provider, and an OpenAI-compatible Qwen3.6 27B adapter;
+  provider, and an OpenAI-compatible Gemma 4 12B adapter;
 - explicit routing for search/refine, details, compare, availability, show
   cart, atomic typed cart drafts, explicit cited research, reset, help, bounded
   recovery, clarification, suggestions, idempotency, optimistic versions, and
@@ -36,9 +36,12 @@ orchestrator hands the final typed `ShopperResponse` plus its safe trace to
 `MarkdownPipelinePort.handoff`; another owner converts that typed response to
 escaped markdown for rendering.
 
-Qwen is configured by alias only. The default alias is
-`Qwen/Qwen3.6-27B-Instruct`; supply an injected OpenAI-compatible transport and
-API key later through `Qwen36ModelAdapter`. No key is stored in this repository.
+Gemma is configured by alias only. The default alias is
+`google/gemma-4-12B-it`; supply `FKGRID_MODEL_ENDPOINT` and
+`FKGRID_MODEL_API_KEY` through the environment, or inject an
+OpenAI-compatible transport into `Gemma4ModelAdapter`. No key is stored in this
+repository. The endpoint is provider-specific because Gemma is open-weight and
+may be served locally or by a compatible hosted provider.
 
 ## Run the contract tests
 

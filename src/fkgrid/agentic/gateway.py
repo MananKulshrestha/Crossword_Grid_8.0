@@ -1,12 +1,13 @@
-"""Structured model gateway, Qwen3.6 adapter, prompts, and deterministic fake."""
+"""Structured model gateway, Gemma 4 adapter, prompts, and deterministic fake."""
 
 from __future__ import annotations
 
 import hashlib
 import json
+import os
 import time
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Mapping, Protocol
 from urllib.request import Request, urlopen
 
 from pydantic import TypeAdapter, ValidationError
@@ -371,11 +372,11 @@ class UrllibJsonTransport:
             return json.loads(response.read().decode("utf-8"))
 
 
-class Qwen36ModelAdapter:
-    """Qwen3.6 27B adapter through an injected OpenAI-compatible transport."""
+class Gemma4ModelAdapter:
+    """Gemma 4 12B adapter through an injected OpenAI-compatible transport."""
 
-    provider_name = "qwen-openai-compatible"
-    default_model_alias = "Qwen/Qwen3.6-27B-Instruct"
+    provider_name = "gemma-openai-compatible"
+    default_model_alias = "google/gemma-4-12B-it"
 
     def __init__(
         self,
@@ -386,6 +387,34 @@ class Qwen36ModelAdapter:
         self.transport = transport
         self.prompts = prompts or PromptRegistry()
         self.model_alias = model_alias
+
+    @classmethod
+    def from_environment(
+        cls,
+        *,
+        prompts: PromptRegistry | None = None,
+        environment: Mapping[str, str] | None = None,
+    ) -> "Gemma4ModelAdapter":
+        """Build the live adapter from environment-only provider settings.
+
+        The key is intentionally never read from a repository file, serialized,
+        or included in trace metadata. The endpoint remains explicit because
+        Gemma may be served by different OpenAI-compatible providers.
+        """
+
+        values = os.environ if environment is None else environment
+        endpoint = values.get("FKGRID_MODEL_ENDPOINT")
+        api_key = values.get("FKGRID_MODEL_API_KEY")
+        if not endpoint:
+            raise ValueError("FKGRID_MODEL_ENDPOINT_REQUIRED")
+        if not api_key:
+            raise ValueError("FKGRID_MODEL_API_KEY_REQUIRED")
+        alias = values.get("FKGRID_MODEL_ALIAS", cls.default_model_alias)
+        return cls(
+            UrllibJsonTransport(endpoint=endpoint, api_key=api_key),
+            prompts=prompts,
+            model_alias=alias,
+        )
 
     def complete(self, request: ModelRequest) -> ModelResponse:
         started = time.perf_counter()

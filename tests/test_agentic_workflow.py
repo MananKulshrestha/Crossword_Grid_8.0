@@ -43,7 +43,7 @@ from fkgrid.agentic.fakes import (
     empty_cart,
 )
 from fkgrid.agentic.gateway import FakeModelGateway
-from fkgrid.agentic.gateway import PromptRegistry, Qwen36ModelAdapter
+from fkgrid.agentic.gateway import Gemma4ModelAdapter, PromptRegistry
 from fkgrid.agentic.orchestrator import TurnOrchestrator
 from fkgrid.agentic.validation import canonical_hash, merge_query_state
 
@@ -59,7 +59,7 @@ def compatibility() -> CompatibilityTuple:
         rank_policy_version="rank-v1",
         gate_policy_version="gate-v1",
         intent_prompt_version="1",
-        intent_model_alias="Qwen/Qwen3.6-27B-Instruct",
+        intent_model_alias="google/gemma-4-12B-it",
         response_template_version="response-v1",
         commerce_policy_version="commerce-v1",
         research_policy_version="research-v1",
@@ -67,7 +67,7 @@ def compatibility() -> CompatibilityTuple:
         memory_schema_version="memory-v1",
         query_enhancement_policy_version="enhancement-v1",
         research_prompt_version="1",
-        research_model_alias="Qwen/Qwen3.6-27B-Instruct",
+        research_model_alias="google/gemma-4-12B-it",
     )
 
 
@@ -354,7 +354,7 @@ class AgenticWorkflowTests(unittest.TestCase):
         self.assertEqual(len(dependencies["gateway"].calls), 0)  # type: ignore[attr-defined]
         self.assertEqual(len(result.response.cart.items), 1)
 
-    def test_prompt_registry_has_versioned_checksums_and_qwen_adapter_has_no_tools(self) -> None:
+    def test_prompt_registry_has_versioned_checksums_and_gemma_adapter_has_no_tools(self) -> None:
         prompts = PromptRegistry()
         spec = prompts.manifest_entry(__import__("fkgrid.agentic.contracts", fromlist=["ModelCallType"]).ModelCallType.RESOLVE_INTENT_AND_DELTA)
         self.assertEqual(len(spec["file_checksum"]), 64)
@@ -376,7 +376,7 @@ class AgenticWorkflowTests(unittest.TestCase):
                 }
 
         transport = Transport()
-        adapter = Qwen36ModelAdapter(transport)
+        adapter = Gemma4ModelAdapter(transport)
         request = prompts.build_request(
             __import__("fkgrid.agentic.contracts", fromlist=["ModelCallType"]).ModelCallType.RESOLVE_INTENT_AND_DELTA,
             {"current_message_verbatim": "show cart"},
@@ -389,6 +389,20 @@ class AgenticWorkflowTests(unittest.TestCase):
         self.assertEqual(response.status.value, "OK")
         self.assertEqual(transport.payload["tools"], [])
         self.assertEqual(transport.payload["model"], compatibility().intent_model_alias)
+
+    def test_gemma_environment_factory_requires_endpoint_and_never_uses_repository_secrets(self) -> None:
+        with self.assertRaisesRegex(ValueError, "FKGRID_MODEL_ENDPOINT_REQUIRED"):
+            Gemma4ModelAdapter.from_environment(environment={"FKGRID_MODEL_API_KEY": "test-only"})
+        with self.assertRaisesRegex(ValueError, "FKGRID_MODEL_API_KEY_REQUIRED"):
+            Gemma4ModelAdapter.from_environment(environment={"FKGRID_MODEL_ENDPOINT": "https://provider.test"})
+
+        adapter = Gemma4ModelAdapter.from_environment(
+            environment={
+                "FKGRID_MODEL_ENDPOINT": "https://provider.test/v1/chat/completions",
+                "FKGRID_MODEL_API_KEY": "test-only",
+            }
+        )
+        self.assertEqual(adapter.model_alias, "google/gemma-4-12B-it")
 
     def test_ambiguous_details_clarifies_and_never_calls_catalog_details(self) -> None:
         snapshot, entries = fixture()

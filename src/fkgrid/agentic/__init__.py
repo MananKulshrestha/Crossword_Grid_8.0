@@ -8,14 +8,14 @@ from .contracts import (
     TurnResult,
 )
 from .capabilities import SHOPPER_CAPABILITIES
-from .gateway import FakeModelGateway, Qwen36ModelAdapter, StructuredModelGateway
+from .gateway import FakeModelGateway, Gemma4ModelAdapter, StructuredModelGateway
 from .orchestrator import TurnOrchestrator
 
 __all__ = [
     "Action",
     "CompatibilityTuple",
     "FakeModelGateway",
-    "Qwen36ModelAdapter",
+    "Gemma4ModelAdapter",
     "SHOPPER_CAPABILITIES",
     "StructuredModelGateway",
     "TerminalState",

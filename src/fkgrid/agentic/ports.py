@@ -215,6 +215,6 @@ class TraceSinkPort(Protocol):
 
 
 class ModelTransportPort(Protocol):
-    """Provider-neutral JSON transport used by the Qwen adapter."""
+    """Provider-neutral JSON transport used by the configured Gemma adapter."""
 
     def post_json(self, payload: dict[str, Any], timeout_ms: int) -> dict[str, Any]: ...

@@ -1,5 +1,6 @@
 .env
 .env.*
+!.env.example
 *.env
 .venv/
 __pycache__/
@@ -11,4 +12,3 @@ artifacts/
 coverage.xml
 .coverage
 *.pyc
-
