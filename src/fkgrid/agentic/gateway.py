@@ -373,6 +373,77 @@ class UrllibJsonTransport:
             return json.loads(response.read().decode("utf-8"))
 
 
+_GOOGLE_SCHEMA_KEYS = frozenset(
+    {
+        "type",
+        "format",
+        "title",
+        "description",
+        "enum",
+        "items",
+        "prefixItems",
+        "minItems",
+        "maxItems",
+        "minimum",
+        "maximum",
+        "properties",
+        "required",
+        "propertyOrdering",
+    }
+)
+
+
+def _google_schema_projection(value: Any, definitions: dict[str, Any] | None = None) -> Any:
+    """Project a Pydantic JSON schema into Google's supported subset."""
+
+    if isinstance(value, dict):
+        definitions = definitions or value.get("$defs", {})
+        if "$ref" in value:
+            reference = value["$ref"]
+            if isinstance(reference, str):
+                definition_name = reference.rsplit("/", 1)[-1]
+                definition = definitions.get(definition_name)
+                if isinstance(definition, dict):
+                    return _google_schema_projection(definition, definitions)
+            return {"type": "object"}
+        for union_key in ("oneOf", "anyOf"):
+            branches = value.get(union_key)
+            if isinstance(branches, list):
+                non_null_branches = [
+                    branch
+                    for branch in branches
+                    if not (isinstance(branch, dict) and branch.get("type") == "null")
+                ]
+                if len(non_null_branches) == 1:
+                    return _google_schema_projection(non_null_branches[0], definitions)
+                return {"type": "object"}
+        projected: dict[str, Any] = {}
+        for key, item in value.items():
+            if key == "properties" and isinstance(item, dict):
+                projected[key] = {
+                    property_name: _google_schema_projection(property_schema, definitions)
+                    for property_name, property_schema in item.items()
+                }
+            elif key in _GOOGLE_SCHEMA_KEYS:
+                projected_item = _google_schema_projection(item, definitions)
+                if projected_item != {}:
+                    projected[key] = projected_item
+        if "const" in value and isinstance(value["const"], (float, int, str)):
+            projected["enum"] = [value["const"]]
+        if isinstance(projected.get("required"), list) and isinstance(
+            projected.get("properties"), dict
+        ):
+            projected["required"] = [
+                name
+                for name in projected["required"]
+                if name in projected["properties"]
+            ]
+        return projected
+    if isinstance(value, list):
+        return [_google_schema_projection(item) for item in value]
+    return value
+
+
 class GeminiGenerateContentTransport:
     """Translate the provider-neutral request into Google's REST contract."""
 
@@ -401,11 +472,21 @@ class GeminiGenerateContentTransport:
             "temperature": payload.get("temperature", 0.0),
             "maxOutputTokens": payload.get("max_tokens", 800),
             "responseMimeType": "application/json",
+            # Gemma 4 supports disabling its internal thinking process with
+            # the minimal level. Shopper intent calls have a strict latency
+            # budget and never request chain-of-thought output.
+            "thinkingConfig": {"thinkingLevel": "minimal"},
         }
-        # The application remains the authorization boundary. Google exposes a
-        # deliberately smaller JSON-schema subset than the full discriminated
-        # Pydantic contracts, so native JSON mode is used here and the complete
-        # contract is revalidated after the response returns.
+        response_format = payload.get("response_format")
+        if isinstance(response_format, dict):
+            json_schema = response_format.get("json_schema")
+            if isinstance(json_schema, dict) and isinstance(json_schema.get("schema"), dict):
+                # The application remains the authorization boundary. The
+                # provider schema only constrains shape; the complete contract
+                # is revalidated after the response returns.
+                generation_config["responseJsonSchema"] = _google_schema_projection(
+                    json_schema["schema"]
+                )
         google_payload: dict[str, Any] = {
             "contents": contents,
             "generationConfig": generation_config,

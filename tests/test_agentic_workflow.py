@@ -442,7 +442,24 @@ class AgenticWorkflowTests(unittest.TestCase):
                     ],
                     "temperature": 0.0,
                     "max_tokens": 50,
-                    "response_format": {"type": "json_schema", "json_schema": {"schema": {}}},
+                    "response_format": {
+                        "type": "json_schema",
+                        "json_schema": {
+                            "schema": {
+                                "$defs": {"Action": {"type": "string", "enum": ["SEARCH"]}},
+                                "type": "object",
+                                "properties": {
+                                    "ok": {"type": "boolean", "minLength": 1},
+                                    "primary_action": {"$ref": "#/$defs/Action"},
+                                    "schema_version": {
+                                        "type": "string",
+                                        "const": "IntentDeltaV1",
+                                    },
+                                },
+                                "required": ["ok", "primary_action", "schema_version"],
+                            }
+                        },
+                    },
                 },
                 1000,
             )
@@ -450,6 +467,20 @@ class AgenticWorkflowTests(unittest.TestCase):
         body = json.loads(request.data)
         self.assertEqual(request.get_header("X-goog-api-key"), "test-only-key")
         self.assertEqual(body["generationConfig"]["responseMimeType"], "application/json")
+        self.assertEqual(body["generationConfig"]["thinkingConfig"], {"thinkingLevel": "minimal"})
+        self.assertEqual(body["generationConfig"]["responseJsonSchema"]["type"], "object")
+        self.assertNotIn(
+            "minLength", body["generationConfig"]["responseJsonSchema"]["properties"]["ok"]
+        )
+        self.assertEqual(
+            body["generationConfig"]["responseJsonSchema"]["properties"]["primary_action"]["enum"],
+            ["SEARCH"],
+        )
+        self.assertEqual(
+            body["generationConfig"]["responseJsonSchema"]["properties"]["schema_version"]["enum"],
+            ["IntentDeltaV1"],
+        )
+        self.assertNotIn("$defs", body["generationConfig"]["responseJsonSchema"])
         self.assertEqual(output["choices"][0]["message"]["content"], '{"ok":true}')
 
     def test_ambiguous_details_clarifies_and_never_calls_catalog_details(self) -> None:

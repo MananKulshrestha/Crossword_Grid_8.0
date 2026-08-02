@@ -45,6 +45,13 @@ the adapter sends the key via `x-goog-api-key`. No key is stored in this
 repository. The endpoint is provider-specific because Gemma is open-weight and
 may be served locally or by a compatible hosted provider.
 
+For the native Gemini path, the adapter disables Gemma thinking for the
+latency-sensitive shopper call, sends a provider-safe `responseJsonSchema`
+projection, and revalidates the complete Pydantic contract after the response.
+The hosted 26B smoke path can exceed the plan’s 1.8-second intent budget, in
+which case the orchestrator returns its safe deterministic fallback; do not
+silently raise that production limit.
+
 ## Run the contract tests
 
 From this worktree:
