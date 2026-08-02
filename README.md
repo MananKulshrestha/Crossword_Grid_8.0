@@ -39,7 +39,9 @@ escaped markdown for rendering.
 Gemma is configured by alias only. The default alias is
 `google/gemma-4-12B-it`; supply `FKGRID_MODEL_ENDPOINT` and
 `FKGRID_MODEL_API_KEY` through the environment, or inject an
-OpenAI-compatible transport into `Gemma4ModelAdapter`. No key is stored in this
+OpenAI-compatible transport into `Gemma4ModelAdapter`. Set
+`FKGRID_MODEL_PROTOCOL=gemini` for Google’s native `generateContent` endpoint;
+the adapter sends the key via `x-goog-api-key`. No key is stored in this
 repository. The endpoint is provider-specific because Gemma is open-weight and
 may be served locally or by a compatible hosted provider.
 

@@ -8,6 +8,7 @@ import os
 import time
 from pathlib import Path
 from typing import Any, Mapping, Protocol
+from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 from pydantic import TypeAdapter, ValidationError
@@ -372,6 +373,66 @@ class UrllibJsonTransport:
             return json.loads(response.read().decode("utf-8"))
 
 
+class GeminiGenerateContentTransport:
+    """Translate the provider-neutral request into Google's REST contract."""
+
+    def __init__(self, endpoint: str, api_key: str) -> None:
+        self.endpoint = endpoint
+        self.api_key = api_key
+
+    def post_json(self, payload: dict[str, Any], timeout_ms: int) -> dict[str, Any]:
+        model_alias = str(payload.get("model", "")).split("/")[-1].lower()
+        endpoint = self.endpoint.replace("{model}", quote(model_alias, safe="-_."))
+        messages = payload.get("messages", [])
+        system_parts = [
+            {"text": message["content"]}
+            for message in messages
+            if message.get("role") == "system" and isinstance(message.get("content"), str)
+        ]
+        contents = [
+            {
+                "role": "model" if message.get("role") == "assistant" else "user",
+                "parts": [{"text": message["content"]}],
+            }
+            for message in messages
+            if message.get("role") != "system" and isinstance(message.get("content"), str)
+        ]
+        generation_config: dict[str, Any] = {
+            "temperature": payload.get("temperature", 0.0),
+            "maxOutputTokens": payload.get("max_tokens", 800),
+            "responseMimeType": "application/json",
+        }
+        # The application remains the authorization boundary. Google exposes a
+        # deliberately smaller JSON-schema subset than the full discriminated
+        # Pydantic contracts, so native JSON mode is used here and the complete
+        # contract is revalidated after the response returns.
+        google_payload: dict[str, Any] = {
+            "contents": contents,
+            "generationConfig": generation_config,
+        }
+        if system_parts:
+            google_payload["systemInstruction"] = {"parts": system_parts}
+        body = json.dumps(google_payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        request = Request(
+            endpoint,
+            data=body,
+            headers={
+                "Content-Type": "application/json",
+                "x-goog-api-key": self.api_key,
+            },
+            method="POST",
+        )
+        with urlopen(request, timeout=max(timeout_ms / 1000, 0.05)) as response:  # noqa: S310 - endpoint is injected
+            provider_response = json.loads(response.read().decode("utf-8"))
+        parts = provider_response["candidates"][0]["content"]["parts"]
+        content = "".join(part["text"] for part in parts if isinstance(part.get("text"), str))
+        if not content:
+            raise ValueError("provider returned no text content")
+        # Return the gateway's provider-neutral shape; the adapter performs the
+        # same JSON and semantic validation for both transports.
+        return {"choices": [{"message": {"content": content}}]}
+
+
 class Gemma4ModelAdapter:
     """Gemma 4 12B adapter through an injected OpenAI-compatible transport."""
 
@@ -383,10 +444,12 @@ class Gemma4ModelAdapter:
         transport: ModelTransport,
         prompts: PromptRegistry | None = None,
         model_alias: str = default_model_alias,
+        provider_name: str = "gemma-openai-compatible",
     ) -> None:
         self.transport = transport
         self.prompts = prompts or PromptRegistry()
         self.model_alias = model_alias
+        self.provider_name = provider_name
 
     @classmethod
     def from_environment(
@@ -403,17 +466,27 @@ class Gemma4ModelAdapter:
         """
 
         values = os.environ if environment is None else environment
+        protocol = values.get("FKGRID_MODEL_PROTOCOL", "openai").casefold()
         endpoint = values.get("FKGRID_MODEL_ENDPOINT")
-        api_key = values.get("FKGRID_MODEL_API_KEY")
+        api_key = values.get("FKGRID_MODEL_API_KEY") or values.get("GEMINI_API_KEY")
+        if protocol == "gemini" and not endpoint:
+            endpoint = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
         if not endpoint:
             raise ValueError("FKGRID_MODEL_ENDPOINT_REQUIRED")
         if not api_key:
             raise ValueError("FKGRID_MODEL_API_KEY_REQUIRED")
         alias = values.get("FKGRID_MODEL_ALIAS", cls.default_model_alias)
+        if protocol == "gemini":
+            transport: ModelTransport = GeminiGenerateContentTransport(endpoint, api_key)
+            provider_name = "google-gemini-api"
+        else:
+            transport = UrllibJsonTransport(endpoint, api_key)
+            provider_name = "gemma-openai-compatible"
         return cls(
-            UrllibJsonTransport(endpoint=endpoint, api_key=api_key),
+            transport,
             prompts=prompts,
             model_alias=alias,
+            provider_name=provider_name,
         )
 
     def complete(self, request: ModelRequest) -> ModelResponse:

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import unittest
 from datetime import datetime, timezone
+from unittest.mock import patch
 
 from fkgrid.agentic.contracts import (
     Action,
@@ -43,7 +45,7 @@ from fkgrid.agentic.fakes import (
     empty_cart,
 )
 from fkgrid.agentic.gateway import FakeModelGateway
-from fkgrid.agentic.gateway import Gemma4ModelAdapter, PromptRegistry
+from fkgrid.agentic.gateway import GeminiGenerateContentTransport, Gemma4ModelAdapter, PromptRegistry
 from fkgrid.agentic.orchestrator import TurnOrchestrator
 from fkgrid.agentic.validation import canonical_hash, merge_query_state
 
@@ -403,6 +405,52 @@ class AgenticWorkflowTests(unittest.TestCase):
             }
         )
         self.assertEqual(adapter.model_alias, "google/gemma-4-12B-it")
+
+        google_adapter = Gemma4ModelAdapter.from_environment(
+            environment={
+                "FKGRID_MODEL_PROTOCOL": "gemini",
+                "FKGRID_MODEL_API_KEY": "test-only",
+            }
+        )
+        self.assertIsInstance(google_adapter.transport, GeminiGenerateContentTransport)
+        self.assertEqual(google_adapter.provider_name, "google-gemini-api")
+
+    def test_google_transport_uses_native_header_and_json_mode_without_network(self) -> None:
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self):
+                return json.dumps(
+                    {"candidates": [{"content": {"parts": [{"text": '{"ok":true}'}]}}]}
+                ).encode()
+
+        transport = GeminiGenerateContentTransport(
+            "https://provider.test/v1beta/models/{model}:generateContent",
+            "test-only-key",
+        )
+        with patch("fkgrid.agentic.gateway.urlopen", return_value=Response()) as opener:
+            output = transport.post_json(
+                {
+                    "model": "google/gemma-4-12B-it",
+                    "messages": [
+                        {"role": "system", "content": "system"},
+                        {"role": "user", "content": "user"},
+                    ],
+                    "temperature": 0.0,
+                    "max_tokens": 50,
+                    "response_format": {"type": "json_schema", "json_schema": {"schema": {}}},
+                },
+                1000,
+            )
+        request = opener.call_args.args[0]
+        body = json.loads(request.data)
+        self.assertEqual(request.get_header("X-goog-api-key"), "test-only-key")
+        self.assertEqual(body["generationConfig"]["responseMimeType"], "application/json")
+        self.assertEqual(output["choices"][0]["message"]["content"], '{"ok":true}')
 
     def test_ambiguous_details_clarifies_and_never_calls_catalog_details(self) -> None:
         snapshot, entries = fixture()
