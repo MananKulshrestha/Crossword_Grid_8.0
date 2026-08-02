@@ -1,0 +1,28 @@
+{
+  "policy_version": "quality-policy-v2-prototype",
+  "objective_window_days": 7,
+  "fulfillment_window_days": 7,
+  "subjective_window_days": 14,
+  "objective_min_independent_groups": 2,
+  "fulfillment_min_independent_groups": 2,
+  "subjective_min_independent_groups": 2,
+  "subjective_min_source_classes": 1,
+  "poor_review_max_rating": 2,
+  "poor_review_requires_objective_flag": false,
+  "correlated_group_cap_fraction": 0.4,
+  "minimum_classifier_confidence": 0.7,
+  "max_structured_evidence": 20,
+  "max_prose_evidence": 8,
+  "urgent_signal_types": ["SAFETY_URGENT"],
+  "immediate_listing_mismatch": true,
+  "routes": [
+    {"issue_class": "PRODUCT_DEFECT", "queue_name": "product-quality-operations", "priority": "HIGH", "sla_minutes": 60},
+    {"issue_class": "LISTING_CONTENT_MISMATCH", "queue_name": "catalog-content-operations", "priority": "HIGH", "sla_minutes": 60},
+    {"issue_class": "COUNTERFEIT_OR_AUTHENTICITY", "queue_name": "safety-specialist-review", "priority": "URGENT", "sla_minutes": 1},
+    {"issue_class": "SAFETY", "queue_name": "safety-specialist-review", "priority": "URGENT", "sla_minutes": 1},
+    {"issue_class": "FULFILLMENT_OR_PACKAGING", "queue_name": "fulfillment-operations", "priority": "NORMAL", "sla_minutes": 60},
+    {"issue_class": "SELLER_OR_SERVICE", "queue_name": "seller-service-operations", "priority": "NORMAL", "sla_minutes": 1440},
+    {"issue_class": "SUBJECTIVE_PREFERENCE", "queue_name": "quality-feedback-aggregate", "priority": "LOW", "sla_minutes": 1440},
+    {"issue_class": "INSUFFICIENT_EVIDENCE", "queue_name": "general-quality-triage", "priority": "NORMAL", "sla_minutes": 60}
+  ]
+}

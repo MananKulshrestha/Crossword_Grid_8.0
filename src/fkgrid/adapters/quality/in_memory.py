@@ -24,6 +24,7 @@ from fkgrid.domain.quality import (
     QualityRoute,
     QualitySignal,
     QueueReceipt,
+    RiskRating,
     canonical_sha256,
 )
 
@@ -170,13 +171,14 @@ class DeterministicQualityClassifier:
 
         return QualityAssessmentProposal(
             issue_class=IssueClass(self.issue_class),
+            risk_rating=RiskRating.HIGH,
             confidence=self.confidence,
             supporting_evidence_ids=evidence_ids,
             contradicting_evidence_ids=[],
             missing_information=packet.missing_information,
             bounded_summary="Structured evidence supports review; human confirmation is required.",
             model_alias="fake-quality-classifier",
-            prompt_version="quality_v1",
+            prompt_version="quality_v2",
         )
 
 

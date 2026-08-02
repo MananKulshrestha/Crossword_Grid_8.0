@@ -98,6 +98,15 @@ class RoutePriority(StrEnum):
     LOW = "LOW"
 
 
+class RiskRating(StrEnum):
+    """Stable four-level review risk, distinct from queue priority/SLA."""
+
+    CRITICAL = "CRITICAL"
+    HIGH = "HIGH"
+    MEDIUM = "MEDIUM"
+    LOW = "LOW"
+
+
 class EvidenceKind(StrEnum):
     STRUCTURED_EVENT = "STRUCTURED_EVENT"
     PROSE_EXCERPT = "PROSE_EXCERPT"
@@ -396,6 +405,7 @@ class EvidencePacket(StrictModel):
 
 class QualityAssessmentProposal(StrictModel):
     issue_class: IssueClass
+    risk_rating: RiskRating
     confidence: float = Field(ge=0, le=1)
     supporting_evidence_ids: list[str] = Field(default_factory=list, max_length=20)
     contradicting_evidence_ids: list[str] = Field(default_factory=list, max_length=20)
@@ -407,6 +417,7 @@ class QualityAssessmentProposal(StrictModel):
 
 class QualityAssessment(StrictModel):
     issue_class: IssueClass
+    risk_rating: RiskRating
     confidence: float = Field(ge=0, le=1)
     supporting_evidence_ids: list[str] = Field(default_factory=list, max_length=20)
     contradicting_evidence_ids: list[str] = Field(default_factory=list, max_length=20)

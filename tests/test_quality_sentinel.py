@@ -24,6 +24,7 @@ from fkgrid.domain.quality import (
     IssueClass,
     QualityEntityBinding,
     QualitySignalInput,
+    RiskRating,
     Severity,
     SignalType,
     SourceReference,
@@ -119,27 +120,27 @@ def workflow(
     return app, persistence, queue
 
 
-def test_three_independent_objective_reports_open_and_route_one_case() -> None:
+def test_two_independent_objective_reports_open_and_route_one_case() -> None:
     app, persistence, queue = workflow()
 
     results = [
-        app.run(make_input(index, reporter_group_id=f"reporter_{index}")) for index in range(1, 4)
+        app.run(make_input(index, reporter_group_id=f"reporter_{index}")) for index in range(1, 3)
     ]
 
     assert results[0].outcome == "NOT_QUALIFIED"
-    assert results[1].outcome == "NOT_QUALIFIED"
-    assert results[2].outcome == "QUALIFIED_CASE"
-    assert results[2].qualification is not None
-    assert results[2].qualification.independent_group_count == 3
-    assert results[2].case is not None
-    assert results[2].case.status is CaseStatus.ROUTED
-    assert results[2].case.assessment is not None
-    assert results[2].case.route is not None
-    assert results[2].case.route.queue_name == "product-quality-operations"
+    assert results[1].outcome == "QUALIFIED_CASE"
+    assert results[1].qualification is not None
+    assert results[1].qualification.independent_group_count == 2
+    assert results[1].case is not None
+    assert results[1].case.status is CaseStatus.ROUTED
+    assert results[1].case.assessment is not None
+    assert results[1].case.assessment.risk_rating.value == "HIGH"
+    assert results[1].case.route is not None
+    assert results[1].case.route.queue_name == "product-quality-operations"
     assert len(queue.routes) == 1
-    assert len(persistence.case_events(results[2].case.case_id)) >= 3
+    assert len(persistence.case_events(results[1].case.case_id)) >= 3
     assert all(
-        "redacted_text" not in run.sanitized_input_summary for run in results[2].trace.tool_runs
+        "redacted_text" not in run.sanitized_input_summary for run in results[1].trace.tool_runs
     )
 
 
@@ -160,6 +161,24 @@ def test_urgent_safety_bypasses_recurrence_and_uses_specialist_route() -> None:
     assert result.case.route.queue_name == "safety-specialist-review"
     assert result.case.route.priority.value == "URGENT"
     assert queue.routes[0].sla_minutes == 1
+
+
+def test_final_risk_is_policy_stable_when_model_proposes_a_laxer_rating() -> None:
+    class LaxRiskClassifier(DeterministicQualityClassifier):
+        def classify(self, packet):
+            return super().classify(packet).model_copy(update={"risk_rating": RiskRating.LOW})
+
+    app, _, _ = workflow(classifier=LaxRiskClassifier())
+    result = app.run(
+        make_input(
+            1,
+            signal_type=SignalType.SAFETY_URGENT,
+            severity=Severity.URGENT,
+        )
+    )
+
+    assert result.case is not None and result.case.assessment is not None
+    assert result.case.assessment.risk_rating is RiskRating.CRITICAL
 
 
 def test_fulfillment_reason_owns_the_fulfillment_route_even_if_classifier_differs() -> None:
@@ -317,6 +336,33 @@ def test_ineligible_poor_review_does_not_qualify_from_low_rating_alone() -> None
     assert result.qualification.trigger == "INELIGIBLE_POOR_REVIEW"
 
 
+def test_two_low_star_reviews_enter_pipeline_and_receive_low_subjective_risk() -> None:
+    app, _, _ = workflow()
+    results = []
+    for index in range(1, 3):
+        review = QualitySignalInput.model_validate(
+            {
+                **make_input(
+                    index,
+                    signal_type=SignalType.SUBJECTIVE_QUALITY,
+                    source_class="REVIEW",
+                    text="The colour is not what I prefer, but there is no objective mismatch.",
+                ).model_dump(),
+                "signal_id": f"review_signal_{index}",
+                "idempotency_key": f"review_idem_{index}",
+                "source_type": SourceType.POOR_REVIEW,
+                "rating": 1,
+                "objective_issue_flag": False,
+            }
+        )
+        results.append(app.run(review))
+
+    assert results[0].outcome == "NOT_QUALIFIED"
+    assert results[1].outcome == "QUALIFIED_CASE"
+    assert results[1].case is not None and results[1].case.assessment is not None
+    assert results[1].case.assessment.risk_rating.value == "LOW"
+
+
 def test_correlated_reporter_groups_are_capped_before_threshold() -> None:
     app, _, _ = workflow()
     results = [
@@ -360,8 +406,9 @@ def test_queue_failure_becomes_safe_triage_after_evidence_is_saved() -> None:
 
 
 def test_versioned_json_policy_adapter_validates_strict_enum_values() -> None:
-    policy = JsonQualityPolicyProvider("resources/quality_policy_v1.json").active_policy()
+    policy = JsonQualityPolicyProvider("resources/quality_policy_v2.json").active_policy()
 
-    assert policy.policy_version == "quality-policy-v1-prototype"
-    assert policy.objective_min_independent_groups == 3
+    assert policy.policy_version == "quality-policy-v2-prototype"
+    assert policy.objective_min_independent_groups == 2
+    assert policy.poor_review_requires_objective_flag is False
     assert len(policy.routes) == 8

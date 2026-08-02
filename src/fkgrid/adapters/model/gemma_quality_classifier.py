@@ -26,11 +26,12 @@ from fkgrid.domain.quality import (
     EvidencePacket,
     IssueClass,
     QualityAssessmentProposal,
+    RiskRating,
 )
 from fkgrid.ports.quality import QualityClassifier
 
 DEFAULT_MODEL_ALIAS = "google/gemma-4-26B-A4B-it"
-DEFAULT_PROMPT_VERSION = "quality_v1"
+DEFAULT_PROMPT_VERSION = "quality_v2"
 DEFAULT_DEEPINFRA_ENDPOINT = "https://api.deepinfra.com/v1/openai/chat/completions"
 DEFAULT_GEMINI_ENDPOINT = (
     "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
@@ -170,7 +171,7 @@ class QualityPrompt:
         self.path = (
             Path(path)
             if path is not None
-            else Path(__file__).with_name("prompts") / ("quality_classification_v1.md")
+            else Path(__file__).with_name("prompts") / ("quality_classification_v2.md")
         )
 
     def text(self) -> str:
@@ -190,6 +191,7 @@ def _output_model() -> type[Any]:
         model_config = ConfigDict(extra="forbid", strict=True)
 
         issue_class: str
+        risk_rating: str
         confidence: float = Field(ge=0, le=1)
         supporting_evidence_ids: list[str] = Field(default_factory=list, max_length=20)
         contradicting_evidence_ids: list[str] = Field(default_factory=list, max_length=20)
@@ -293,6 +295,10 @@ def _response_schema(packet: EvidencePacket) -> dict[str, Any]:
                 "type": "string",
                 "enum": [item.value for item in packet.allowed_issue_classes],
             },
+            "risk_rating": {
+                "type": "string",
+                "enum": [item.value for item in RiskRating],
+            },
             "confidence": {"type": "number", "minimum": 0, "maximum": 1},
             "supporting_evidence_ids": {
                 "type": "array",
@@ -313,6 +319,7 @@ def _response_schema(packet: EvidencePacket) -> dict[str, Any]:
         },
         "required": [
             "issue_class",
+            "risk_rating",
             "confidence",
             "supporting_evidence_ids",
             "contradicting_evidence_ids",
@@ -417,6 +424,10 @@ class Gemma4QualityClassifier(QualityClassifier):
             raise GemmaQualityModelError("GEMMA_ISSUE_CLASS_INVALID") from exc
         if issue_class not in packet.allowed_issue_classes:
             raise GemmaQualityModelError("GEMMA_ISSUE_CLASS_NOT_ALLOWED")
+        try:
+            risk_rating = RiskRating(output.risk_rating)
+        except ValueError as exc:
+            raise GemmaQualityModelError("GEMMA_RISK_RATING_INVALID") from exc
         available_ids = {item.evidence_id for item in packet.items} | {
             fact.evidence_id for snapshot in packet.snapshots for fact in snapshot.facts
         }
@@ -430,6 +441,7 @@ class Gemma4QualityClassifier(QualityClassifier):
         missing = list(dict.fromkeys([*packet.missing_information, *output.missing_information]))
         return QualityAssessmentProposal(
             issue_class=issue_class,
+            risk_rating=risk_rating,
             confidence=output.confidence,
             supporting_evidence_ids=output.supporting_evidence_ids,
             contradicting_evidence_ids=output.contradicting_evidence_ids,

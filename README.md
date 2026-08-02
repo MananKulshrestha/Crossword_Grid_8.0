@@ -31,7 +31,21 @@ or enforcement port.
   contract demos.
 - `migrations/quality_sentinel_v1.sql` as a database-owner handoff. It is not
   executed here and is not a substitute for the repository's Alembic migration.
-- `resources/quality_policy_v1.json` with labelled prototype thresholds/routes.
+- `resources/quality_policy_v2.json` with labelled low-threshold prototype policy/routes.
+- `src/fkgrid/ui/app.py`, a simple Streamlit tester with separate report and review forms,
+  four-level risk display, case inspection, and human decision controls.
+
+The local prototype opens a case after two independent signals in the same
+verified product/reason window. Reports and low-star reviews are both accepted;
+subjective reviews can qualify as low-risk aggregate evidence after two
+independent submissions. This is intentionally easy to exercise and is not a
+production moderation threshold.
+
+Risk is displayed as `CRITICAL`, `HIGH`, `MEDIUM`, or `LOW`. Gemma proposes an
+issue class and risk under a versioned ground-truth prompt, then deterministic
+policy derives the final risk from structured signal type and severity. That
+policy-owned step makes identical evidence replay to the same risk even if a
+provider varies its proposed label.
 
 ## Integration work left for other owners
 
@@ -48,8 +62,8 @@ transport is retained behind `FKGRID_GEMMA_PROVIDER=gemini`. Operations must
 approve/activate policy and queue configuration. API/UI owners should expose
 typed inputs and redacted traces only.
 
-No database, provider, network queue, API server, or UI is started by this
-package. Tests are offline and deterministic.
+No database or production queue is started by this package. The local API and
+Streamlit tester use in-memory adapters; live Gemma calls are opt-in.
 
 ## FastAPI and Swagger UI
 
@@ -74,11 +88,24 @@ Then open http://127.0.0.1:8000/docs. The default composition uses
 deterministic in-memory adapters. Database owners can pass their ports to
 `create_app(QualityApiState(...))`; no migration or database startup occurs.
 
+Run the simple Quality Sentinel tester against the API with:
+
+```powershell
+uv run streamlit run src/fkgrid/ui/app.py --server.port 8501
+```
+
+Open http://127.0.0.1:8501. The sidebar shows whether the API is using the
+deterministic fake or `google/gemma-4-26B-A4B-it`. Use the Report and Review
+tabs to submit two distinct signals, then use Case review for the assessment,
+risk, evidence, route, human decision, and close/reopen flow.
+
 ## Local verification
 
 ```powershell
 uv run pytest
 uv run ruff check .
+uv run ruff format --check .
+uv run mypy src
 ```
 
 The project uses the bundled fake/in-memory adapters for deterministic tests. To

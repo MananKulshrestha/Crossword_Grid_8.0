@@ -96,6 +96,7 @@ CREATE TABLE quality_case_evidence (
 CREATE TABLE quality_assessments (
     case_id VARCHAR(128) PRIMARY KEY REFERENCES quality_cases(case_id),
     issue_class VARCHAR(40) NOT NULL,
+    risk_rating VARCHAR(16) NOT NULL,
     confidence NUMERIC(5,4) NOT NULL,
     supporting_evidence_ids_json TEXT NOT NULL,
     contradicting_evidence_ids_json TEXT NOT NULL,

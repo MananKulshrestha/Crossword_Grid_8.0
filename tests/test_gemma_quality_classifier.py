@@ -81,6 +81,7 @@ class FakeTransport:
 def valid_response() -> dict[str, Any]:
     return {
         "issue_class": "LISTING_CONTENT_MISMATCH",
+        "risk_rating": "HIGH",
         "confidence": 0.91,
         "supporting_evidence_ids": ["evidence_1"],
         "contradicting_evidence_ids": [],
@@ -97,13 +98,19 @@ def test_gemma_classifier_returns_strict_proposal_and_redacted_projection() -> N
 
     assert proposal.issue_class is IssueClass.LISTING_CONTENT_MISMATCH
     assert proposal.model_alias == DEFAULT_MODEL_ALIAS
-    assert proposal.prompt_version == "quality_v1"
+    assert proposal.prompt_version == "quality_v2"
     assert proposal.supporting_evidence_ids == ["evidence_1"]
     sent_packet = json.loads(transport.calls[0]["user_prompt"])
     assert sent_packet["items"][0]["evidence_id"] == "evidence_1"
     assert "product_secret" not in transport.calls[0]["user_prompt"]
     assert "signal_private" not in transport.calls[0]["user_prompt"]
     assert transport.calls[0]["response_schema"]["additionalProperties"] is False
+    assert transport.calls[0]["response_schema"]["properties"]["risk_rating"]["enum"] == [
+        "CRITICAL",
+        "HIGH",
+        "MEDIUM",
+        "LOW",
+    ]
     assert transport.calls[0]["timeout_ms"] == 1800
 
 

@@ -32,6 +32,7 @@ from fkgrid.domain.quality import (
     QualityToolName,
     QualityTrace,
     QualityWorkflowResult,
+    RiskRating,
     SignalStatus,
     ToolRun,
     ToolStatus,
@@ -78,7 +79,7 @@ class QualitySentinelWorkflow:
     """Run one signal through bounded deterministic tools and one classifier call."""
 
     tool_version = "quality-tools-v1"
-    classifier_prompt_version = "quality_v1"
+    classifier_prompt_version = "quality_v2"
 
     def __init__(
         self,
@@ -287,6 +288,7 @@ class QualitySentinelWorkflow:
         except Exception:
             proposal = QualityAssessmentProposal(
                 issue_class=IssueClass.INSUFFICIENT_EVIDENCE,
+                risk_rating=RiskRating.LOW,
                 confidence=0.0,
                 supporting_evidence_ids=[],
                 contradicting_evidence_ids=[],

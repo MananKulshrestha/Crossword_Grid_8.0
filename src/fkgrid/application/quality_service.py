@@ -26,6 +26,7 @@ from fkgrid.domain.quality import (
     QualityRoute,
     QualitySignal,
     QualitySignalInput,
+    RiskRating,
     RoutePriority,
     RouteRule,
     Severity,
@@ -43,7 +44,12 @@ def default_quality_policy() -> QualityPolicy:
     """Load the reviewed prototype defaults without pretending they are production policy."""
 
     return QualityPolicy(
-        policy_version="quality-policy-v1-prototype",
+        policy_version="quality-policy-v2-prototype",
+        objective_min_independent_groups=2,
+        fulfillment_min_independent_groups=2,
+        subjective_min_independent_groups=2,
+        subjective_min_source_classes=1,
+        poor_review_requires_objective_flag=False,
         routes=[
             RouteRule(
                 issue_class=IssueClass.PRODUCT_DEFECT,
@@ -233,7 +239,7 @@ def qualify_signal_group(
             reason="An urgent structured reason code bypasses recurrence thresholds.",
         )
 
-    if group_key.signal_type in {SignalType.SUBJECTIVE_QUALITY, SignalType.ABUSE_SPAM}:
+    if group_key.signal_type is SignalType.ABUSE_SPAM:
         return QualificationResult(
             status=QualificationStatus.NOT_QUALIFIED,
             group_key=group_key,
@@ -245,7 +251,7 @@ def qualify_signal_group(
             correlated_group_count=max(0, correlated_count - correlated_credit),
             evidence_complete=evidence_complete,
             urgent=False,
-            reason="Subjective or abuse feedback remains aggregate evidence in Tier 1.",
+            reason="Abuse/spam feedback remains aggregate evidence in Tier 1.",
         )
 
     if not evidence_complete:
@@ -267,6 +273,13 @@ def qualify_signal_group(
             if direct_system_count
             else "FULFILLMENT_RECURRENCE_THRESHOLD"
         )
+    elif group_key.signal_type is SignalType.SUBJECTIVE_QUALITY:
+        qualified = (
+            credited_independent_count >= policy.subjective_min_independent_groups
+            and source_class_count >= policy.subjective_min_source_classes
+        )
+        status = QualificationStatus.QUALIFIED if qualified else QualificationStatus.NOT_QUALIFIED
+        trigger = "SUBJECTIVE_REVIEW_THRESHOLD"
     else:
         qualified = False
         status = QualificationStatus.NOT_QUALIFIED
@@ -436,6 +449,41 @@ def assemble_evidence_packet(
     )
 
 
+def deterministic_risk_rating(packet: EvidencePacket, issue_class: IssueClass) -> RiskRating:
+    """Derive the final risk from structured facts, never from model prose.
+
+    The model still proposes a risk value for a constrained, grounded response,
+    but this policy-owned result makes replayed identical evidence stable even
+    when a provider varies its proposed label.
+    """
+
+    severities = {item.severity for item in packet.items}
+    if (
+        packet.group_key.signal_type is SignalType.SAFETY_URGENT
+        or Severity.URGENT in severities
+        or issue_class is IssueClass.SAFETY
+    ):
+        return RiskRating.CRITICAL
+    if packet.group_key.signal_type is SignalType.SUBJECTIVE_QUALITY:
+        return RiskRating.LOW
+    if packet.group_key.signal_type is SignalType.FULFILLMENT_MISMATCH:
+        return RiskRating.MEDIUM
+    if (
+        packet.group_key.signal_type is SignalType.OBJECTIVE_INCORRECT
+        or Severity.HIGH in severities
+        or issue_class
+        in {
+            IssueClass.PRODUCT_DEFECT,
+            IssueClass.LISTING_CONTENT_MISMATCH,
+            IssueClass.COUNTERFEIT_OR_AUTHENTICITY,
+        }
+    ):
+        return RiskRating.HIGH
+    if issue_class in {IssueClass.FULFILLMENT_OR_PACKAGING, IssueClass.SELLER_OR_SERVICE}:
+        return RiskRating.MEDIUM
+    return RiskRating.LOW
+
+
 def validate_assessment(
     proposal: QualityAssessmentProposal,
     packet: EvidencePacket,
@@ -466,8 +514,10 @@ def validate_assessment(
         reasons.append("MISSING_REQUIRED_CONTEXT")
 
     if reasons:
+        fallback_issue_class = IssueClass.INSUFFICIENT_EVIDENCE
         return QualityAssessment(
-            issue_class=IssueClass.INSUFFICIENT_EVIDENCE,
+            issue_class=fallback_issue_class,
+            risk_rating=deterministic_risk_rating(packet, fallback_issue_class),
             confidence=0.0,
             supporting_evidence_ids=[],
             contradicting_evidence_ids=[
@@ -487,6 +537,7 @@ def validate_assessment(
         )
     return QualityAssessment(
         issue_class=proposal.issue_class,
+        risk_rating=deterministic_risk_rating(packet, proposal.issue_class),
         confidence=proposal.confidence,
         supporting_evidence_ids=proposal.supporting_evidence_ids,
         contradicting_evidence_ids=proposal.contradicting_evidence_ids,

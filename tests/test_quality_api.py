@@ -56,13 +56,13 @@ def test_api_runs_existing_workflow_and_supports_reviewer_lifecycle() -> None:
     client = TestClient(create_app(build_demo_state()))
 
     results = [
-        client.post("/api/v1/quality/signals", json=signal_payload(index)) for index in range(1, 4)
+        client.post("/api/v1/quality/signals", json=signal_payload(index)) for index in range(1, 3)
     ]
 
-    assert [response.status_code for response in results] == [200, 200, 200]
+    assert [response.status_code for response in results] == [200, 200]
     assert results[0].json()["outcome"] == "NOT_QUALIFIED"
-    assert results[2].json()["outcome"] == "QUALIFIED_CASE"
-    case_id = results[2].json()["case"]["case_id"]
+    assert results[1].json()["outcome"] == "QUALIFIED_CASE"
+    case_id = results[1].json()["case"]["case_id"]
 
     case = client.get(f"/api/v1/quality/cases/{case_id}")
     events = client.get(f"/api/v1/quality/cases/{case_id}/events")
