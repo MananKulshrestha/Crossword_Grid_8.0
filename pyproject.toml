@@ -1,0 +1,36 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "fkgrid-quality-sentinel"
+version = "0.1.0"
+description = "Tier 1 contract-first Catalog Quality Sentinel workflow"
+requires-python = ">=3.12"
+dependencies = [
+  "pydantic>=2.7,<3",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8,<9",
+  "ruff>=0.6,<1",
+  "mypy>=1.11,<2",
+  "bandit>=1.7,<2",
+  "pip-audit>=2.7,<3",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/fkgrid"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
