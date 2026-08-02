@@ -33,6 +33,12 @@ The runtime lookup is deterministic, immutable-snapshot based, scoped, compatibl
 version checked, and capped at three mappings per term. It never reads memory,
 purchase history, raw transcripts, or user logs, and it never creates hard filters.
 
+Candidate artifacts are written under a temporary sibling directory and published
+atomically only after candidate, mapping, regression, shadow, and manifest checksums
+are valid. Activation is a compare-and-swap pointer update; an active pointer stores
+the approved mapping-ID allowlist so partial human review cannot delete inherited
+mappings or activate rejected proposals.
+
 ## Integration handoff
 
 Implementations still required outside this branch are represented by ports:
@@ -57,4 +63,3 @@ python -m mypy src
 
 The repository environment may use `uv`; no database or provider secret is needed
 for the included deterministic fakes/tests.
-

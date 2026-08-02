@@ -16,6 +16,7 @@ from fkgrid.domain.catalog_language import (
     CanonicalVocabularySnapshot,
     EvidenceGroup,
     EvidenceWindow,
+    LexiconArtifactManifest,
     LexiconCandidateVersion,
     LexiconCompatibility,
     LexiconLookupRequest,
@@ -108,3 +109,12 @@ class TraceSinkPort(Protocol):
 
 class LexiconLookupPort(Protocol):
     def lookup_expansions(self, request: LexiconLookupRequest) -> LexiconLookupResult: ...
+
+
+class LexiconArtifactPort(Protocol):
+    def write_candidate(
+        self,
+        candidate: LexiconCandidateVersion,
+        regression: RegressionReport,
+        shadow: ShadowReport,
+    ) -> LexiconArtifactManifest: ...

@@ -209,7 +209,7 @@ class ApprovingReview(ReviewPort):
 
     def review_lexicon_diff(self, candidate: LexiconCandidateVersion) -> ReviewDecision:
         self.calls += 1
-        mapping_ids = [mapping.mapping_id for mapping in candidate.mappings]
+        mapping_ids = candidate.proposed_mapping_ids
         return ReviewDecision(
             candidate_version=candidate.candidate_version,
             approved=self.approve,

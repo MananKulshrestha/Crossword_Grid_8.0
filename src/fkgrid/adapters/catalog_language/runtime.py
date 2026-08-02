@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
 
 from fkgrid.catalog_language.normalization import normalize_surface_form
 from fkgrid.domain.catalog_language import (
@@ -14,6 +15,8 @@ from fkgrid.domain.catalog_language import (
     MappingStatus,
 )
 from fkgrid.ports.catalog_language import LexiconLookupPort
+
+ScopeMatch = Literal["EXACT", "ANCESTOR", "GLOBAL"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,7 +47,7 @@ class DeterministicLexiconLookup(LexiconLookupPort):
         return scope_rank, evidence_rank, mapping.mapping_id
 
     @staticmethod
-    def _scope_match(mapping: LexiconMapping, request: LexiconLookupRequest) -> str | None:
+    def _scope_match(mapping: LexiconMapping, request: LexiconLookupRequest) -> ScopeMatch | None:
         if mapping.locale != request.locale:
             return None
         scope = mapping.scope
@@ -69,14 +72,14 @@ class DeterministicLexiconLookup(LexiconLookupPort):
                 compatibility_ok=False,
                 warnings=["LEXICON_VERSION_MISMATCH"],
             )
-        candidates: list[tuple[str, LexiconMapping]] = []
+        candidates: list[tuple[ScopeMatch, LexiconMapping]] = []
         for mapping in self._by_key.get((request.locale, normalized), ()):
             scope_match = self._scope_match(mapping, request)
             if scope_match is not None:
                 candidates.append((scope_match, mapping))
         if not candidates:
             return LexiconLookupResult(normalized_term=normalized)
-        scope_rank = {"EXACT": 0, "ANCESTOR": 1, "GLOBAL": 2}
+        scope_rank: dict[ScopeMatch, int] = {"EXACT": 0, "ANCESTOR": 1, "GLOBAL": 2}
         candidates.sort(key=lambda item: (scope_rank[item[0]], self._mapping_sort_key(item[1])))
         top_scope = scope_rank[candidates[0][0]]
         top = [item for item in candidates if scope_rank[item[0]] == top_scope]

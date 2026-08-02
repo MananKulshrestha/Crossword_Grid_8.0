@@ -58,7 +58,8 @@ class CatalogLanguageQueries:
         name="load_canonical_vocabulary",
         sql="""
             SELECT target_type, target_id, canonical_name, normalized_name,
-                   locale, taxonomy_node_id, parent_taxonomy_node_id, attribute_id, active
+                   locale, taxonomy_node_id, parent_taxonomy_node_id, attribute_id,
+                   normalizer_version, active
               FROM lexicon_vocabulary_snapshot
              WHERE catalog_version = :catalog_version
                AND taxonomy_version = :taxonomy_version
@@ -194,6 +195,28 @@ class CatalogLanguageQueries:
         ),
     )
 
+    RETIRE_ACTIVE = SqlQuery(
+        name="retire_active_lexicon",
+        sql="""
+            UPDATE lexicon_versions
+               SET status = 'RETIRED', activated_at = NULL
+             WHERE lexicon_version = :expected_active_version
+               AND status = 'ACTIVE'
+        """,
+        required_parameters=frozenset({"expected_active_version"}),
+    )
+
+    PROMOTE_CANDIDATE = SqlQuery(
+        name="promote_approved_lexicon",
+        sql="""
+            UPDATE lexicon_versions
+               SET status = 'ACTIVE', activated_at = :activated_at, actor_id = :actor_id
+             WHERE lexicon_version = :candidate_version
+               AND status = 'APPROVED'
+        """,
+        required_parameters=frozenset({"candidate_version", "activated_at", "actor_id"}),
+    )
+
     ACTIVATE_CAS = SqlQuery(
         name="activate_lexicon_version_cas",
         sql="""
@@ -229,5 +252,7 @@ class CatalogLanguageQueries:
         INSERT_REGRESSION,
         INSERT_SHADOW,
         RECORD_REVIEW,
+        RETIRE_ACTIVE,
+        PROMOTE_CANDIDATE,
         ACTIVATE_CAS,
     )

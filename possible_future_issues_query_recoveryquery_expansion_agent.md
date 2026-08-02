@@ -31,6 +31,10 @@ query, validator, workflow budget, artifact format, or provider boundary.
   recursively or broaden targets.
 - Review and activation are separate authorized operations. No fake/default review
   adapter may be used in production, and stale-base activation must fail closed.
+- Candidate artifacts are complete immutable snapshots, not diffs: inherited mappings
+  must remain present while only reviewer-approved new IDs enter the active pointer.
+  A partial-approval bug can either delete old search language or activate rejected
+  mappings, so the artifact pointer must retain an explicit mapping-ID allowlist.
 
 ## Future risks and likely bugs
 
@@ -53,6 +57,12 @@ query, validator, workflow budget, artifact format, or provider boundary.
   version. A cache that omits one key can leak a scoped expansion into another query.
 - Filesystem activation can fail after writing a candidate but before pointer swap;
   retain the last-known-good pointer and make recovery idempotent.
+- Manifest timestamps must use one canonical UTC representation (`Z`) for checksum
+  calculation and Pydantic parsing; `+00:00` versus `Z` drift invalidates otherwise
+  correct artifacts.
+- Regression and shadow evaluation must treat `IN_REVIEW` candidate mappings as
+  provisional approved inputs for offline comparison, while runtime lookup must only
+  expose mappings selected by the active pointer as `APPROVED`.
 - Model/provider tokenization and timeout behavior may differ from local estimates;
   enforce the parent deadline and record input/output hashes without storing prompts.
 - SQL query plans may scan aggregate/recovery tables at scale; add indexes and inspect

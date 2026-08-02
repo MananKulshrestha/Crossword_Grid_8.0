@@ -378,7 +378,20 @@ class LexiconCandidateVersion(StrictModel):
     compatibility: LexiconCompatibility
     mappings: list[LexiconMapping] = Field(min_length=1, max_length=5_000)
     proposal_ids: list[str] = Field(min_length=1, max_length=5_000)
+    proposed_mapping_ids: list[str] = Field(min_length=1, max_length=5_000)
     candidate_checksum: str = Field(min_length=64, max_length=64)
+    created_at: datetime
+
+
+class LexiconArtifactManifest(StrictModel):
+    candidate_version: str
+    compatibility: LexiconCompatibility
+    candidate_checksum: str = Field(min_length=64, max_length=64)
+    mapping_count: int = Field(ge=1)
+    mappings_checksum: str = Field(min_length=64, max_length=64)
+    regression_report_checksum: str = Field(min_length=64, max_length=64)
+    shadow_report_checksum: str = Field(min_length=64, max_length=64)
+    manifest_checksum: str = Field(min_length=64, max_length=64)
     created_at: datetime
 
 

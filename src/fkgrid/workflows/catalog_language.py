@@ -563,15 +563,20 @@ class CatalogLanguageTier2Workflow:
         candidate_compatibility = request.compatibility.model_copy(
             update={"lexicon_version": candidate_version}
         )
+        inherited_mappings = [
+            mapping.model_copy(update={"compatibility": candidate_compatibility})
+            for mapping in active_mappings
+        ]
         candidate_mappings = [
             mapping.model_copy(update={"compatibility": candidate_compatibility})
-            for mapping in mappings
+            for mapping in [*inherited_mappings, *mappings]
         ]
         candidate_checksum = sha256_hex(
             {
                 "compatibility": candidate_compatibility,
                 "mappings": candidate_mappings,
                 "proposal_ids": proposal_ids,
+                "proposed_mapping_ids": [mapping.mapping_id for mapping in mappings],
             }
         )
         candidate = LexiconCandidateVersion(
@@ -580,6 +585,7 @@ class CatalogLanguageTier2Workflow:
             compatibility=candidate_compatibility,
             mappings=candidate_mappings,
             proposal_ids=proposal_ids,
+            proposed_mapping_ids=[mapping.mapping_id for mapping in mappings],
             candidate_checksum=candidate_checksum,
             created_at=self.clock.now(),
         )
@@ -633,7 +639,7 @@ class CatalogLanguageTier2Workflow:
             "review_lexicon_diff",
             "APPROVED" if review.approved else "REJECTED",
         )
-        all_mapping_ids = {mapping.mapping_id for mapping in mappings}
+        all_mapping_ids = set(candidate.proposed_mapping_ids)
         approved_ids = set(review.approved_mapping_ids)
         if (
             not approved_ids.issubset(all_mapping_ids)
@@ -669,12 +675,14 @@ class CatalogLanguageTier2Workflow:
                 trace=events,
                 warnings=["HUMAN_REVIEW_DID_NOT_APPROVE"],
             )
+        inherited_ids = {mapping.mapping_id for mapping in candidate.mappings} - all_mapping_ids
+        activated_ids = sorted(inherited_ids | approved_ids)
         try:
             activation_receipt = self.activation.activate_lexicon_version(
                 request=ActivationRequest(
                     candidate_version=candidate.candidate_version,
                     expected_active_version=request.active_lexicon_version,
-                    approved_mapping_ids=sorted(approved_ids),
+                    approved_mapping_ids=activated_ids,
                     actor_id=review.reviewer_id,
                 )
             )

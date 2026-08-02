@@ -41,3 +41,7 @@ def _jsonable(value: Any) -> Any:
 
 def sha256_hex(value: Any) -> str:
     return hashlib.sha256(canonical_json_bytes(value)).hexdigest()
+
+
+def sha256_bytes(value: bytes) -> str:
+    return hashlib.sha256(value).hexdigest()
