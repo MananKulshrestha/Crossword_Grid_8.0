@@ -126,8 +126,8 @@ WORKFLOW_EXAMPLE = {
     },
     "active_lexicon_version": "lex-demo-1",
     "max_proposals": 100,
-    "proposer_deadline_ms": 800,
-    "critic_deadline_ms": 800,
+    "proposer_deadline_ms": 1800,
+    "critic_deadline_ms": 1800,
     "regression_policy_version": "regression-v1",
     "shadow_policy_version": "shadow-v1",
 }

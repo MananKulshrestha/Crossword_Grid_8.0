@@ -77,6 +77,13 @@ $env:FKGRID_GEMMA_BASE_URL = "http://127.0.0.1:11434"
 $env:FKGRID_GEMMA_MODEL = "gemma3:27b"
 ```
 
+If that model is not installed in Ollama, install it explicitly before starting
+the API (the download is large):
+
+```powershell
+ollama pull gemma3:27b
+```
+
 For an OpenAI-compatible local server, use `FKGRID_GEMMA_PROVIDER=\"openai_compatible\"`,
 set `FKGRID_GEMMA_BASE_URL` to its `/v1` URL, and set `FKGRID_GEMMA_MODEL` to the
 exact loaded Gemma alias. The app reports the configured model at `/ready` and
