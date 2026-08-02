@@ -163,6 +163,13 @@ def validate_mapping(
         }
     ):
         codes.append("ATTRIBUTE_SCOPE_MISMATCH")
+    if target and target.scope.taxonomy_node_id:
+        allowed_taxonomy_scopes = {
+            target.scope.taxonomy_node_id,
+            target.scope.parent_taxonomy_node_id,
+        }
+        if draft.scope.taxonomy_node_id not in allowed_taxonomy_scopes:
+            codes.append("TAXONOMY_SCOPE_MISMATCH")
     for mapping in existing_mappings:
         if (
             mapping.status in {MappingStatus.APPROVED, MappingStatus.IN_REVIEW}

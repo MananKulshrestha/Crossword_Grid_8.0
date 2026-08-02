@@ -54,6 +54,10 @@ class FilesystemLexiconArtifactStore(LexiconArtifactPort, ActivationPort, Active
     ) -> LexiconArtifactManifest:
         if any(mapping.compatibility != candidate.compatibility for mapping in candidate.mappings):
             raise ValueError("candidate contains a mapping from a different compatibility tuple")
+        if regression.candidate_version != candidate.candidate_version:
+            raise ValueError("regression report belongs to a different candidate")
+        if shadow.candidate_version != candidate.candidate_version:
+            raise ValueError("shadow report belongs to a different candidate")
         if len({mapping.mapping_id for mapping in candidate.mappings}) != len(candidate.mappings):
             raise ValueError("candidate contains duplicate mapping IDs")
         expected_candidate_checksum = sha256_hex(

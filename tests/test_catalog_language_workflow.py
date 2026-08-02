@@ -18,11 +18,18 @@ from fkgrid.adapters.catalog_language.fakes import (
 from fkgrid.adapters.model.fake import FakeCatalogLanguageModel, QueuedModelResponse
 from fkgrid.domain.catalog_language import (
     CanonicalVocabularySnapshot,
+    EvidenceBand,
     EvidenceGroup,
     EvidenceSourceClass,
     EvidenceWindow,
+    ExpansionAction,
     LexiconCompatibility,
+    LexiconMapping,
+    LexiconScope,
     LexiconWorkflowRequest,
+    MappingDirection,
+    MappingKind,
+    MappingStatus,
     ModelStatus,
     RegressionReport,
     TargetType,
@@ -100,6 +107,7 @@ def workflow(
     model: FakeCatalogLanguageModel | None = None,
     regression: PassingRegression | None = None,
     review: ApprovingReview | None = None,
+    active_mappings: list[LexiconMapping] | None = None,
 ) -> tuple[CatalogLanguageTier2Workflow, FakeCatalogLanguageModel, CompareAndSwapActivation]:
     selected_model = model or FakeCatalogLanguageModel()
     activation = CompareAndSwapActivation("lex-1")
@@ -107,7 +115,7 @@ def workflow(
         evidence=FakeEvidenceAggregation([evidence_group()]),
         vocabulary=FakeVocabulary(vocabulary()),
         targets=InMemoryTargetRetriever(),
-        active_lexicon=FakeActiveLexicon(),
+        active_lexicon=FakeActiveLexicon(active_mappings or []),
         model=selected_model,
         regression=regression or PassingRegression(),
         shadow=PassingShadow(),
@@ -118,6 +126,27 @@ def workflow(
         trace_sink=InMemoryTrace(),
     )
     return workflow, selected_model, activation
+
+
+def existing_mapping() -> LexiconMapping:
+    return LexiconMapping(
+        mapping_id="existing-mapping",
+        surface_form="sports shoes",
+        normalized_form="sports shoes",
+        locale="en-IN",
+        mapping_kind=MappingKind.SYNONYM,
+        target_type=TargetType.TAXONOMY_NODE,
+        target_id="athletic-shoes",
+        scope=LexiconScope(locale="en-IN", taxonomy_node_id="footwear"),
+        direction=MappingDirection.QUERY_TO_CANONICAL,
+        expansion_action=ExpansionAction.CANONICAL_SYNONYM,
+        evidence_band=EvidenceBand.APPROVED_HIGH,
+        origin="TIER_1_CURATED",
+        evidence_ids=["curated-1"],
+        status=MappingStatus.APPROVED,
+        compatibility=compatibility(),
+        created_at=datetime(2026, 8, 1, tzinfo=UTC),
+    )
 
 
 def test_tier2_workflow_runs_proposer_critic_regression_review_and_cas_activation() -> None:
@@ -186,6 +215,29 @@ def test_proposer_cannot_select_a_target_outside_supplied_allowed_set() -> None:
     assert len(model.calls) == 1
 
 
+def test_critic_cannot_add_unsupplied_evidence_ids() -> None:
+    model = FakeCatalogLanguageModel()
+    model.queue(
+        "critique_mapping",
+        QueuedModelResponse(
+            status=ModelStatus.OK,
+            payload={
+                "decision": "ACCEPT",
+                "concern_codes": [],
+                "recommended_scope": None,
+                "evidence_ids": ["foreign-evidence"],
+                "rationale_code": "bad-evidence",
+            },
+        ),
+    )
+    app, _, _ = workflow(model=model)
+
+    result = app.run(request())
+
+    assert result.status == WorkflowStatus.NO_PROPOSALS
+    assert result.decisions[0].validation_codes == ["CRITIC_EVIDENCE_ID_NOT_SUPPLIED"]
+
+
 def test_regression_failure_blocks_review_and_activation() -> None:
     regression = PassingRegression(
         RegressionReport(
@@ -221,3 +273,20 @@ def test_review_rejection_keeps_candidate_in_review_and_does_not_activate() -> N
     assert result.status == WorkflowStatus.REVIEW_PENDING
     assert result.review is not None and result.review.approved is False
     assert activation.calls == []
+
+
+def test_candidate_is_a_complete_snapshot_and_activation_keeps_inherited_mappings() -> None:
+    app, _, activation = workflow(active_mappings=[existing_mapping()])
+
+    result = app.run(request())
+
+    assert result.status == WorkflowStatus.COMPLETED
+    assert result.candidate is not None and result.activation is not None
+    assert {mapping.mapping_id for mapping in result.candidate.mappings} == {
+        "existing-mapping",
+        *result.candidate.proposed_mapping_ids,
+    }
+    assert set(activation.calls[0].approved_mapping_ids) == {
+        "existing-mapping",
+        *result.candidate.proposed_mapping_ids,
+    }

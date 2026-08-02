@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-from fkgrid.catalog_language.normalization import normalize_surface_form
+from fkgrid.catalog_language.normalization import normalize_surface_form, protected_ranges
 from fkgrid.domain.catalog_language import (
     ExpansionResult,
     LexiconCompatibility,
@@ -30,6 +30,10 @@ class DeterministicLexiconLookup(LexiconLookupPort):
     """Lookup only approved, compatible mappings; no model/history/retrieval calls."""
 
     def __init__(self, snapshot: RuntimeLexiconSnapshot) -> None:
+        if snapshot.lexicon_version != snapshot.compatibility.lexicon_version:
+            raise ValueError("runtime snapshot lexicon version mismatch")
+        if any(mapping.compatibility != snapshot.compatibility for mapping in snapshot.mappings):
+            raise ValueError("runtime snapshot contains mixed compatibility tuples")
         self.snapshot = snapshot
         self._by_key: dict[tuple[str, str], tuple[LexiconMapping, ...]] = {}
         buckets: dict[tuple[str, str], list[LexiconMapping]] = {}
@@ -66,6 +70,11 @@ class DeterministicLexiconLookup(LexiconLookupPort):
 
     def lookup_expansions(self, request: LexiconLookupRequest) -> LexiconLookupResult:
         normalized = normalize_surface_form(request.term, request.locale)
+        if protected_ranges(request.term):
+            return LexiconLookupResult(
+                normalized_term=normalized,
+                warnings=["PROTECTED_OR_NEGATED_TERM"],
+            )
         if request.lexicon_version != self.snapshot.lexicon_version:
             return LexiconLookupResult(
                 normalized_term=normalized,

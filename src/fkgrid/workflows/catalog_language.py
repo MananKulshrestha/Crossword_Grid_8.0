@@ -486,6 +486,19 @@ class CatalogLanguageTier2Workflow:
                     )
                 )
                 continue
+            if any(
+                evidence_id not in cluster.evidence_group_ids
+                for evidence_id in critic_response.payload.evidence_ids
+            ):
+                decisions.append(
+                    MappingDecision(
+                        proposal_id=proposal_id,
+                        source_form=cluster.surface_forms[0],
+                        status="REJECTED",
+                        validation_codes=["CRITIC_EVIDENCE_ID_NOT_SUPPLIED"],
+                    )
+                )
+                continue
             critic = self._critique(critic_response.payload)
             evidence_score = score_mapping_evidence(
                 support_count=evidence.support_count,

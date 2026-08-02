@@ -84,6 +84,15 @@ query, validator, workflow budget, artifact format, or provider boundary.
 - Review evidence IDs and target IDs are allowlisted input data. A model response that
   cites a valid-looking but unsupplied evidence/target ID must be rejected even if the
   rest of the JSON is schema-valid.
+- Runtime snapshots must fail closed when any mapping has a different compatibility
+  tuple or when the snapshot label disagrees with the tuple; bypassing this check can
+  mix taxonomy, normalizer, ranking, and lexicon semantics in one request.
+- Scoped mappings require the query-recovery caller to pass the matching taxonomy scope.
+  Omitting that scope should abstain; making scoped aliases global would create
+  cross-category false positives and may weaken hard-filter semantics.
+- Candidate regression/shadow reports and candidate mappings must all carry the same
+  candidate version. If a persistence adapter drops that linkage, an old report could
+  incorrectly authorize a newer candidate.
 
 ## Open handoff questions
 

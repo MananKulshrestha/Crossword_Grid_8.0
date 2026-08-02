@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+import pytest
+
 from fkgrid.adapters.catalog_language.runtime import (
     DeterministicLexiconLookup,
     RuntimeLexiconSnapshot,
@@ -111,3 +113,46 @@ def test_lookup_rejects_stale_lexicon_version() -> None:
 
     assert result.compatibility_ok is False
     assert result.warnings == ["LEXICON_VERSION_MISMATCH"]
+
+
+def test_lookup_does_not_expand_quoted_or_negated_input() -> None:
+    lookup = DeterministicLexiconLookup(
+        RuntimeLexiconSnapshot(
+            lexicon_version="lex-1",
+            compatibility=compatibility(),
+            mappings=(
+                mapping("footwear", "athletic-shoes", LexiconScope(taxonomy_node_id="footwear")),
+            ),
+        )
+    )
+
+    result = lookup.lookup_expansions(
+        LexiconLookupRequest(
+            term='"trainers"',
+            locale="en-IN",
+            taxonomy_node_id="footwear",
+            lexicon_version="lex-1",
+        )
+    )
+
+    assert result.mappings == []
+    assert result.warnings == ["PROTECTED_OR_NEGATED_TERM"]
+
+
+def test_lookup_rejects_mixed_compatibility_snapshot() -> None:
+    mixed_mapping = mapping(
+        "mixed",
+        "athletic-shoes",
+        LexiconScope(taxonomy_node_id="footwear"),
+    ).model_copy(
+        update={"compatibility": compatibility().model_copy(update={"lexicon_version": "lex-2"})}
+    )
+
+    with pytest.raises(ValueError, match="mixed compatibility"):
+        DeterministicLexiconLookup(
+            RuntimeLexiconSnapshot(
+                lexicon_version="lex-1",
+                compatibility=compatibility(),
+                mappings=(mixed_mapping,),
+            )
+        )
