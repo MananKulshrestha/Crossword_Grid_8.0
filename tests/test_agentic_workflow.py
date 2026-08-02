@@ -45,7 +45,12 @@ from fkgrid.agentic.fakes import (
     empty_cart,
 )
 from fkgrid.agentic.gateway import FakeModelGateway
-from fkgrid.agentic.gateway import GeminiGenerateContentTransport, Gemma4ModelAdapter, PromptRegistry
+from fkgrid.agentic.gateway import (
+    GeminiGenerateContentTransport,
+    Gemma4ModelAdapter,
+    PromptRegistry,
+    UrllibJsonTransport,
+)
 from fkgrid.agentic.orchestrator import TurnOrchestrator
 from fkgrid.agentic.validation import canonical_hash, merge_query_state
 
@@ -482,6 +487,37 @@ class AgenticWorkflowTests(unittest.TestCase):
         )
         self.assertNotIn("$defs", body["generationConfig"]["responseJsonSchema"])
         self.assertEqual(output["choices"][0]["message"]["content"], '{"ok":true}')
+
+    def test_openai_compatible_transport_omits_empty_tools_for_deepinfra(self) -> None:
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self):
+                return b'{"choices":[{"message":{"content":"{}"}}]}'
+
+        transport = UrllibJsonTransport(
+            "https://api.deepinfra.com/v1/openai/chat/completions",
+            "test-only-key",
+        )
+        with patch("fkgrid.agentic.gateway.urlopen", return_value=Response()) as opener:
+            transport.post_json(
+                {
+                    "model": "google/gemma-4-26b-a4b-it",
+                    "messages": [],
+                    "tools": [],
+                    "tool_choice": "none",
+                },
+                1800,
+            )
+        request = opener.call_args.args[0]
+        payload = json.loads(request.data.decode("utf-8"))
+        self.assertNotIn("tools", payload)
+        self.assertNotIn("tool_choice", payload)
+        self.assertEqual(request.get_header("Authorization"), "Bearer test-only-key")
 
     def test_ambiguous_details_clarifies_and_never_calls_catalog_details(self) -> None:
         snapshot, entries = fixture()

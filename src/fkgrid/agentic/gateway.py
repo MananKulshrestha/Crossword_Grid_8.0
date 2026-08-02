@@ -6,23 +6,24 @@ import hashlib
 import json
 import os
 import time
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Mapping, Protocol
+from typing import Any, Protocol
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 from pydantic import TypeAdapter, ValidationError
 
 from .contracts import (
-    CompatibilityTuple,
-    IntentDeltaV1,
     ClarificationDraft,
+    CompatibilityTuple,
     FollowUpSelection,
-    RecoveryPlan,
+    IntentDeltaV1,
     ModelCallType,
     ModelRequest,
     ModelResponse,
     ModelStatus,
+    RecoveryPlan,
     ResearchSynthesisV1,
     ValidationIssue,
 )
@@ -31,6 +32,9 @@ from .validation import canonical_hash, canonical_json
 
 class StructuredModelGateway(Protocol):
     def complete(self, request: ModelRequest) -> ModelResponse: ...
+
+
+DEFAULT_DEEPINFRA_ENDPOINT = "https://api.deepinfra.com/v1/openai/chat/completions"
 
 
 class PromptSpec:
@@ -364,7 +368,16 @@ class UrllibJsonTransport:
         self.api_key = api_key
 
     def post_json(self, payload: dict[str, Any], timeout_ms: int) -> dict[str, Any]:
-        body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        provider_payload = dict(payload)
+        # DeepInfra rejects an explicitly empty tools array. Keep the
+        # provider-neutral gateway contract unchanged, but omit no-op tool
+        # fields at the OpenAI-compatible HTTP boundary.
+        if provider_payload.get("tools") == []:
+            provider_payload.pop("tools")
+            provider_payload.pop("tool_choice", None)
+        body = json.dumps(provider_payload, ensure_ascii=False, separators=(",", ":")).encode(
+            "utf-8"
+        )
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
@@ -538,7 +551,7 @@ class Gemma4ModelAdapter:
         *,
         prompts: PromptRegistry | None = None,
         environment: Mapping[str, str] | None = None,
-    ) -> "Gemma4ModelAdapter":
+    ) -> Gemma4ModelAdapter:
         """Build the live adapter from environment-only provider settings.
 
         The key is intentionally never read from a repository file, serialized,
@@ -549,9 +562,14 @@ class Gemma4ModelAdapter:
         values = os.environ if environment is None else environment
         protocol = values.get("FKGRID_MODEL_PROTOCOL", "openai").casefold()
         endpoint = values.get("FKGRID_MODEL_ENDPOINT")
-        api_key = values.get("FKGRID_MODEL_API_KEY") or values.get("GEMINI_API_KEY")
+        if protocol == "deepinfra":
+            api_key = values.get("DEEPINFRA_API_KEY") or values.get("FKGRID_MODEL_API_KEY")
+        else:
+            api_key = values.get("FKGRID_MODEL_API_KEY") or values.get("GEMINI_API_KEY")
         if protocol == "gemini" and not endpoint:
             endpoint = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+        if protocol == "deepinfra" and not endpoint:
+            endpoint = DEFAULT_DEEPINFRA_ENDPOINT
         if not endpoint:
             raise ValueError("FKGRID_MODEL_ENDPOINT_REQUIRED")
         if not api_key:
@@ -560,6 +578,9 @@ class Gemma4ModelAdapter:
         if protocol == "gemini":
             transport: ModelTransport = GeminiGenerateContentTransport(endpoint, api_key)
             provider_name = "google-gemini-api"
+        elif protocol == "deepinfra":
+            transport = UrllibJsonTransport(endpoint, api_key)
+            provider_name = "deepinfra"
         else:
             transport = UrllibJsonTransport(endpoint, api_key)
             provider_name = "gemma-openai-compatible"

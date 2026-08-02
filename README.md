@@ -1,10 +1,10 @@
 # FK GRiD shopper-facing agentic chat
 
-This branch contains only the shopper-facing agentic orchestration described by
-technical plan 24 and its shopper-runtime dependencies. It is a contract-first
-thin slice that can run with deterministic fakes before the database, catalog,
-retrieval, cart, research-provider, Qdrant, LightRAG, or Graph RAG owners finish
-their adapters.
+This branch contains the shopper-facing agentic orchestration described by
+technical plan 24 and its shopper-runtime dependencies, plus a FastAPI testing
+surface. It is a contract-first slice that can run against a rich synthetic
+catalog fixture while the production database, retrieval, cart,
+research-provider, Qdrant, LightRAG, and Graph RAG owners finish their adapters.
 
 ## What is implemented
 
@@ -26,6 +26,8 @@ their adapters.
   Qdrant-compatible exact result semantics, optional LightRAG/Graph RAG advisory
   context, memory/history, cart, research, suggestions, traces, and the future
   markdown pipeline;
+- a deterministic 600-record, multi-category synthetic fixture for local API
+  testing; this fixture is catalog data only, not a replacement for Gemma.
 - deterministic fake adapters and standard-library contract tests.
 
 ## Deliberate boundary
@@ -36,21 +38,19 @@ orchestrator hands the final typed `ShopperResponse` plus its safe trace to
 `MarkdownPipelinePort.handoff`; another owner converts that typed response to
 escaped markdown for rendering.
 
-Gemma is configured by alias only. The default hosted alias is
-`gemma-4-26b-a4b-it`; supply `FKGRID_MODEL_ENDPOINT` and
-`FKGRID_MODEL_API_KEY` through the environment, or inject an
-OpenAI-compatible transport into `Gemma4ModelAdapter`. Set
-`FKGRID_MODEL_PROTOCOL=gemini` for Google’s native `generateContent` endpoint;
-the adapter sends the key via `x-goog-api-key`. No key is stored in this
-repository. The endpoint is provider-specific because Gemma is open-weight and
-may be served locally or by a compatible hosted provider.
+Gemma is configured by alias and provider. The default live provider is
+DeepInfra with model `google/gemma-4-26b-a4b-it`; provide `DEEPINFRA_API_KEY`
+through the process environment. DeepInfra uses the OpenAI-compatible endpoint
+`https://api.deepinfra.com/v1/openai/chat/completions` and Bearer
+authentication. No key is stored in this repository. The older Google-native
+transport remains available only when explicitly selecting
+`FKGRID_MODEL_PROTOCOL=gemini`.
 
-For the native Gemini path, the adapter disables Gemma thinking for the
-latency-sensitive shopper call, sends a provider-safe `responseJsonSchema`
-projection, and revalidates the complete Pydantic contract after the response.
-The hosted 26B smoke path can exceed the plan’s 1.8-second intent budget, in
-which case the orchestrator returns its safe deterministic fallback; do not
-silently raise that production limit.
+For live DeepInfra calls, the adapter sends the strict structured-output schema
+and revalidates the complete Pydantic contract after the response. The hosted
+26B smoke path can exceed the plan’s 1.8-second intent budget, in which case
+the orchestrator returns its safe deterministic fallback; do not silently raise
+that production limit.
 
 ## Run the contract tests
 
@@ -63,6 +63,44 @@ python -m unittest discover -s tests -v
 
 The eventual repository bootstrap can replace the standard-library test command
 with the plan-02 pytest/Ruff/mypy commands without changing the contracts.
+
+## Test through FastAPI Swagger UI
+
+This branch now includes a FastAPI delivery layer at
+`src/fkgrid/api/main.py`. It uses the existing `TurnOrchestrator` and the
+existing in-memory testing ports; it does not create a second routing or cart
+implementation. The default API runtime uses the real Gemma 4 26B adapter.
+Fake model mode is available only when explicitly setting
+`FKGRID_MODEL_MODE=fake`; the default is never a fake model.
+
+Inject the key through the process environment and start the API from this
+worktree:
+
+```powershell
+$env:PYTHONPATH = "src"
+$env:FKGRID_MODEL_MODE = "live"
+$env:FKGRID_MODEL_PROTOCOL = "deepinfra"
+$env:FKGRID_MODEL_ALIAS = "google/gemma-4-26b-a4b-it"
+$env:FKGRID_MODEL_ENDPOINT = "https://api.deepinfra.com/v1/openai/chat/completions"
+$env:DEEPINFRA_API_KEY = "<your DeepInfra token>"
+# Optional fixture controls; defaults are 600 records and seed 20260801.
+$env:FKGRID_TEST_CATALOG_SIZE = "600"
+$env:FKGRID_TEST_CATALOG_SEED = "20260801"
+# Optional diagnostic override; the safe production default remains 1800 ms.
+$env:FKGRID_INTENT_BUDGET_MS = "5000"
+uvicorn fkgrid.api.main:app --host 127.0.0.1 --port 8000
+```
+
+Open [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs). The page now has a
+chat panel above the normal Swagger operations: type a message, press Enter or
+Send, read the agent response, and continue with a follow-up in the same
+session. The panel creates the session and rotates the client/idempotency IDs
+automatically, so JSON editing is not required for conversational testing.
+The underlying `POST /v1/sessions/{session_id}/turns` operation remains
+available for contract-level testing, while `GET /v1/model` exposes safe model
+metadata without secrets. `SHOW_CART` remains a typed model-free action.
+Hosted Gemma 4 26B can exceed the production 1800 ms budget, so the optional
+5000 ms setting is useful for local Swagger diagnosis only.
 
 See [possible_future_issues.md](possible_future_issues.md) for fragile
 integration points, latency risks, accuracy risks, and release gates.
@@ -79,18 +117,26 @@ $env:PYTHONPATH = "src;tests"
 python tests/manual_shopper_chat.py --model fake
 ```
 
-The testing catalog contains exactly three mock products:
+The API testing catalog contains 600 synthetic SKU/offer records across
+t-shirts, shirts, jeans, sneakers, backpacks, headphones, laptops,
+smartphones, tablets, smartwatches, speakers, and fitness bands. Records have
+deterministic prices, brands, colors, materials, variants, ratings,
+availability, stock, delivery days, warranty, evidence references, and stable
+product/SKU/offer identity tuples. Change `FKGRID_TEST_CATALOG_SIZE` and
+`FKGRID_TEST_CATALOG_SEED` for another reproducible fixture.
 
-- `Prototype shirt 1` — `entry_1` / `product_1` / `sku_1` / `offer_1` — INR 1,000.01
-- `Prototype shirt 2` — `entry_2` / `product_2` / `sku_2` / `offer_2` — INR 1,000.02
-- `Prototype shirt 3` — `entry_3` / `product_3` / `sku_3` / `offer_3` — INR 1,000.03
+The default fixture intentionally has no exact red T-shirt SKU; its T-shirt
+colors are black, maroon, navy, olive, and white. A normal request such as
+`recommend me some red T-shirts` reports that limitation and ranks the closest
+available color (maroon) first. An explicit category in a follow-up replaces
+the previous scope, so `shoes` searches sneakers instead of reusing T-shirts.
 
 Try messages such as `Find a shirt size m`, `Show details for the first one`,
 `Compare the first and second one`, `Is the first one available?`, and `Show
 my cart`. The runner also supports `/catalog`, `/state`, `/help`, and `/quit`.
 
-To exercise the live Gemma adapter instead, inject a runtime key through
-`GEMINI_API_KEY` or `FKGRID_MODEL_API_KEY` and run:
+To exercise the live DeepInfra Gemma adapter instead, inject a runtime key
+through `DEEPINFRA_API_KEY` and run:
 
 ```powershell
 python tests/manual_shopper_chat.py --model live --intent-budget-ms 5000

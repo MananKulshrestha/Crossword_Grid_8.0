@@ -1,7 +1,7 @@
 {
   "schema_version": "prompt-manifest-v1",
   "prompts": [
-    {"prompt_id": "intent_v1", "prompt_version": "1", "file": "intent_v1.md", "file_checksum": "dcd1ffd7818690380cfddc6334f8675a2246694c6dc24ae63853b2a99f6f98d6", "input_schema": "IntentContextProjectionV1", "output_schema": "IntentDeltaV1", "temperature": 0, "max_output_tokens": 500, "capabilities": ["SHOPPER_INTENT"]},
+    {"prompt_id": "intent_v1", "prompt_version": "1", "file": "intent_v1.md", "file_checksum": "81a2182f7b742bd169cd51016c5ca6fef5dd34f431c7e3b36c80a46618e7d320", "input_schema": "IntentContextProjectionV1", "output_schema": "IntentDeltaV1", "temperature": 0, "max_output_tokens": 500, "capabilities": ["SHOPPER_INTENT"]},
     {"prompt_id": "clarification_v1", "prompt_version": "1", "file": "clarification_v1.md", "file_checksum": "1308e242ca58b3ed5ba5a41e8dee7638ab2635e0f38f7171f85aee826058b191", "input_schema": "ClarificationPacketV1", "output_schema": "ClarificationDraftV1", "temperature": 0, "max_output_tokens": 200, "capabilities": ["SHOPPER_INTENT"]},
     {"prompt_id": "recovery_v1", "prompt_version": "1", "file": "recovery_v1.md", "file_checksum": "570274a34504879f271ea12d09fb098999bdf6d29b0821df95a7c13566ff59ff", "input_schema": "RecoveryContextV1", "output_schema": "RecoveryPlanV1", "temperature": 0, "max_output_tokens": 300, "capabilities": ["RECOVERY"]},
     {"prompt_id": "research_synthesis_v1", "prompt_version": "1", "file": "research_synthesis_v1.md", "file_checksum": "b52efce775572447d73b6a3ef4a79a3b4afa2ae819f39d33f48506083dce23b8", "input_schema": "ResearchContextV1", "output_schema": "ResearchSynthesisV1", "temperature": 0, "max_output_tokens": 800, "capabilities": ["SHOPPER_READ"]},

@@ -81,6 +81,7 @@ from .validation import (
     validate_clarifying_question,
     validate_intent_semantics,
 )
+from .query_lexicon import apply_explicit_catalog_terms
 
 
 @dataclass(frozen=True)
@@ -464,6 +465,10 @@ class TurnOrchestrator:
         intent, issues = parse_intent_payload(model_response.output_payload)
         if intent is None:
             return None, issues
+        # Provider output is valid but may omit an obvious catalog term.  The
+        # reviewed deterministic lexicon restores only explicit current-turn
+        # category/color semantics before the normal semantic validator runs.
+        intent = apply_explicit_catalog_terms(intent, projection.current_message_verbatim)
         allowed = {
             entry.result_entry_id for entry in projection.active_result_bindings
         } | set(projection.cart_summary.item_ids)
@@ -596,16 +601,22 @@ class TurnOrchestrator:
                     result.status.value,
                 )
             terminal = TerminalState.ANSWERED_WITH_GROUNDED_RESULTS if result.entries else TerminalState.NO_ELIGIBLE_MATCH
+            summary = (
+                f"I found {len(result.entries)} prototype catalog result(s)."
+                if result.entries
+                else "No eligible prototype catalog result matched the preserved constraints."
+            )
+            if "REQUESTED_COLOR_NOT_IN_DATASET" in result.warnings:
+                summary += (
+                    " The exact requested color is not in this prototype dataset; "
+                    "the closest available colors are shown first."
+                )
             return (
                 ShopperResponse(
                     response_id=self.ids.new_id("response"),
                     action=action,
                     terminal_state=terminal,
-                    summary=(
-                        f"I found {len(result.entries)} prototype catalog result(s)."
-                        if result.entries
-                        else "No eligible prototype catalog result matched the preserved constraints."
-                    ),
+                    summary=summary,
                     search_entries=result.entries,
                     result_set_id=result.result_set_id,
                     state_delta=delta_summary,

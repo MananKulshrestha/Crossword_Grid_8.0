@@ -17,10 +17,11 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPOSITORY_ROOT / "src"))
 sys.path.insert(0, str(REPOSITORY_ROOT / "tests"))
 
+from test_agentic_workflow import fixture, orchestrator  # noqa: E402
+
 from fkgrid.agentic.contracts import Fact, Money, SearchEntry, TurnRequest  # noqa: E402
 from fkgrid.agentic.gateway import Gemma4ModelAdapter  # noqa: E402
 from fkgrid.agentic.orchestrator import OrchestratorConfig  # noqa: E402
-from test_agentic_workflow import fixture, orchestrator  # noqa: E402
 
 
 def _money(value: Any) -> str:
@@ -42,7 +43,10 @@ def print_catalog(entries: list[SearchEntry]) -> None:
             f"  {entry.display_position}. {entry.title} | "
             f"entry={entry.result_entry_id} | product={entry.binding.product_id} | {facts}"
         )
-    print("Identity references accepted by the fake resolver: first/second/third, entry_* or product_*.")
+    print(
+        "Identity references accepted by the fake resolver: first/second/third, "
+        "entry_* or product_*."
+    )
 
 
 def print_help() -> None:
@@ -108,7 +112,7 @@ def main() -> int:
         "--model",
         choices=("fake", "live"),
         default="fake",
-        help="Use deterministic routing fake (default) or the configured Gemini adapter.",
+        help="Use deterministic routing fake (default) or the configured DeepInfra adapter.",
     )
     parser.add_argument(
         "--intent-budget-ms",
@@ -121,11 +125,11 @@ def main() -> int:
     snapshot, entries = fixture()
     app, dependencies = orchestrator(snapshot, entries)
     if args.model == "live":
-        os.environ.setdefault("FKGRID_MODEL_PROTOCOL", "gemini")
-        os.environ.setdefault("FKGRID_MODEL_ALIAS", "gemma-4-26b-a4b-it")
+        os.environ.setdefault("FKGRID_MODEL_PROTOCOL", "deepinfra")
+        os.environ.setdefault("FKGRID_MODEL_ALIAS", "google/gemma-4-26b-a4b-it")
         os.environ.setdefault(
             "FKGRID_MODEL_ENDPOINT",
-            "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+            "https://api.deepinfra.com/v1/openai/chat/completions",
         )
         app.gateway = Gemma4ModelAdapter.from_environment()
         app.config = OrchestratorConfig(intent_budget_ms=args.intent_budget_ms)

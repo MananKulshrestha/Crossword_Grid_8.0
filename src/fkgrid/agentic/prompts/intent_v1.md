@@ -23,3 +23,12 @@ No chain of thought is requested. Only the bounded fields in IntentDeltaV1 are
 allowed. If a value is not supported by the current message or supplied state,
 leave it unknown or request clarification.
 
+For an explicit catalog request, do not drop obvious product terms from the
+delta. Use ADD_SCOPE for the current product category (for example, map
+"shoes" to the supplied sneaker taxonomy node); an explicit category in the
+current message replaces an older category scope. Treat an ordinary color
+request such as "red T-shirts" as a SET_SOFT color preference so deterministic
+retrieval can rank the exact color first and the closest available colors next.
+Use SET_HARD for color only when the shopper says "only", "must", "exactly",
+or otherwise makes the color non-negotiable. Never call a near color an exact
+match; the catalog adapter must label approximate-color fallback explicitly.
