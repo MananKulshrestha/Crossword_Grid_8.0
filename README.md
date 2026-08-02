@@ -53,6 +53,34 @@ Implementations still required outside this branch are represented by ports:
 No active lexicon is changed by a workflow run unless an authorized review decision
 and activation CAS both succeed.
 
+## Swagger / FastAPI local test
+
+The FastAPI delivery layer is available at `src/fkgrid/api/main.py`. It is an
+additive adapter over the existing workflow and deterministic runtime lookup;
+the default app uses clearly labelled in-memory demo adapters so it can be
+tested before the database and provider owners finish their integrations.
+
+From the repository root, run:
+
+```text
+python -m uvicorn fkgrid.api.main:app --app-dir src --host 127.0.0.1 --port 8000
+```
+
+Then open [Swagger UI](http://127.0.0.1:8000/docs). The useful routes are:
+
+- `GET /health` and `GET /ready` — process/readiness state.
+- `GET /api/v1/catalog-language/capabilities` — Tier 2 capability and forbidden-action contract.
+- `POST /api/v1/catalog-language/tier2/runs` — runs the existing bounded proposer/critic,
+  validation, regression, shadow, review, and activation workflow.
+- `POST /api/v1/catalog-language/lookup` — runs the existing model-free deterministic
+  active-lexicon lookup.
+
+The Swagger examples use `cat-demo-1` / `tax-demo-1` / `lex-demo-1` and do not
+create a database, persist a proposal, call a network provider, or represent
+live catalogue truth. For production, construct `CatalogLanguageApiContainer`
+with the database, retrieval, model, review, activation, and artifact adapters;
+the HTTP contracts do not need to change.
+
 ## Local checks
 
 ```text

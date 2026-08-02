@@ -93,6 +93,19 @@ query, validator, workflow budget, artifact format, or provider boundary.
 - Candidate regression/shadow reports and candidate mappings must all carry the same
   candidate version. If a persistence adapter drops that linkage, an old report could
   incorrectly authorize a newer candidate.
+- The FastAPI default container is intentionally deterministic and in-memory. It is
+  useful for Swagger contract testing but must never be mistaken for production
+  catalog, evidence, review, activation, or live-commerce truth.
+- The demo activation adapter keeps compare-and-swap state for the process lifetime;
+  a second Swagger run using the original active version can correctly return an
+  activation conflict. Production persistence must retain the same CAS semantics
+  across workers and restarts.
+- The HTTP edge parses ISO-8601 datetime strings before constructing strict domain
+  models. Removing that conversion or allowing permissive domain coercion can make
+  Swagger requests fail unpredictably or weaken the intended trust boundary.
+- The admin-facing API routes do not invent operator authorization. The configured
+  production review/activation services and deployment gateway must enforce roles,
+  audit identity, rate limits, and network access before exposing these operations.
 
 ## Open handoff questions
 
