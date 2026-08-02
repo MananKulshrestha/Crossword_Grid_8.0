@@ -15,8 +15,8 @@ automatic lexicon activation.
 - Proposer and critic are separate tool-less structured calls. The critic emits
   concern codes only.
 - The default FastAPI assembly uses Gemma for both calls through a provider-neutral
-  adapter. Ollama is the default local transport (`gemma3:27b`); an OpenAI-compatible
-  transport and exact model alias can be selected through environment settings.
+  adapter. DeepInfra is the default transport (`google/gemma-4-26B-A4B-it`); Ollama
+  and other OpenAI-compatible transports can be selected through environment settings.
 - Canonical target IDs come only from `CanonicalVocabularyPort`.
 - DB schema/queries are a handoff to the database owner; this branch does not run
   migrations or create a connection.

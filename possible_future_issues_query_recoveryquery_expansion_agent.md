@@ -97,13 +97,12 @@ query, validator, workflow budget, artifact format, or provider boundary.
   in-memory evidence/vocabulary/review fixtures. Those fixtures are useful for
   model-path testing but must never be mistaken for production catalog,
   evidence, review, activation, or live-commerce truth.
-- Gemma model aliases differ between Ollama (`gemma3:27b`) and OpenAI-compatible
-  runtimes (`google/gemma-3-27b-it` or another loaded alias). A wrong alias must
+- Gemma model aliases differ between DeepInfra (`google/gemma-4-26B-A4B-it`),
+  Ollama (`gemma3:27b`), and other OpenAI-compatible runtimes. A wrong alias must
   remain a visible readiness failure rather than silently selecting another model.
-- The verified local Ollama store currently contains only `llama3.2:1b`; the API
-  correctly reports Gemma as not ready and does not substitute that model. A live
-  Gemma test therefore requires an explicit model pull or a configured remote/local
-  Gemma endpoint with enough memory and latency budget.
+- The verified local Ollama store contains only `llama3.2:1b`; the default API now
+  uses DeepInfra and never substitutes that local model. A live test therefore
+  requires the configured DeepInfra token and a reachable model endpoint.
 - The demo activation adapter keeps compare-and-swap state for the process lifetime;
   a second Swagger run using the original active version can correctly return an
   activation conflict. Production persistence must retain the same CAS semantics
@@ -114,6 +113,9 @@ query, validator, workflow budget, artifact format, or provider boundary.
 - The admin-facing API routes do not invent operator authorization. The configured
   production review/activation services and deployment gateway must enforce roles,
   audit identity, rate limits, and network access before exposing these operations.
+- Offline DeepInfra proposer/critic calls now have a 10-second default and 30-second
+  hard maximum. This must not leak into shopper intent latency budgets; remote cold
+  starts and queueing still need cost/latency monitoring and bounded retry policy.
 
 ## Open handoff questions
 

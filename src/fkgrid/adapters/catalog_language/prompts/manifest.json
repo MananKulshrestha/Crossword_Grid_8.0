@@ -4,13 +4,13 @@
     "version": "1",
     "input_schema": "CatalogLanguageProposerInputV1",
     "output_schema": "MappingDraftV1",
-    "file_sha256": "1694492b627839824b0e56d883b062e99a078def7591c175e67783bc2fd349dc"
+    "file_sha256": "c4c06a859ec403d2a4495d583e56cd9f78b570adf11573a2e15f6192c2d8b3c1"
   },
   "catalog_language_critic_v1": {
     "file": "catalog_language_critic_v1.md",
     "version": "1",
     "input_schema": "CatalogLanguageCriticInputV1",
     "output_schema": "CriticDraftV1",
-    "file_sha256": "ac1a4d3e460d11cc92bfc73fd1013217fca296fd8136217c7a9b9aa6927b8078"
+    "file_sha256": "72c6aa1c9c46bf1460c045033fffec95de8488fc4e5e96d773a8d393e1044987"
   }
 }

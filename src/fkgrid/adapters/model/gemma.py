@@ -1,4 +1,4 @@
-"""Gemma model adapter for Ollama and OpenAI-compatible local runtimes.
+"""Gemma model adapter for DeepInfra, Ollama, and OpenAI-compatible runtimes.
 
 The workflow owns all authority and validation.  This adapter only sends the
 versioned proposer/critic prompt, requests structured JSON, and converts the
@@ -15,7 +15,7 @@ from time import perf_counter
 from typing import Literal, cast
 
 import httpx
-from pydantic import SecretStr
+from pydantic import SecretStr, ValidationError
 
 from fkgrid.adapters.catalog_language.prompts import PromptRegistry
 from fkgrid.catalog_language.serialization import canonical_json_bytes, sha256_hex
@@ -28,16 +28,16 @@ from fkgrid.domain.catalog_language import (
 )
 from fkgrid.ports.catalog_language import CatalogLanguageModelPort
 
-GemmaProvider = Literal["ollama", "openai_compatible"]
+GemmaProvider = Literal["ollama", "openai_compatible", "deepinfra"]
 
 
 @dataclass(frozen=True, slots=True)
 class GemmaModelSettings:
-    """Runtime configuration for a locally hosted Gemma model."""
+    """Runtime configuration for a hosted or local Gemma model."""
 
-    provider: GemmaProvider = "ollama"
-    base_url: str = "http://127.0.0.1:11434"
-    model_name: str = "gemma3:27b"
+    provider: GemmaProvider = "deepinfra"
+    base_url: str = "https://api.deepinfra.com/v1/openai"
+    model_name: str = "google/gemma-4-26B-A4B-it"
     api_key: SecretStr | None = None
     readiness_timeout_seconds: float = 2.0
     max_output_tokens: int = 384
@@ -54,18 +54,28 @@ class GemmaModelSettings:
 
     @classmethod
     def from_environment(cls) -> GemmaModelSettings:
-        provider = os.getenv("FKGRID_GEMMA_PROVIDER", "ollama")
-        if provider not in {"ollama", "openai_compatible"}:
-            raise ValueError("FKGRID_GEMMA_PROVIDER must be ollama or openai_compatible")
+        provider = os.getenv("FKGRID_GEMMA_PROVIDER", "deepinfra")
+        if provider not in {"ollama", "openai_compatible", "deepinfra"}:
+            raise ValueError(
+                "FKGRID_GEMMA_PROVIDER must be ollama, openai_compatible, or deepinfra"
+            )
         provider_value = cast(GemmaProvider, provider)
         default_base_url = (
-            "http://127.0.0.1:11434" if provider == "ollama" else "http://127.0.0.1:1234/v1"
+            "http://127.0.0.1:11434"
+            if provider == "ollama"
+            else "https://api.deepinfra.com/v1/openai"
+            if provider == "deepinfra"
+            else "http://127.0.0.1:1234/v1"
         )
-        raw_key = os.getenv("FKGRID_GEMMA_API_KEY")
+        raw_key = (
+            os.getenv("DEEPINFRA_API_KEY")
+            or os.getenv("DEEPINFRA_TOKEN")
+            or os.getenv("FKGRID_GEMMA_API_KEY")
+        )
         return cls(
             provider=provider_value,
             base_url=os.getenv("FKGRID_GEMMA_BASE_URL", default_base_url).rstrip("/"),
-            model_name=os.getenv("FKGRID_GEMMA_MODEL", "gemma3:27b"),
+            model_name=os.getenv("FKGRID_GEMMA_MODEL", "google/gemma-4-26B-A4B-it"),
             api_key=SecretStr(raw_key) if raw_key else None,
             readiness_timeout_seconds=float(os.getenv("FKGRID_GEMMA_READY_TIMEOUT_S", "2")),
             max_output_tokens=int(os.getenv("FKGRID_GEMMA_MAX_OUTPUT_TOKENS", "384")),
@@ -94,7 +104,7 @@ class GemmaCatalogLanguageModel(CatalogLanguageModelPort):
                 timeout=self.settings.readiness_timeout_seconds,
                 transport=self._transport,
             ) as client:
-                response = client.get(self._models_url())
+                response = client.get(self._models_url(), headers=self._headers())
             if response.status_code >= 400:
                 return False, f"Gemma provider returned HTTP {response.status_code}"
             payload = response.json()
@@ -128,7 +138,7 @@ class GemmaCatalogLanguageModel(CatalogLanguageModelPort):
             prompt = self._render_prompt(request)
             response = self._post(request, prompt, payload_type)
             content = self._extract_content(response.json())
-            parsed = json.loads(content)
+            parsed = self._parse_json_content(content)
             payload = payload_type.model_validate_json(canonical_json_bytes(parsed))
             return ModelCallResponse(
                 call_id=request.call_id,
@@ -155,7 +165,26 @@ class GemmaCatalogLanguageModel(CatalogLanguageModelPort):
                 True,
                 started,
             )
-        except (json.JSONDecodeError, TypeError, ValueError, KeyError, IndexError):
+        except json.JSONDecodeError:
+            return self._failure(
+                request,
+                input_hash,
+                ModelStatus.INVALID_OUTPUT,
+                "OUTPUT_JSON_INVALID",
+                False,
+                started,
+            )
+        except ValidationError as exc:
+            return self._failure(
+                request,
+                input_hash,
+                ModelStatus.INVALID_OUTPUT,
+                "OUTPUT_SCHEMA_INVALID",
+                False,
+                started,
+                self._validation_codes(exc),
+            )
+        except (TypeError, ValueError, KeyError, IndexError):
             return self._failure(
                 request,
                 input_hash,
@@ -171,9 +200,7 @@ class GemmaCatalogLanguageModel(CatalogLanguageModelPort):
         prompt: str,
         payload_type: type[MappingDraft] | type[CriticDraft],
     ) -> httpx.Response:
-        headers = {"Content-Type": "application/json"}
-        if self.settings.api_key is not None:
-            headers["Authorization"] = f"Bearer {self.settings.api_key.get_secret_value()}"
+        headers = self._headers()
         schema = payload_type.model_json_schema()
         if self.settings.provider == "ollama":
             url = f"{self.settings.base_url}/api/chat"
@@ -224,16 +251,22 @@ class GemmaCatalogLanguageModel(CatalogLanguageModelPort):
         )
 
     def _models_url(self) -> str:
-        return (
-            f"{self.settings.base_url}/api/tags"
-            if self.settings.provider == "ollama"
-            else f"{self.settings.base_url}/models"
-        )
+        if self.settings.provider == "ollama":
+            return f"{self.settings.base_url}/api/tags"
+        if self.settings.provider == "deepinfra":
+            return f"{self.settings.base_url.removesuffix('/openai')}/models"
+        return f"{self.settings.base_url}/models"
+
+    def _headers(self) -> dict[str, str]:
+        headers = {"Content-Type": "application/json"}
+        if self.settings.api_key is not None:
+            headers["Authorization"] = f"Bearer {self.settings.api_key.get_secret_value()}"
+        return headers
 
     def _available_models(self, payload: object) -> list[str]:
         if not isinstance(payload, dict):
             raise TypeError("model list response must be an object")
-        values = payload.get("models", [])
+        values = payload.get("models", payload.get("data", []))
         if not isinstance(values, list):
             raise TypeError("model list must be an array")
         names: list[str] = []
@@ -259,12 +292,45 @@ class GemmaCatalogLanguageModel(CatalogLanguageModelPort):
             if not isinstance(choice, dict):
                 raise TypeError("provider choice must be an object")
             message = choice.get("message")
-        if not isinstance(message, dict) or not isinstance(message.get("content"), str):
+        if not isinstance(message, dict):
             raise TypeError("provider message content must be a string")
-        content = message["content"].strip()
+        raw_content = message.get("content")
+        if isinstance(raw_content, list):
+            text_parts: list[str] = []
+            for part in raw_content:
+                if isinstance(part, dict) and isinstance(part.get("text"), str):
+                    text_parts.append(part["text"])
+            raw_content = "".join(text_parts)
+        if not isinstance(raw_content, str):
+            raise TypeError("provider message content must be a string")
+        content = raw_content.strip()
         if content.startswith("```"):
             content = content.removeprefix("```").removeprefix("json").removesuffix("```").strip()
         return content
+
+    @staticmethod
+    def _parse_json_content(content: str) -> object:
+        """Parse strict JSON even when a model adds a short reasoning prefix.
+
+        The returned object is still passed through the strict Pydantic output
+        model.  We only locate a JSON object; we never repair fields, invent
+        IDs, or accept arbitrary natural-language output.
+        """
+
+        try:
+            return json.loads(content)
+        except json.JSONDecodeError as original_error:
+            decoder = json.JSONDecoder()
+            for index, character in enumerate(content):
+                if character != "{":
+                    continue
+                try:
+                    value, _ = decoder.raw_decode(content[index:])
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(value, dict):
+                    return value
+            raise original_error
 
     @staticmethod
     def _http_failure(code: int) -> tuple[ModelStatus, str, bool]:
@@ -274,6 +340,15 @@ class GemmaCatalogLanguageModel(CatalogLanguageModelPort):
             return ModelStatus.UNAVAILABLE, "PROVIDER_SERVER_ERROR", True
         return ModelStatus.ERROR, "PROVIDER_REQUEST_REJECTED", False
 
+    @staticmethod
+    def _validation_codes(error: ValidationError) -> list[str]:
+        codes = ["OUTPUT_SCHEMA_INVALID"]
+        for item in error.errors()[:15]:
+            location = ".".join(str(part) for part in item.get("loc", ())) or "root"
+            error_type = str(item.get("type", "unknown")).upper().replace("-", "_")
+            codes.append(f"OUTPUT_FIELD_{error_type}:{location}")
+        return codes
+
     def _failure(
         self,
         request: ModelCallRequest,
@@ -282,6 +357,7 @@ class GemmaCatalogLanguageModel(CatalogLanguageModelPort):
         code: str,
         retryable: bool,
         started: float,
+        validation_codes: list[str] | None = None,
     ) -> ModelCallResponse:
         return ModelCallResponse(
             call_id=request.call_id,
@@ -289,6 +365,6 @@ class GemmaCatalogLanguageModel(CatalogLanguageModelPort):
             input_hash=input_hash,
             model_alias=self.settings.model_name,
             latency_ms=max(0, int((perf_counter() - started) * 1000)),
-            validation_codes=[code],
+            validation_codes=validation_codes or [code],
             retryable=retryable,
         )

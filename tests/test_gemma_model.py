@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 
 import httpx
+from pydantic import SecretStr
 
 from fkgrid.adapters.model.gemma import GemmaCatalogLanguageModel, GemmaModelSettings
 from fkgrid.domain.catalog_language import LexiconCompatibility, ModelCallRequest, ModelStatus
@@ -123,6 +124,70 @@ def test_gemma_readiness_requires_the_configured_model_alias() -> None:
     assert adapter.readiness() == (True, "Gemma model 'gemma3:27b' is ready")
 
 
+def test_deepinfra_adapter_uses_openai_compatible_endpoint_and_bearer_auth() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "decision": "ABSTAIN",
+                                }
+                            )
+                        }
+                    }
+                ]
+            },
+        )
+
+    adapter = model(
+        GemmaModelSettings(
+            provider="deepinfra",
+            base_url="https://api.deepinfra.com/v1/openai",
+            model_name="google/gemma-4-26B-A4B-it",
+            api_key=SecretStr("test-deepinfra-token"),
+        ),
+        httpx.MockTransport(handler),
+    )
+
+    result = adapter.propose_canonical_mapping(proposer_request())
+
+    assert result.status == ModelStatus.OK
+    assert result.payload is not None and result.payload.decision == "ABSTAIN"
+    assert str(requests[0].url) == "https://api.deepinfra.com/v1/openai/chat/completions"
+    assert requests[0].headers["authorization"] == "Bearer test-deepinfra-token"
+
+
+def test_deepinfra_readiness_accepts_openai_models_response() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v1/models"
+        return httpx.Response(
+            200,
+            json={"data": [{"id": "google/gemma-4-26B-A4B-it"}]},
+        )
+
+    adapter = model(
+        GemmaModelSettings(
+            provider="deepinfra",
+            base_url="https://api.deepinfra.com/v1/openai",
+            model_name="google/gemma-4-26B-A4B-it",
+            api_key=SecretStr("test-deepinfra-token"),
+        ),
+        httpx.MockTransport(handler),
+    )
+
+    assert adapter.readiness() == (
+        True,
+        "Gemma model 'google/gemma-4-26B-A4B-it' is ready",
+    )
+
+
 def test_invalid_gemma_json_is_abstained_as_invalid_output() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"message": {"content": "not-json"}})
@@ -136,4 +201,32 @@ def test_invalid_gemma_json_is_abstained_as_invalid_output() -> None:
 
     assert result.status == ModelStatus.INVALID_OUTPUT
     assert result.payload is None
-    assert result.validation_codes == ["OUTPUT_SCHEMA_INVALID"]
+    assert result.validation_codes == ["OUTPUT_JSON_INVALID"]
+
+
+def test_gemma_json_after_reasoning_prefix_is_still_strictly_validated() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": (
+                                'I checked the supplied candidates.\n{"decision":"ABSTAIN"}\n'
+                            )
+                        }
+                    }
+                ]
+            },
+        )
+
+    adapter = model(
+        GemmaModelSettings(provider="deepinfra", base_url="http://gemma.test"),
+        httpx.MockTransport(handler),
+    )
+
+    result = adapter.propose_canonical_mapping(proposer_request())
+
+    assert result.status == ModelStatus.OK
+    assert result.payload is not None and result.payload.decision == "ABSTAIN"

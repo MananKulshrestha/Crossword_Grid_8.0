@@ -89,6 +89,10 @@ class WorkflowStatus(StrEnum):
     FAILED_SAFE = "FAILED_SAFE"
 
 
+CATALOG_LANGUAGE_DEFAULT_MODEL_DEADLINE_MS = 10_000
+CATALOG_LANGUAGE_MODEL_MAX_DEADLINE_MS = 30_000
+
+
 class ModelStatus(StrEnum):
     OK = "OK"
     INVALID_OUTPUT = "INVALID_OUTPUT"
@@ -255,7 +259,7 @@ class ModelCallRequest(StrictModel):
     output_schema_version: str = Field(min_length=1, max_length=128)
     input_payload: dict[str, Any] = Field(max_length=64)
     allowed_target_ids: list[str] = Field(default_factory=list, max_length=10)
-    deadline_ms: int = Field(ge=1, le=1_800)
+    deadline_ms: int = Field(ge=1, le=CATALOG_LANGUAGE_MODEL_MAX_DEADLINE_MS)
     temperature: float = Field(ge=0.0, le=0.0)
     tools: list[Any] = Field(default_factory=list, max_length=0)
     compatibility: LexiconCompatibility
@@ -455,8 +459,16 @@ class LexiconWorkflowRequest(StrictModel):
     compatibility: LexiconCompatibility
     active_lexicon_version: str = Field(min_length=1, max_length=128)
     max_proposals: int = Field(default=100, ge=1, le=500)
-    proposer_deadline_ms: int = Field(default=800, ge=1, le=1_800)
-    critic_deadline_ms: int = Field(default=800, ge=1, le=1_800)
+    proposer_deadline_ms: int = Field(
+        default=CATALOG_LANGUAGE_DEFAULT_MODEL_DEADLINE_MS,
+        ge=1,
+        le=CATALOG_LANGUAGE_MODEL_MAX_DEADLINE_MS,
+    )
+    critic_deadline_ms: int = Field(
+        default=CATALOG_LANGUAGE_DEFAULT_MODEL_DEADLINE_MS,
+        ge=1,
+        le=CATALOG_LANGUAGE_MODEL_MAX_DEADLINE_MS,
+    )
     regression_policy_version: str = Field(min_length=1, max_length=128)
     shadow_policy_version: str = Field(min_length=1, max_length=128)
 

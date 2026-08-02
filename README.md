@@ -67,9 +67,26 @@ From the repository root, run:
 python -m uvicorn fkgrid.api.main:app --app-dir src --host 127.0.0.1 --port 8000
 ```
 
-The default provider is Ollama at `http://127.0.0.1:11434` with model
-`gemma3:27b`. Set these variables before starting the server if your Gemma
-runtime uses another alias or an OpenAI-compatible endpoint:
+The default provider is DeepInfra at
+`https://api.deepinfra.com/v1/openai` with model
+`google/gemma-4-26B-A4B-it`. Configure it before starting the server:
+
+The Tier 2 proposer and critic use a bounded 10-second default per remote model
+call, with a 30-second hard maximum. This is an offline catalog-language budget,
+separate from the shopper runtime’s 1.8-second intent budget.
+
+```powershell
+$env:FKGRID_GEMMA_PROVIDER = "deepinfra"
+$env:FKGRID_GEMMA_BASE_URL = "https://api.deepinfra.com/v1/openai"
+$env:FKGRID_GEMMA_MODEL = "google/gemma-4-26B-A4B-it"
+$env:DEEPINFRA_API_KEY = "<your-token>"
+```
+
+The API reads `DEEPINFRA_API_KEY`, `DEEPINFRA_TOKEN`, or the legacy
+`FKGRID_GEMMA_API_KEY` variable. Secrets are read only at process startup and
+are never written to the repository or returned by the API.
+
+For a local Ollama runtime instead, set the provider and model explicitly:
 
 ```powershell
 $env:FKGRID_GEMMA_PROVIDER = "ollama"
@@ -77,18 +94,12 @@ $env:FKGRID_GEMMA_BASE_URL = "http://127.0.0.1:11434"
 $env:FKGRID_GEMMA_MODEL = "gemma3:27b"
 ```
 
-If that model is not installed in Ollama, install it explicitly before starting
-the API (the download is large):
-
-```powershell
-ollama pull gemma3:27b
-```
-
-For an OpenAI-compatible local server, use `FKGRID_GEMMA_PROVIDER=\"openai_compatible\"`,
-set `FKGRID_GEMMA_BASE_URL` to its `/v1` URL, and set `FKGRID_GEMMA_MODEL` to the
-exact loaded Gemma alias. The app reports the configured model at `/ready` and
-returns `503` for workflow calls when that model is not available; it never
-silently falls back to the fake model.
+For another OpenAI-compatible server, use
+`FKGRID_GEMMA_PROVIDER="openai_compatible"`, set `FKGRID_GEMMA_BASE_URL` to its
+`/v1` URL, and set `FKGRID_GEMMA_MODEL` to the exact loaded Gemma alias. The
+app reports the configured model at `/ready` and returns `503` for workflow
+calls when that model is not available; it never silently falls back to the
+fake model.
 
 Then open [Swagger UI](http://127.0.0.1:8000/docs). The useful routes are:
 

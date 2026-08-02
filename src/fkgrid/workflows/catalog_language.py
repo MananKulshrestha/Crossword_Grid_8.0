@@ -450,12 +450,14 @@ class CatalogLanguageTier2Workflow:
             if proposer_response.status != ModelStatus.OK or not isinstance(
                 proposer_response.payload, MappingDraft
             ):
+                proposer_codes = [f"PROPOSER_{proposer_response.status.value}"]
+                proposer_codes.extend(proposer_response.validation_codes)
                 decisions.append(
                     MappingDecision(
                         proposal_id=proposal_id,
                         source_form=cluster.surface_forms[0],
                         status="ABSTAINED",
-                        validation_codes=[f"PROPOSER_{proposer_response.status.value}"],
+                        validation_codes=proposer_codes[:32],
                     )
                 )
                 continue
@@ -477,12 +479,14 @@ class CatalogLanguageTier2Workflow:
             if critic_response.status != ModelStatus.OK or not isinstance(
                 critic_response.payload, CriticDraft
             ):
+                critic_codes = [f"CRITIC_{critic_response.status.value}"]
+                critic_codes.extend(critic_response.validation_codes)
                 decisions.append(
                     MappingDecision(
                         proposal_id=proposal_id,
                         source_form=cluster.surface_forms[0],
                         status="REJECTED",
-                        validation_codes=[f"CRITIC_{critic_response.status.value}"],
+                        validation_codes=critic_codes[:32],
                     )
                 )
                 continue

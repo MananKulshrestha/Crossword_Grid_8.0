@@ -10,6 +10,8 @@ from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 
 from fkgrid.api.container import CatalogLanguageApiContainer, create_gemma_container
 from fkgrid.domain.catalog_language import (
+    CATALOG_LANGUAGE_DEFAULT_MODEL_DEADLINE_MS,
+    CATALOG_LANGUAGE_MODEL_MAX_DEADLINE_MS,
     EvidenceWindow,
     LexiconCompatibility,
     LexiconLookupRequest,
@@ -59,8 +61,16 @@ class LexiconWorkflowApiRequest(BaseModel):
     compatibility: LexiconCompatibility
     active_lexicon_version: str = Field(min_length=1, max_length=128)
     max_proposals: int = Field(default=100, ge=1, le=500)
-    proposer_deadline_ms: int = Field(default=800, ge=1, le=1_800)
-    critic_deadline_ms: int = Field(default=800, ge=1, le=1_800)
+    proposer_deadline_ms: int = Field(
+        default=CATALOG_LANGUAGE_DEFAULT_MODEL_DEADLINE_MS,
+        ge=1,
+        le=CATALOG_LANGUAGE_MODEL_MAX_DEADLINE_MS,
+    )
+    critic_deadline_ms: int = Field(
+        default=CATALOG_LANGUAGE_DEFAULT_MODEL_DEADLINE_MS,
+        ge=1,
+        le=CATALOG_LANGUAGE_MODEL_MAX_DEADLINE_MS,
+    )
     regression_policy_version: str = Field(min_length=1, max_length=128)
     shadow_policy_version: str = Field(min_length=1, max_length=128)
 
@@ -126,8 +136,8 @@ WORKFLOW_EXAMPLE = {
     },
     "active_lexicon_version": "lex-demo-1",
     "max_proposals": 100,
-    "proposer_deadline_ms": 1800,
-    "critic_deadline_ms": 1800,
+    "proposer_deadline_ms": 10000,
+    "critic_deadline_ms": 10000,
     "regression_policy_version": "regression-v1",
     "shadow_policy_version": "shadow-v1",
 }
@@ -222,7 +232,8 @@ def create_app(container: CatalogLanguageApiContainer | None = None) -> FastAPI:
                     "gemma": {
                         "summary": "Gemma local run",
                         "description": (
-                            "Requires the configured Gemma model, default gemma3:27b, "
+                            "Requires the configured Gemma model, default DeepInfra "
+                            "google/gemma-4-26B-A4B-it, "
                             "to be available from the provider."
                         ),
                         "value": WORKFLOW_EXAMPLE,

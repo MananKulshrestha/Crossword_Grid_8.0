@@ -10,5 +10,11 @@ DATA_START
 {{canonical_critic_input_json}}
 DATA_END
 
-Return only strict CriticDraftV1 JSON.
+Output contract:
+- Always include decision and rationale_code.
+- Use only ACCEPT, CONCERN, or ABSTAIN for decision.
+- evidence_ids must be copied only from the supplied evidence IDs.
+- Use recommended_scope null when no scope recommendation is needed.
+- Do not return an explanation, Markdown, replacement target, or unknown key.
 
+Return only strict CriticDraftV1 JSON.
