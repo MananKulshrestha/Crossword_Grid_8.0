@@ -49,6 +49,29 @@ redacted traces only.
 No database, provider, network queue, API server, or UI is started by this
 package. Tests are offline and deterministic.
 
+## FastAPI and Swagger UI
+
+The thin API layer is available at `fkgrid.api.main:app` and keeps the existing
+workflow as the only owner of qualification, evidence, assessment, routing, and
+case-transition policy. It provides:
+
+- `GET /healthz` and `GET /readyz` for local readiness.
+- `POST /api/v1/quality/signals` for the complete signal-to-review workflow.
+- `GET /api/v1/quality/cases/{case_id}` and `/events` for review inspection.
+- `POST /api/v1/quality/cases/{case_id}/decision` for reviewer decisions.
+- `POST /api/v1/quality/cases/{case_id}/lifecycle` for close/reopen.
+- `GET /api/v1/quality/tools`, `/policy`, and `/demo-state` for safe inspection.
+
+Run the no-database local demo with:
+
+```powershell
+uv run uvicorn fkgrid.api.main:app --host 127.0.0.1 --port 8000
+```
+
+Then open http://127.0.0.1:8000/docs. The default composition uses
+deterministic in-memory adapters. Database owners can pass their ports to
+`create_app(QualityApiState(...))`; no migration or database startup occurs.
+
 ## Local verification
 
 ```powershell
@@ -62,6 +85,10 @@ compose the live classifier, set the runtime-only variables in `.env.example`
 `Gemma4QualityClassifier.from_environment()`. No key is read from repository
 files, persisted, logged, or included in traces. The database owner still
 supplies persistence and migration adapters.
+
+The FastAPI demo uses the deterministic classifier by default. To opt into the
+Gemma adapter explicitly, set `FKGRID_USE_GEMMA=true` together with the
+runtime-only `FKGRID_GEMMA_API_KEY` before starting Uvicorn.
 
 For an authorized local smoke test, inject `FKGRID_GEMMA_API_KEY` from the
 operator's secret manager for the process only, instantiate the classifier, and

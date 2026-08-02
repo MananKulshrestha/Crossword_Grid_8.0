@@ -16,6 +16,7 @@ from fkgrid.domain.quality import (
     CatalogSnapshot,
     EvidencePacket,
     GroupKey,
+    HumanDecision,
     QualificationResult,
     QualityAssessmentProposal,
     QualityCase,
@@ -116,7 +117,7 @@ class InMemoryQualityPersistence:
         with self._lock:
             return deepcopy(self.events_by_case.get(case_id, []))
 
-    def save_human_decision(self, decision: object) -> object:
+    def save_human_decision(self, decision: HumanDecision) -> HumanDecision:
         with self._lock:
             self.decisions.append(deepcopy(decision))
             return deepcopy(decision)
