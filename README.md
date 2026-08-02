@@ -38,10 +38,13 @@ or enforcement port.
 The database owner must implement the port contracts with SQLAlchemy/Alembic,
 short transactions, unique idempotency constraints, append-only case events,
 and the repository's shared canonical IDs/version tuple. The catalog owner must
-provide immutable event-time snapshots. The model owner must provide a strict
-structured gateway adapter with no tools and bounded timeout. Operations must
-approve/activate policy and queue configuration. API/UI owners should expose
-typed inputs and redacted traces only.
+provide immutable event-time snapshots. A provider-neutral `QualityClassifier`
+port is implemented by the offline fake and by the optional
+`Gemma4QualityClassifier` Google REST adapter. The live adapter uses
+`gemma-4-26b-a4b-it`, sends one redacted packet with no tools, requests JSON,
+and strictly revalidates citations and fields. Operations must approve/activate
+policy and queue configuration. API/UI owners should expose typed inputs and
+redacted traces only.
 
 No database, provider, network queue, API server, or UI is started by this
 package. Tests are offline and deterministic.
@@ -53,5 +56,15 @@ uv run pytest
 uv run ruff check .
 ```
 
-The project currently uses the bundled fake/in-memory adapters to prove the
-workflow while the shared application and database layers are assembled.
+The project uses the bundled fake/in-memory adapters for deterministic tests. To
+compose the live classifier, set the runtime-only variables in `.env.example`
+(or the process environment) and call
+`Gemma4QualityClassifier.from_environment()`. No key is read from repository
+files, persisted, logged, or included in traces. The database owner still
+supplies persistence and migration adapters.
+
+For an authorized local smoke test, inject `FKGRID_GEMMA_API_KEY` from the
+operator's secret manager for the process only, instantiate the classifier, and
+run one representative `EvidencePacket`. Do not put the key in `.env`, shell
+history, fixtures, traces, or command arguments; clear the process variable
+after the smoke test.

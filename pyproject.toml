@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "fkgrid-quality-sentinel"
 version = "0.1.0"
-description = "Tier 1 contract-first Catalog Quality Sentinel workflow"
+description = "Tier 1 contract-first Catalog Quality Sentinel workflow with optional Gemma 4 classification"
 requires-python = ">=3.12"
 dependencies = [
   "pydantic>=2.7,<3",
