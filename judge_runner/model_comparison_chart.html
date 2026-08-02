@@ -1,0 +1,282 @@
+<title>Attribute Extraction Benchmark</title>
+<style>
+  .viz-root {
+    color-scheme: light;
+    --surface-1:      #fcfcfb;
+    --surface-page:    #f9f9f7;
+    --text-primary:   #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted:     #898781;
+    --grid:           #e1e0d9;
+    --baseline:       #c3c2b7;
+    --border:         rgba(11,11,11,0.10);
+    --series-1: #2a78d6; /* strict */
+    --series-2: #eb6834; /* loose */
+    --series-3: #1baf7a; /* missing */
+    --winner-glow: rgba(42,120,214,0.16);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) .viz-root {
+      color-scheme: dark;
+      --surface-1:      #1a1a19;
+      --surface-page:    #0d0d0d;
+      --text-primary:   #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted:     #898781;
+      --grid:           #2c2c2a;
+      --baseline:       #383835;
+      --border:         rgba(255,255,255,0.10);
+      --series-1: #3987e5;
+      --series-2: #d95926;
+      --series-3: #199e70;
+      --winner-glow: rgba(57,135,229,0.20);
+    }
+  }
+  :root[data-theme="dark"] .viz-root {
+    color-scheme: dark;
+    --surface-1:      #1a1a19;
+    --surface-page:    #0d0d0d;
+    --text-primary:   #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted:     #898781;
+    --grid:           #2c2c2a;
+    --baseline:       #383835;
+    --border:         rgba(255,255,255,0.10);
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+    --winner-glow: rgba(57,135,229,0.20);
+  }
+
+  * { box-sizing: border-box; }
+  body { margin: 0; }
+  .viz-root {
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: var(--surface-page);
+    color: var(--text-primary);
+    padding: 48px 20px;
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+  }
+  .card {
+    width: 100%;
+    max-width: 980px;
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 24px;
+    padding: 40px 44px 32px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04), 0 24px 60px -20px rgba(0,0,0,0.18);
+  }
+  .eyebrow {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin: 0 0 6px;
+  }
+  h1 {
+    font-size: 26px;
+    font-weight: 650;
+    letter-spacing: -0.015em;
+    margin: 0 0 6px;
+  }
+  .sub {
+    font-size: 14px;
+    color: var(--text-secondary);
+    margin: 0 0 28px;
+    line-height: 1.5;
+  }
+  .legend {
+    display: flex;
+    gap: 20px;
+    margin-bottom: 22px;
+    flex-wrap: wrap;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    font-weight: 500;
+  }
+  .swatch {
+    width: 10px;
+    height: 10px;
+    border-radius: 3px;
+    flex: none;
+  }
+  .chart {
+    position: relative;
+  }
+  .plot {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    align-items: end;
+    height: 300px;
+    border-bottom: 1px solid var(--baseline);
+    position: relative;
+    padding-left: 4px;
+  }
+  .gridlines {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    grid-template-rows: repeat(5, 1fr);
+    pointer-events: none;
+  }
+  .gridlines div {
+    border-top: 1px solid var(--grid);
+  }
+  .group {
+    position: relative;
+    height: 100%;
+    display: flex;
+    align-items: end;
+    justify-content: center;
+    gap: 4px;
+    padding: 0 6px;
+  }
+  .group.winner {
+    background: var(--winner-glow);
+    border-radius: 12px 12px 0 0;
+  }
+  .bar-wrap {
+    position: relative;
+    width: 20px;
+    height: 100%;
+    display: flex;
+    align-items: end;
+  }
+  .bar {
+    width: 100%;
+    border-radius: 4px 4px 0 0;
+    position: relative;
+  }
+  .bar[data-s="1"] { background: var(--series-1); }
+  .bar[data-s="2"] { background: var(--series-2); }
+  .bar[data-s="3"] { background: var(--series-3); }
+
+  .bar .tip {
+    position: absolute;
+    top: -18px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 10.5px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .labels {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    margin-top: 12px;
+    padding-left: 4px;
+  }
+  .labels div {
+    text-align: center;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--text-primary);
+    padding: 0 2px;
+    line-height: 1.35;
+  }
+  .labels div span {
+    display: block;
+    font-size: 10.5px;
+    font-weight: 500;
+    color: var(--text-muted);
+  }
+
+  .footnote {
+    margin-top: 26px;
+    padding-top: 18px;
+    border-top: 1px solid var(--grid);
+    font-size: 12px;
+    color: var(--text-muted);
+    line-height: 1.6;
+  }
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    background: var(--winner-glow);
+    color: var(--series-1);
+    font-size: 10.5px;
+    font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 20px;
+    margin-top: 6px;
+  }
+</style>
+
+<div class="viz-root">
+  <div class="card">
+    <p class="eyebrow">Query attribute-extraction eval &middot; 200 samples/model</p>
+    <h1>Model comparison: attribute extraction &amp; missing-field detection</h1>
+    <p class="sub">Micro F1 across strict (exact value match), loose (substring match), and missing-attribute detection scoring.</p>
+
+    <div class="legend">
+      <div class="legend-item"><span class="swatch" style="background:var(--series-1)"></span>Strict F1</div>
+      <div class="legend-item"><span class="swatch" style="background:var(--series-2)"></span>Loose F1</div>
+      <div class="legend-item"><span class="swatch" style="background:var(--series-3)"></span>Missing-attr F1</div>
+    </div>
+
+    <div class="chart">
+      <div class="plot" id="plot">
+        <div class="gridlines"><div></div><div></div><div></div><div></div><div></div></div>
+      </div>
+      <div class="labels" id="labels"></div>
+    </div>
+
+    <div class="footnote">
+      Strict = normalized exact-string match. Loose = substring match (catches qualifier drops like "under $80" → "$80"). Missing-attribute F1 scores detection of unstated fields the query should have flagged as missing. Gemma4:e4b and Qwen3.6 lead on strict/loose extraction; Qwen3.6 leads missing-attribute detection.
+    </div>
+  </div>
+</div>
+
+<script>
+  const data = [
+    { name: "gemma4", sub: "e2b",  strict: 43.41, loose: 55.51, missing: 23.11 },
+    { name: "gemma4", sub: "e4b",  strict: 80.13, loose: 84.50, missing: 28.22, winner: true },
+    { name: "llama3.2", sub: "1b", strict: 30.61, loose: 42.89, missing: 10.73 },
+    { name: "llama3.2", sub: "3b", strict: 56.73, loose: 64.61, missing: 43.19 },
+    { name: "llama3", sub: "8b",   strict: 66.35, loose: 77.75, missing: 31.73 },
+    { name: "qwen3.6", sub: "latest", strict: 80.61, loose: 85.09, missing: 49.10 },
+  ];
+
+  const maxVal = 100;
+  const plot = document.getElementById("plot");
+  const labels = document.getElementById("labels");
+
+  data.forEach(d => {
+    const group = document.createElement("div");
+    group.className = "group" + (d.winner ? " winner" : "");
+
+    [["strict", 1], ["loose", 2], ["missing", 3]].forEach(([key, slot]) => {
+      const wrap = document.createElement("div");
+      wrap.className = "bar-wrap";
+      const bar = document.createElement("div");
+      bar.className = "bar";
+      bar.dataset.s = slot;
+      bar.style.height = (d[key] / maxVal * 100) + "%";
+      const tip = document.createElement("span");
+      tip.className = "tip";
+      tip.textContent = d[key].toFixed(0);
+      bar.appendChild(tip);
+      wrap.appendChild(bar);
+      group.appendChild(wrap);
+    });
+
+    plot.appendChild(group);
+
+    const label = document.createElement("div");
+    label.innerHTML = `${d.name}<span>${d.sub}</span>` + (d.winner ? `<div class="badge">TOP F1</div>` : "");
+    labels.appendChild(label);
+  });
+</script>

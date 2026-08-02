@@ -1,0 +1,14 @@
+[
+  {"category_key": "shoes", "template": "Looking for {brand} {color} {category} in {size} for {usage} at {price}"},
+  {"category_key": "shoes", "template": "Need {category} for {usage}, {size}, preferably {brand}"},
+  {"category_key": "backpack", "template": "Looking for a {color} {brand} {category}, {size}, for {usage}"},
+  {"category_key": "backpack", "template": "Need a {category} for {usage} at {price}"},
+  {"category_key": "headphones", "template": "Need {brand} {category} for {usage} in {color} at {price}"},
+  {"category_key": "headphones", "template": "Looking for {size} {category} for {usage}"},
+  {"category_key": "laptop", "template": "Looking for a {color} {brand} {size} {category} for {usage} at {price}"},
+  {"category_key": "laptop", "template": "Need a {category} for {usage}, around {size}"},
+  {"category_key": "chair", "template": "Find a {color} {brand} {size} {category} for {usage}"},
+  {"category_key": "chair", "template": "Looking for a {category} for {usage} at {price}"},
+  {"category_key": "coffee maker", "template": "Need a {brand} {color} {size} {category} for {usage} at {price}"},
+  {"category_key": "coffee maker", "template": "Looking for a {category} for {usage}, preferably {brand}"}
+]

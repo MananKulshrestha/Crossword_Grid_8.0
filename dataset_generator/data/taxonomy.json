@@ -1,0 +1,62 @@
+{
+  "shoes": {
+    "canonical_category": "shoes",
+    "attributes": {
+      "size": {"values": ["size 8", "size 9", "size 10"]},
+      "price": {"values": ["under $80", "under $120", "under $160"]},
+      "usage": {"values": ["running", "walking", "hiking"]},
+      "color": {"values": ["black", "white", "blue"]},
+      "brand": {"values": ["Nike", "Adidas", "Brooks"]}
+    }
+  },
+  "backpack": {
+    "canonical_category": "backpack",
+    "attributes": {
+      "size": {"values": ["small", "medium", "large"]},
+      "price": {"values": ["under $50", "under $90", "under $130"]},
+      "usage": {"values": ["commuting", "travel", "school"]},
+      "color": {"values": ["black", "navy", "green"]},
+      "brand": {"values": ["JanSport", "Herschel", "North Face"]}
+    }
+  },
+  "headphones": {
+    "canonical_category": "headphones",
+    "attributes": {
+      "size": {"values": ["compact", "standard", "over-ear"]},
+      "price": {"values": ["under $75", "under $150", "under $250"]},
+      "usage": {"values": ["music", "gaming", "office calls"]},
+      "color": {"values": ["black", "white", "silver"]},
+      "brand": {"values": ["Sony", "Bose", "JBL"]}
+    }
+  },
+  "laptop": {
+    "canonical_category": "laptop",
+    "attributes": {
+      "size": {"values": ["13-inch", "14-inch", "16-inch"]},
+      "price": {"values": ["under $800", "under $1200", "under $1800"]},
+      "usage": {"values": ["school", "coding", "video editing"]},
+      "color": {"values": ["silver", "black", "blue"]},
+      "brand": {"values": ["Dell", "Lenovo", "Apple"]}
+    }
+  },
+  "chair": {
+    "canonical_category": "chair",
+    "attributes": {
+      "size": {"values": ["small", "medium", "large"]},
+      "price": {"values": ["under $150", "under $300", "under $500"]},
+      "usage": {"values": ["office work", "gaming", "studying"]},
+      "color": {"values": ["black", "gray", "white"]},
+      "brand": {"values": ["IKEA", "Herman Miller", "Steelcase"]}
+    }
+  },
+  "coffee maker": {
+    "canonical_category": "coffee maker",
+    "attributes": {
+      "size": {"values": ["single-serve", "8-cup", "12-cup"]},
+      "price": {"values": ["under $60", "under $120", "under $200"]},
+      "usage": {"values": ["home", "office", "travel"]},
+      "color": {"values": ["black", "silver", "cream"]},
+      "brand": {"values": ["Keurig", "Nespresso", "Breville"]}
+    }
+  }
+}

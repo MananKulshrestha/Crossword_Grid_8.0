@@ -1,0 +1,9 @@
+{
+  "priority_mapping": {
+    "1": ["category"],
+    "2": ["size"],
+    "3": ["price"],
+    "4": ["usage"],
+    "5": ["brand", "color"]
+  }
+}
