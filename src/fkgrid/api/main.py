@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Annotated
+from uuid import uuid4
 
-from fastapi import Body, Depends, FastAPI, HTTPException, Request, status
+from fastapi import Body, Depends, FastAPI, HTTPException, Query, Request, status
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 
 from fkgrid.api.container import CatalogLanguageApiContainer, create_gemma_container
@@ -13,6 +14,7 @@ from fkgrid.domain.catalog_language import (
     CATALOG_LANGUAGE_DEFAULT_MODEL_DEADLINE_MS,
     CATALOG_LANGUAGE_MODEL_MAX_DEADLINE_MS,
     EvidenceWindow,
+    GuidedLexiconRunRequest,
     LexiconCompatibility,
     LexiconLookupRequest,
     LexiconLookupResult,
@@ -152,6 +154,26 @@ LOOKUP_EXAMPLE = {
 }
 
 
+OPENAPI_TAGS = [
+    {
+        "name": "guided-demo",
+        "description": (
+            "Human-friendly input: enter a query term and scope as fields. "
+            "The server runs the same validated Tier 2 workflow."
+        ),
+    },
+    {
+        "name": "catalog-language",
+        "description": "Advanced JSON workflow and capability contracts.",
+    },
+    {
+        "name": "deterministic-lookup",
+        "description": "Model-free lookup against the active reviewed lexicon.",
+    },
+    {"name": "system", "description": "Health and readiness probes."},
+]
+
+
 def get_container(request: Request) -> CatalogLanguageApiContainer:
     return request.app.state.catalog_language
 
@@ -175,6 +197,14 @@ def create_app(container: CatalogLanguageApiContainer | None = None) -> FastAPI:
         docs_url="/docs",
         redoc_url="/redoc",
         openapi_url="/openapi.json",
+        openapi_tags=OPENAPI_TAGS,
+        swagger_ui_parameters={
+            "defaultModelsExpandDepth": -1,
+            "displayRequestDuration": True,
+            "docExpansion": "list",
+            "filter": True,
+            "tryItOutEnabled": True,
+        },
     )
     app.state.catalog_language = selected_container
 
@@ -210,6 +240,102 @@ def create_app(container: CatalogLanguageApiContainer | None = None) -> FastAPI:
             capabilities=sorted(CATALOG_LANGUAGE_CAPABILITIES),
             forbidden_capabilities=sorted(CATALOG_LANGUAGE_FORBIDDEN_CAPABILITIES),
         )
+
+    @app.post(
+        "/api/v1/catalog-language/tier2/guided-run",
+        response_model=LexiconWorkflowResult,
+        status_code=status.HTTP_200_OK,
+        tags=["guided-demo"],
+        summary="Guided run — enter a query term without editing JSON",
+        description=(
+            "Enter a shopper-language term, locale, and optional category/attribute in the "
+            "Swagger parameter fields. The input becomes bounded demo evidence and then flows "
+            "through the same Tier 2 proposer, critic, deterministic validation, regression, "
+            "review, and activation workflow as the advanced JSON route. The default app calls "
+            "the configured Gemma model; local fixture adapters stand in for the future DB "
+            "and artifact owners."
+        ),
+    )
+    def run_guided(
+        term: Annotated[
+            str,
+            Query(
+                min_length=1,
+                max_length=256,
+                description="The shopper-language term or phrase to expand.",
+                examples=["sneakers", "water proof shoes"],
+            ),
+        ],
+        locale: Annotated[
+            str,
+            Query(
+                min_length=2,
+                max_length=32,
+                description="Locale scope for the proposal.",
+                examples=["en-IN"],
+            ),
+        ] = "en-IN",
+        category: Annotated[
+            str,
+            Query(
+                min_length=1,
+                max_length=128,
+                description="Canonical taxonomy scope. Use footwear for the included demo catalog.",
+                examples=["footwear"],
+            ),
+        ] = "footwear",
+        attribute_id: Annotated[
+            str | None,
+            Query(
+                max_length=128,
+                description="Optional canonical attribute scope; leave blank when not needed.",
+            ),
+        ] = None,
+        proposer_deadline_ms: Annotated[
+            int,
+            Query(
+                ge=1,
+                le=CATALOG_LANGUAGE_MODEL_MAX_DEADLINE_MS,
+                description="Remote Gemma proposer budget. 30,000 is the guided default.",
+            ),
+        ] = CATALOG_LANGUAGE_MODEL_MAX_DEADLINE_MS,
+        critic_deadline_ms: Annotated[
+            int,
+            Query(
+                ge=1,
+                le=CATALOG_LANGUAGE_MODEL_MAX_DEADLINE_MS,
+                description="Remote Gemma critic budget. 30,000 is the guided default.",
+            ),
+        ] = CATALOG_LANGUAGE_MODEL_MAX_DEADLINE_MS,
+        container: CatalogLanguageApiContainer = catalog_language_container_dependency,
+    ) -> LexiconWorkflowResult:
+        is_ready, detail = container.check_readiness()
+        if not is_ready:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=detail,
+            )
+        if not term.strip() or not category.strip():
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="term and category must contain non-whitespace text",
+            )
+        request = GuidedLexiconRunRequest(
+            run_id=f"guided-{uuid4().hex}",
+            term=term.strip(),
+            locale=locale.strip(),
+            taxonomy_node_id=category.strip() or None,
+            attribute_id=attribute_id.strip() if attribute_id and attribute_id.strip() else None,
+            proposer_deadline_ms=proposer_deadline_ms,
+            critic_deadline_ms=critic_deadline_ms,
+        )
+        try:
+            return container.run_guided(request)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="guided catalog-language workflow failed safely; inspect server telemetry",
+            ) from exc
 
     @app.post(
         "/api/v1/catalog-language/tier2/runs",
@@ -261,7 +387,7 @@ def create_app(container: CatalogLanguageApiContainer | None = None) -> FastAPI:
         "/api/v1/catalog-language/lookup",
         response_model=LexiconLookupResult,
         status_code=status.HTTP_200_OK,
-        tags=["catalog-language"],
+        tags=["deterministic-lookup"],
         summary="Resolve one term through the deterministic active lexicon",
         description=(
             "Model-free bounded lookup. It never calls the proposer, reads history, "

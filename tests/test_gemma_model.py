@@ -165,7 +165,11 @@ def test_deepinfra_adapter_uses_openai_compatible_endpoint_and_bearer_auth() -> 
 
 
 def test_deepinfra_readiness_accepts_openai_models_response() -> None:
+    calls = 0
+
     def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
         assert request.url.path == "/v1/models"
         return httpx.Response(
             200,
@@ -178,6 +182,7 @@ def test_deepinfra_readiness_accepts_openai_models_response() -> None:
             base_url="https://api.deepinfra.com/v1/openai",
             model_name="google/gemma-4-26B-A4B-it",
             api_key=SecretStr("test-deepinfra-token"),
+            readiness_cache_seconds=60.0,
         ),
         httpx.MockTransport(handler),
     )
@@ -186,6 +191,11 @@ def test_deepinfra_readiness_accepts_openai_models_response() -> None:
         True,
         "Gemma model 'google/gemma-4-26B-A4B-it' is ready",
     )
+    assert adapter.readiness() == (
+        True,
+        "Gemma model 'google/gemma-4-26B-A4B-it' is ready",
+    )
+    assert calls == 1
 
 
 def test_invalid_gemma_json_is_abstained_as_invalid_output() -> None:

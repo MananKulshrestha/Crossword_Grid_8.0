@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
-from time import perf_counter
+from time import monotonic, perf_counter
 from typing import Literal, cast
 
 import httpx
@@ -40,6 +40,7 @@ class GemmaModelSettings:
     model_name: str = "google/gemma-4-26B-A4B-it"
     api_key: SecretStr | None = None
     readiness_timeout_seconds: float = 2.0
+    readiness_cache_seconds: float = 15.0
     max_output_tokens: int = 384
 
     def __post_init__(self) -> None:
@@ -49,6 +50,8 @@ class GemmaModelSettings:
             raise ValueError("Gemma model_name must not be empty")
         if self.readiness_timeout_seconds <= 0:
             raise ValueError("readiness_timeout_seconds must be positive")
+        if self.readiness_cache_seconds <= 0:
+            raise ValueError("readiness_cache_seconds must be positive")
         if not 32 <= self.max_output_tokens <= 2_048:
             raise ValueError("max_output_tokens must be between 32 and 2048")
 
@@ -78,6 +81,7 @@ class GemmaModelSettings:
             model_name=os.getenv("FKGRID_GEMMA_MODEL", "google/gemma-4-26B-A4B-it"),
             api_key=SecretStr(raw_key) if raw_key else None,
             readiness_timeout_seconds=float(os.getenv("FKGRID_GEMMA_READY_TIMEOUT_S", "2")),
+            readiness_cache_seconds=float(os.getenv("FKGRID_GEMMA_READY_CACHE_S", "15")),
             max_output_tokens=int(os.getenv("FKGRID_GEMMA_MAX_OUTPUT_TOKENS", "384")),
         )
 
@@ -95,10 +99,22 @@ class GemmaCatalogLanguageModel(CatalogLanguageModelPort):
         self.settings = settings
         self.prompt_registry = prompt_registry or PromptRegistry()
         self._transport = transport
+        self._readiness_cache: tuple[float, tuple[bool, str]] | None = None
 
     def readiness(self) -> tuple[bool, str]:
         """Return a safe readiness result without exposing provider failures."""
 
+        now = monotonic()
+        if self._readiness_cache is not None:
+            cached_at, cached_result = self._readiness_cache
+            if now - cached_at < self.settings.readiness_cache_seconds:
+                return cached_result
+        result = self._probe_readiness()
+        if result[0]:
+            self._readiness_cache = (monotonic(), result)
+        return result
+
+    def _probe_readiness(self) -> tuple[bool, str]:
         try:
             with httpx.Client(
                 timeout=self.settings.readiness_timeout_seconds,

@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from hashlib import sha256
 
-from fkgrid.catalog_language.normalization import tokenize
+from fkgrid.catalog_language.normalization import normalize_surface_form, tokenize
 from fkgrid.domain.catalog_language import (
     ActivationReceipt,
     ActivationRequest,
     CanonicalVocabularySnapshot,
     EvidenceGroup,
+    EvidenceSourceClass,
     EvidenceWindow,
     LexiconCandidateVersion,
     LexiconCompatibility,
@@ -74,6 +76,60 @@ class FakeEvidenceAggregation(EvidenceAggregationPort):
     ) -> list[EvidenceGroup]:
         self.calls.append((window, compatibility))
         return list(self.groups)
+
+
+class InteractiveEvidenceAggregation(EvidenceAggregationPort):
+    """Turn one explicitly supplied term into bounded demo evidence.
+
+    This is only the guided Swagger adapter.  It keeps the production port
+    unchanged: a database owner can replace it with aggregated, de-identified
+    query-gap evidence without changing the workflow or the model contract.
+    """
+
+    def __init__(
+        self,
+        *,
+        term: str,
+        locale: str,
+        taxonomy_node_id: str | None,
+        attribute_id: str | None,
+    ) -> None:
+        self.term = term.strip()
+        self.locale = locale
+        self.taxonomy_node_id = taxonomy_node_id
+        self.attribute_id = attribute_id
+
+    def aggregate_query_gap_events(
+        self, window: EvidenceWindow, compatibility: LexiconCompatibility
+    ) -> list[EvidenceGroup]:
+        del compatibility
+        normalized = normalize_surface_form(self.term, self.locale)
+        surface_forms = [self.term]
+        if normalized != self.term:
+            surface_forms.append(normalized)
+        fingerprint = sha256(
+            f"{normalized}|{self.locale}|{self.taxonomy_node_id or ''}|"
+            f"{self.attribute_id or ''}".encode()
+        ).hexdigest()[:24]
+        support_count = max(window.min_support_count, 8)
+        return [
+            EvidenceGroup(
+                group_id=f"guided-{fingerprint}",
+                normalized_term=normalized,
+                observed_surface_forms=surface_forms,
+                locale=self.locale,
+                taxonomy_node_id=self.taxonomy_node_id,
+                attribute_id=self.attribute_id,
+                support_count=support_count,
+                distinct_source_groups=max(window.min_distinct_source_groups, 8),
+                source_classes=[EvidenceSourceClass.ZERO_RESULT, EvidenceSourceClass.RECOVERY],
+                source_concentration=0.25,
+                recovery_success_count=support_count // 2,
+                contradiction_count=0,
+                first_observed_at=window.window_start,
+                last_observed_at=window.window_end - timedelta(seconds=1),
+            )
+        ]
 
 
 class FakeVocabulary(CanonicalVocabularyPort):

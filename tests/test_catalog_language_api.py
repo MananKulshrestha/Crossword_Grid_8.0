@@ -41,6 +41,7 @@ def test_health_ready_and_openapi_are_available() -> None:
     assert openapi.status_code == 200
     paths = openapi.json()["paths"]
     assert "/api/v1/catalog-language/tier2/runs" in paths
+    assert "/api/v1/catalog-language/tier2/guided-run" in paths
     assert "/api/v1/catalog-language/lookup" in paths
 
 
@@ -77,6 +78,39 @@ def test_tier_two_endpoint_executes_existing_workflow() -> None:
     assert body["status"] == "COMPLETED"
     assert body["candidate"]["parent_lexicon_version"] == "lex-demo-1"
     assert body["activation"]["activated"] is True
+
+
+def test_guided_endpoint_accepts_clean_query_input_and_uses_same_workflow() -> None:
+    response = client.post(
+        "/api/v1/catalog-language/tier2/guided-run",
+        params={
+            "term": "sneakers",
+            "locale": "en-IN",
+            "category": "footwear",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "COMPLETED"
+    assert body["decisions"][0]["source_form"] == "sneakers"
+    assert body["activation"]["activated"] is True
+    assert any(
+        event["step"] == "propose_canonical_mapping" and event["status"] == "OK"
+        for event in body["trace"]
+    )
+    second_response = client.post(
+        "/api/v1/catalog-language/tier2/guided-run",
+        params={"term": "trainers", "locale": "en-IN", "category": "footwear"},
+    )
+    second_body = second_response.json()
+    assert second_response.status_code == 200
+    assert second_body["status"] == "COMPLETED"
+    assert (
+        second_body["candidate"]["parent_lexicon_version"]
+        == body["activation"]["active_lexicon_version"]
+    )
+    assert second_body["candidate"]["candidate_version"] != body["candidate"]["candidate_version"]
 
 
 def test_invalid_strict_body_is_rejected_before_workflow_execution() -> None:

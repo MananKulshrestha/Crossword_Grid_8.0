@@ -116,6 +116,19 @@ query, validator, workflow budget, artifact format, or provider boundary.
 - Offline DeepInfra proposer/critic calls now have a 10-second default and 30-second
   hard maximum. This must not leak into shopper intent latency budgets; remote cold
   starts and queueing still need cost/latency monitoring and bounded retry policy.
+- The guided Swagger route turns one explicitly typed term into synthetic demo evidence
+  so a human can exercise the complete workflow without editing JSON. It must remain
+  clearly labelled as a test/admin path; replacing it with raw user-search evidence
+  without aggregation, privacy controls, and thresholds would bypass Tier 2 evidence
+  gates.
+- Guided input currently uses the local fixture taxonomy scope (`footwear`) and version
+  tuple. A category label-to-ID selector backed by the production vocabulary is still
+  required; accepting arbitrary IDs or silently falling back to a global scope could
+  produce misleading no-target results or cross-category mappings.
+- Guided Swagger submissions are successive workflow runs and the local adapter carries
+  its active-version pointer forward between them. The in-memory pointer is not a
+  concurrency or durability boundary; production UI needs a current-version refresh,
+  idempotency, and database-backed activation CAS before concurrent operators use it.
 
 ## Open handoff questions
 

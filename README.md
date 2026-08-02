@@ -64,7 +64,7 @@ container.
 From the repository root, run:
 
 ```text
-python -m uvicorn fkgrid.api.main:app --app-dir src --host 127.0.0.1 --port 8000
+python -m uvicorn fkgrid.api.main:app --app-dir src --host 127.0.0.1 --port 8010
 ```
 
 The default provider is DeepInfra at
@@ -85,6 +85,9 @@ $env:DEEPINFRA_API_KEY = "<your-token>"
 The API reads `DEEPINFRA_API_KEY`, `DEEPINFRA_TOKEN`, or the legacy
 `FKGRID_GEMMA_API_KEY` variable. Secrets are read only at process startup and
 are never written to the repository or returned by the API.
+Successful provider readiness is cached for 15 seconds by default so repeated
+guided Swagger submissions do not re-probe the model catalog unnecessarily;
+override that with `FKGRID_GEMMA_READY_CACHE_S` when needed.
 
 For a local Ollama runtime instead, set the provider and model explicitly:
 
@@ -101,14 +104,24 @@ app reports the configured model at `/ready` and returns `503` for workflow
 calls when that model is not available; it never silently falls back to the
 fake model.
 
-Then open [Swagger UI](http://127.0.0.1:8000/docs). The useful routes are:
+Then open [Swagger UI](http://127.0.0.1:8010/docs). Start with the **Guided
+run — enter a query term without editing JSON** operation. Click **Try it out**
+and fill in `term`, `locale`, and `category` (the included fixture uses
+`footwear`). It generates the run ID, compatibility tuple, evidence window,
+and policy versions for you, then sends your term through the same proposer,
+critic, validation, regression, review, and activation workflow.
+
+The useful routes are:
 
 - `GET /health` and `GET /ready` — process/readiness state.
 - `GET /api/v1/catalog-language/capabilities` — Tier 2 capability and forbidden-action contract.
+- `POST /api/v1/catalog-language/tier2/guided-run` — clean field-based input for one term;
+  this is the recommended Gemma test path.
 - `POST /api/v1/catalog-language/tier2/runs` — runs the existing bounded proposer/critic,
-  validation, regression, shadow, review, and activation workflow.
+  validation, regression, shadow, review, and activation workflow using the advanced JSON
+  contract.
 - `POST /api/v1/catalog-language/lookup` — runs the existing model-free deterministic
-  active-lexicon lookup.
+  active-lexicon lookup; it does not call Gemma.
 
 The Swagger examples use local fixture versions `cat-demo-1` / `tax-demo-1` /
 `lex-demo-1`, but proposer and critic decisions are made by the configured

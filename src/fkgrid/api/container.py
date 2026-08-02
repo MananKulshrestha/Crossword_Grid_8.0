@@ -2,15 +2,15 @@
 
 The API accepts a fully assembled container so production callers can inject
 database, retrieval, model, review, and activation adapters without changing
-HTTP contracts.  The default container is a deterministic demo only; it never
-connects to a database or external provider.
+HTTP contracts.  The default container uses real Gemma calls and local
+contract fixtures until those production adapters are supplied.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 from fkgrid.adapters.catalog_language.fakes import (
@@ -22,6 +22,7 @@ from fkgrid.adapters.catalog_language.fakes import (
     FakeVocabulary,
     InMemoryTargetRetriever,
     InMemoryTrace,
+    InteractiveEvidenceAggregation,
     PassingRegression,
     PassingShadow,
     SequentialIds,
@@ -37,20 +38,25 @@ from fkgrid.domain.catalog_language import (
     EvidenceBand,
     EvidenceGroup,
     EvidenceSourceClass,
+    EvidenceWindow,
     ExpansionAction,
+    GuidedLexiconRunRequest,
     LexiconCompatibility,
     LexiconMapping,
     LexiconScope,
+    LexiconWorkflowRequest,
+    LexiconWorkflowResult,
     MappingDirection,
     MappingKind,
     MappingStatus,
     TargetType,
     VocabularyItem,
 )
-from fkgrid.ports.catalog_language import LexiconLookupPort
+from fkgrid.ports.catalog_language import CatalogLanguageModelPort, LexiconLookupPort
 from fkgrid.workflows.catalog_language import CatalogLanguageTier2Workflow
 
 ApiMode = Literal["demo", "gemma", "configured"]
+GuidedRunner = Callable[[GuidedLexiconRunRequest], LexiconWorkflowResult]
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,11 +73,17 @@ class CatalogLanguageApiContainer:
     ready: bool = True
     readiness_detail: str = "configured adapters are available"
     readiness_probe: Callable[[], tuple[bool, str]] | None = None
+    guided_runner: GuidedRunner | None = None
 
     def check_readiness(self) -> tuple[bool, str]:
         if self.readiness_probe is not None:
             return self.readiness_probe()
         return self.ready, self.readiness_detail
+
+    def run_guided(self, request: GuidedLexiconRunRequest) -> LexiconWorkflowResult:
+        if self.guided_runner is None:
+            raise RuntimeError("guided catalog-language workflow is not configured")
+        return self.guided_runner(request)
 
 
 def demo_compatibility() -> LexiconCompatibility:
@@ -151,17 +163,77 @@ def demo_mapping(compatibility: LexiconCompatibility) -> LexiconMapping:
     )
 
 
+def _guided_runner(
+    *, model: CatalogLanguageModelPort, vocabulary: CanonicalVocabularySnapshot
+) -> GuidedRunner:
+    """Build the clean-input path while preserving the same Tier 2 workflow."""
+
+    base_compatibility = demo_compatibility()
+    activation = CompareAndSwapActivation(base_compatibility.lexicon_version)
+    ids = SequentialIds()
+
+    def run(request: GuidedLexiconRunRequest) -> LexiconWorkflowResult:
+        compatibility = base_compatibility.model_copy(
+            update={"lexicon_version": activation.active_version}
+        )
+        now = datetime.now(UTC)
+        window = EvidenceWindow(
+            window_start=now - timedelta(days=request.evidence_window_days),
+            window_end=now,
+            min_observation_days=request.evidence_window_days,
+            min_support_count=5,
+            min_distinct_source_groups=5,
+            min_source_classes=2,
+            max_source_concentration=0.4,
+        )
+        workflow = CatalogLanguageTier2Workflow(
+            evidence=InteractiveEvidenceAggregation(
+                term=request.term,
+                locale=request.locale,
+                taxonomy_node_id=request.taxonomy_node_id,
+                attribute_id=request.attribute_id,
+            ),
+            vocabulary=FakeVocabulary(vocabulary),
+            targets=InMemoryTargetRetriever(),
+            active_lexicon=FakeActiveLexicon(),
+            model=model,
+            regression=PassingRegression(),
+            shadow=PassingShadow(),
+            review=ApprovingReview(),
+            activation=activation,
+            clock=FakeClock(now),
+            ids=ids,
+            trace_sink=InMemoryTrace(),
+        )
+        return workflow.run(
+            LexiconWorkflowRequest(
+                run_id=request.run_id,
+                evidence_window=window,
+                compatibility=compatibility,
+                active_lexicon_version=compatibility.lexicon_version,
+                max_proposals=1,
+                proposer_deadline_ms=request.proposer_deadline_ms,
+                critic_deadline_ms=request.critic_deadline_ms,
+                regression_policy_version="regression-v1",
+                shadow_policy_version="shadow-v1",
+            )
+        )
+
+    return run
+
+
 def create_demo_container() -> CatalogLanguageApiContainer:
     """Assemble a safe, deterministic container for local Swagger exploration."""
 
     compatibility = demo_compatibility()
     vocabulary = demo_vocabulary(compatibility)
+    model = FakeCatalogLanguageModel()
     workflow = CatalogLanguageTier2Workflow(
         evidence=FakeEvidenceAggregation([demo_evidence()]),
         vocabulary=FakeVocabulary(vocabulary),
         targets=InMemoryTargetRetriever(),
         active_lexicon=FakeActiveLexicon(),
-        model=FakeCatalogLanguageModel(),
+        model=model,
         regression=PassingRegression(),
         shadow=PassingShadow(),
         review=ApprovingReview(),
@@ -182,6 +254,7 @@ def create_demo_container() -> CatalogLanguageApiContainer:
         lookup=lookup,
         mode="demo",
         readiness_detail="deterministic demo adapters active; no database or provider configured",
+        guided_runner=_guided_runner(model=model, vocabulary=vocabulary),
     )
 
 
@@ -230,4 +303,5 @@ def create_gemma_container(
             "readiness not checked yet"
         ),
         readiness_probe=model.readiness,
+        guided_runner=_guided_runner(model=model, vocabulary=vocabulary),
     )

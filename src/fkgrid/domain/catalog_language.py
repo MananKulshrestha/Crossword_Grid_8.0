@@ -473,6 +473,27 @@ class LexiconWorkflowRequest(StrictModel):
     shadow_policy_version: str = Field(min_length=1, max_length=128)
 
 
+class GuidedLexiconRunRequest(StrictModel):
+    """Small human-facing input that is expanded into the full Tier 2 request."""
+
+    run_id: str = Field(min_length=1, max_length=128)
+    term: str = Field(min_length=1, max_length=256)
+    locale: str = Field(default="en-IN", min_length=2, max_length=32)
+    taxonomy_node_id: str | None = Field(default=None, max_length=128)
+    attribute_id: str | None = Field(default=None, max_length=128)
+    evidence_window_days: int = Field(default=30, ge=7, le=365)
+    proposer_deadline_ms: int = Field(
+        default=CATALOG_LANGUAGE_DEFAULT_MODEL_DEADLINE_MS,
+        ge=1,
+        le=CATALOG_LANGUAGE_MODEL_MAX_DEADLINE_MS,
+    )
+    critic_deadline_ms: int = Field(
+        default=CATALOG_LANGUAGE_DEFAULT_MODEL_DEADLINE_MS,
+        ge=1,
+        le=CATALOG_LANGUAGE_MODEL_MAX_DEADLINE_MS,
+    )
+
+
 class MappingDecision(StrictModel):
     proposal_id: str
     source_form: str
