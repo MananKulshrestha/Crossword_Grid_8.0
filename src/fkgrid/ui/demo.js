@@ -15,6 +15,9 @@ const recentBlock = document.querySelector("#recentBlock");
 const recentRuns = document.querySelector("#recentRuns");
 const querySet = document.querySelector("#querySet");
 const queryCount = document.querySelector("#queryCount");
+const fullWorkflow = document.querySelector("#fullWorkflow");
+const modeBadge = document.querySelector("#modeBadge");
+const modeHint = document.querySelector("#modeHint");
 const liveRuns = [];
 let latestResponse = null;
 let loadingTimer = null;
@@ -58,11 +61,17 @@ function setPanel(panel) {
 }
 
 function setLoadingStep(step) {
-  const messages = [
-    ["Reading your phrase…", "Preparing bounded evidence for the live proposer."],
-    ["Gemma is comparing meanings…", "The independent critic is checking scope and precision."],
-    ["Verifying the proposal…", "Deterministic gates are checking the candidate before activation."],
-  ];
+  const messages = fullWorkflow.checked
+    ? [
+        ["Reading your phrase…", "Preparing bounded evidence for the live proposer."],
+        ["Gemma is comparing meanings…", "The independent critic is checking scope and precision."],
+        ["Verifying the proposal…", "Deterministic gates are checking the candidate before activation."],
+      ]
+    : [
+        ["Reading your phrase…", "Preparing one bounded proposer call for the fast preview."],
+        ["Checking the target…", "Deterministic vocabulary and target validation remain enabled."],
+        ["Preparing the preview…", "No critic, release gate, review, or activation call will run."],
+      ];
   const [title, copy] = messages[step];
   $("#loadingTitle").textContent = title;
   $("#loadingCopy").textContent = copy;
@@ -70,6 +79,8 @@ function setLoadingStep(step) {
   ["loadStepOne", "loadStepTwo", "loadStepThree"].forEach((id, index) => {
     $("#" + id).classList.toggle("active", index === step);
   });
+  $("#loadStepTwo").textContent = fullWorkflow.checked ? "CRITIQUE" : "VALIDATE";
+  $("#loadStepThree").textContent = fullWorkflow.checked ? "VERIFY" : "PREVIEW";
 }
 
 function startLoadingAnimation() {
@@ -124,8 +135,9 @@ function renderTimeline(body) {
   $("#workflowTimeline").innerHTML = gateLabels.map(([label, status]) => {
     const normalized = String(status ?? "NOT_RUN");
     const complete = ["OK", "VALID", "PASSED", "APPROVED", "ACTIVATED"].includes(normalized);
+    const skipped = normalized === "SKIPPED_PREVIEW";
     const failed = ["ERROR", "REJECTED", "ABSTAIN", "NOT_RUN"].includes(normalized);
-    return `<div class="timeline-item ${complete ? "complete" : failed ? "failed" : "pending"}">
+    return `<div class="timeline-item ${complete ? "complete" : skipped ? "skipped" : failed ? "failed" : "pending"}">
       <div class="timeline-dot" aria-hidden="true"></div>
       <span class="timeline-label">${escapeHtml(label)}</span>
       <span class="timeline-status">${escapeHtml(normalized)}</span>
@@ -136,6 +148,7 @@ function renderTimeline(body) {
 function renderResult(body) {
   latestResponse = body;
   const expansion = body.output?.expanded_to?.[0] ?? null;
+  const previewOnly = body.status === "PREVIEW_ONLY";
   const input = body.input ?? {};
   $("#shownQuery").textContent = input.term || "—";
   $("#shownLocale").textContent = `${input.locale || "—"} · ${input.category || "global"}`;
@@ -144,11 +157,13 @@ function renderResult(body) {
   $("#normalizedQuery").textContent = body.output?.normalized_query || "—";
   $("#mappingType").textContent = expansion ? formatLabel(expansion.mapping_kind) : "No mapping";
   $("#evidenceBand").textContent = expansion ? formatLabel(expansion.evidence_band) : "Needs review";
-  $("#workflowResult").textContent = body.gates?.activated ? "COMPLETE" : "SAFE STOP";
+  $("#workflowResult").textContent = previewOnly ? "PREVIEW ONLY" : body.gates?.activated ? "COMPLETE" : "SAFE STOP";
   $("#runMeta").textContent = `${body.run_id || "run"} · ${body.model?.mode === "gemma" ? "Gemma active" : "demo model"} · ${body.gates?.active_lexicon_version || "no active version"}`;
-  resultHeading.textContent = expansion ? "Here is the safe expansion" : "No safe expansion proposed";
-  runState.textContent = body.gates?.activated ? "WORKFLOW COMPLETE" : "SAFE STOP";
-  runState.dataset.state = body.gates?.activated ? "complete" : "error";
+  resultHeading.textContent = previewOnly
+    ? expansion ? "Fast preview complete" : "No preview target proposed"
+    : expansion ? "Here is the safe expansion" : "No safe expansion proposed";
+  runState.textContent = previewOnly ? "PREVIEW ONLY" : body.gates?.activated ? "WORKFLOW COMPLETE" : "SAFE STOP";
+  runState.dataset.state = previewOnly ? "preview" : body.gates?.activated ? "complete" : "error";
   renderQuerySet(body);
   renderTimeline(body);
   setPanel("result");
@@ -202,9 +217,17 @@ async function runExpansion(event) {
   runState.dataset.state = "running";
   setPanel("loading");
   startLoadingAnimation();
-  const params = new URLSearchParams({ term, locale: localeInput.value, category });
+  const params = new URLSearchParams({
+    term,
+    locale: localeInput.value,
+    category,
+    proposer_deadline_ms: fullWorkflow.checked ? "30000" : "20000",
+  });
+  const endpoint = fullWorkflow.checked
+    ? "/api/v1/catalog-language/tier2/guided-run"
+    : "/api/v1/catalog-language/tier2/guided-preview";
   try {
-    const response = await fetch(`/api/v1/catalog-language/tier2/guided-run?${params.toString()}`, {
+    const response = await fetch(`${endpoint}?${params.toString()}`, {
       method: "POST",
       headers: { Accept: "application/json" },
     });
@@ -246,6 +269,15 @@ document.querySelectorAll(".starter-chip").forEach((chip) => {
     termInput.value = chip.dataset.term;
     termInput.focus();
   });
+});
+
+fullWorkflow.addEventListener("change", () => {
+  const preview = !fullWorkflow.checked;
+  modeBadge.textContent = preview ? "FAST PREVIEW" : "FULL";
+  modeBadge.classList.toggle("preview", preview);
+  modeHint.textContent = preview
+    ? "One live proposer call. Critic and publication gates are skipped; activation is impossible."
+    : "Safest path. Runs both model calls and every release gate.";
 });
 
 checkReadiness();

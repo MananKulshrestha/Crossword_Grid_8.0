@@ -43,6 +43,7 @@ from fkgrid.domain.catalog_language import (
     GuidedLexiconRunRequest,
     LexiconCompatibility,
     LexiconMapping,
+    LexiconPreviewResult,
     LexiconScope,
     LexiconWorkflowRequest,
     LexiconWorkflowResult,
@@ -57,6 +58,7 @@ from fkgrid.workflows.catalog_language import CatalogLanguageTier2Workflow
 
 ApiMode = Literal["demo", "gemma", "configured"]
 GuidedRunner = Callable[[GuidedLexiconRunRequest], LexiconWorkflowResult]
+GuidedPreviewRunner = Callable[[GuidedLexiconRunRequest], LexiconPreviewResult]
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,6 +76,7 @@ class CatalogLanguageApiContainer:
     readiness_detail: str = "configured adapters are available"
     readiness_probe: Callable[[], tuple[bool, str]] | None = None
     guided_runner: GuidedRunner | None = None
+    guided_preview_runner: GuidedPreviewRunner | None = None
 
     def check_readiness(self) -> tuple[bool, str]:
         if self.readiness_probe is not None:
@@ -84,6 +87,11 @@ class CatalogLanguageApiContainer:
         if self.guided_runner is None:
             raise RuntimeError("guided catalog-language workflow is not configured")
         return self.guided_runner(request)
+
+    def run_guided_preview(self, request: GuidedLexiconRunRequest) -> LexiconPreviewResult:
+        if self.guided_preview_runner is None:
+            raise RuntimeError("guided catalog-language preview is not configured")
+        return self.guided_preview_runner(request)
 
 
 def demo_compatibility() -> LexiconCompatibility:
@@ -222,6 +230,65 @@ def _guided_runner(
     return run
 
 
+def _guided_preview_runner(
+    *, model: CatalogLanguageModelPort, vocabulary: CanonicalVocabularySnapshot
+) -> GuidedPreviewRunner:
+    """Build a proposer-only path that cannot review or activate a lexicon."""
+
+    base_compatibility = demo_compatibility()
+    activation = CompareAndSwapActivation(base_compatibility.lexicon_version)
+    ids = SequentialIds()
+
+    def run(request: GuidedLexiconRunRequest) -> LexiconPreviewResult:
+        compatibility = base_compatibility.model_copy(
+            update={"lexicon_version": activation.active_version}
+        )
+        now = datetime.now(UTC)
+        window = EvidenceWindow(
+            window_start=now - timedelta(days=request.evidence_window_days),
+            window_end=now,
+            min_observation_days=request.evidence_window_days,
+            min_support_count=5,
+            min_distinct_source_groups=5,
+            min_source_classes=2,
+            max_source_concentration=0.4,
+        )
+        workflow = CatalogLanguageTier2Workflow(
+            evidence=InteractiveEvidenceAggregation(
+                term=request.term,
+                locale=request.locale,
+                taxonomy_node_id=request.taxonomy_node_id,
+                attribute_id=request.attribute_id,
+            ),
+            vocabulary=FakeVocabulary(vocabulary),
+            targets=InMemoryTargetRetriever(),
+            active_lexicon=FakeActiveLexicon(),
+            model=model,
+            regression=PassingRegression(),
+            shadow=PassingShadow(),
+            review=ApprovingReview(),
+            activation=activation,
+            clock=FakeClock(now),
+            ids=ids,
+            trace_sink=InMemoryTrace(),
+        )
+        return workflow.preview(
+            LexiconWorkflowRequest(
+                run_id=request.run_id,
+                evidence_window=window,
+                compatibility=compatibility,
+                active_lexicon_version=compatibility.lexicon_version,
+                max_proposals=1,
+                proposer_deadline_ms=request.proposer_deadline_ms,
+                critic_deadline_ms=request.critic_deadline_ms,
+                regression_policy_version="regression-v1",
+                shadow_policy_version="shadow-v1",
+            )
+        )
+
+    return run
+
+
 def create_demo_container() -> CatalogLanguageApiContainer:
     """Assemble a safe, deterministic container for local Swagger exploration."""
 
@@ -255,6 +322,7 @@ def create_demo_container() -> CatalogLanguageApiContainer:
         mode="demo",
         readiness_detail="deterministic demo adapters active; no database or provider configured",
         guided_runner=_guided_runner(model=model, vocabulary=vocabulary),
+        guided_preview_runner=_guided_preview_runner(model=model, vocabulary=vocabulary),
     )
 
 
@@ -304,4 +372,5 @@ def create_gemma_container(
         ),
         readiness_probe=model.readiness,
         guided_runner=_guided_runner(model=model, vocabulary=vocabulary),
+        guided_preview_runner=_guided_preview_runner(model=model, vocabulary=vocabulary),
     )

@@ -24,6 +24,7 @@ from fkgrid.domain.catalog_language import (
     LexiconCompatibility,
     LexiconLookupRequest,
     LexiconLookupResult,
+    LexiconPreviewResult,
     LexiconScope,
     LexiconWorkflowRequest,
     LexiconWorkflowResult,
@@ -299,7 +300,7 @@ OPENAPI_TAGS = [
 ]
 
 
-def _trace_status(result: LexiconWorkflowResult, step: str) -> str:
+def _trace_status(result: LexiconWorkflowResult | LexiconPreviewResult, step: str) -> str:
     statuses = [event.status for event in result.trace if event.step == step]
     return statuses[-1] if statuses else "NOT_RUN"
 
@@ -374,6 +375,64 @@ def _guided_response(
     )
 
 
+def _guided_preview_response(
+    request: GuidedLexiconRunRequest,
+    result: LexiconPreviewResult,
+    container: CatalogLanguageApiContainer,
+) -> GuidedRunResponse:
+    mapping = result.mapping
+    return GuidedRunResponse(
+        run_id=result.run_id,
+        status=result.status,
+        input=GuidedInputSummary(
+            term=request.term,
+            locale=request.locale,
+            category=request.taxonomy_node_id,
+            attribute_id=request.attribute_id,
+        ),
+        output=GuidedExpansionOutput(
+            normalized_query=normalize_surface_form(request.term, request.locale),
+            expanded_to=(
+                [
+                    GuidedExpansion(
+                        mapping_id=mapping.mapping_id,
+                        source_form=mapping.surface_form,
+                        normalized_form=mapping.normalized_form,
+                        target_type=mapping.target_type,
+                        target_id=mapping.target_id,
+                        mapping_kind=mapping.mapping_kind,
+                        direction=mapping.direction,
+                        expansion_action=mapping.expansion_action,
+                        scope=mapping.scope,
+                        evidence_band=mapping.evidence_band,
+                    )
+                ]
+                if mapping is not None
+                else []
+            ),
+        ),
+        model=GuidedModelSummary(
+            mode=container.mode,
+            active=container.mode == "gemma",
+            proposer_status=(
+                result.proposer.status.value if result.proposer is not None else "NOT_RUN"
+            ),
+            critic_status="SKIPPED_PREVIEW",
+        ),
+        gates=GuidedGateSummary(
+            candidate_version=None,
+            validation=_trace_status(result, "validate_mapping"),
+            regression="SKIPPED_PREVIEW",
+            shadow="SKIPPED_PREVIEW",
+            review="SKIPPED_PREVIEW",
+            activation="SKIPPED_PREVIEW",
+            activated=False,
+            active_lexicon_version=None,
+        ),
+        warnings=list(result.warnings),
+    )
+
+
 def get_container(request: Request) -> CatalogLanguageApiContainer:
     return request.app.state.catalog_language
 
@@ -408,6 +467,13 @@ def create_app(container: CatalogLanguageApiContainer | None = None) -> FastAPI:
     )
     app.state.catalog_language = selected_container
     app.mount("/demo/static", StaticFiles(directory=DEMO_UI_DIR), name="demo-static")
+
+    def close_model_client() -> None:
+        close = getattr(selected_container.workflow.model, "close", None)
+        if callable(close):
+            close()
+
+    app.router.add_event_handler("shutdown", close_model_client)
 
     @app.get("/demo", include_in_schema=False)
     def demo() -> FileResponse:
@@ -549,6 +615,84 @@ def create_app(container: CatalogLanguageApiContainer | None = None) -> FastAPI:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="guided catalog-language workflow failed safely; inspect server telemetry",
+            ) from exc
+
+    @app.post(
+        "/api/v1/catalog-language/tier2/guided-preview",
+        response_model=GuidedRunResponse,
+        status_code=status.HTTP_200_OK,
+        tags=["guided-demo"],
+        summary="Fast preview — one proposer call, never activates",
+        description=(
+            "Runs the live proposer and deterministic target validation only. The critic, "
+            "regression, shadow, review, and activation steps are intentionally skipped; "
+            "this route can never change the active lexicon. Use the full guided-run route "
+            "for a complete Tier 2 result."
+        ),
+    )
+    def run_guided_preview(
+        term: Annotated[
+            str,
+            Query(
+                min_length=1,
+                max_length=256,
+                description="The shopper-language term or phrase to preview.",
+                examples=["sneakers", "water proof shoes"],
+            ),
+        ],
+        locale: Annotated[
+            str,
+            Query(min_length=2, max_length=32, description="Locale scope for the preview."),
+        ] = "en-IN",
+        category: Annotated[
+            str,
+            Query(
+                min_length=1,
+                max_length=128,
+                description="Canonical taxonomy scope. Use footwear for the demo catalog.",
+            ),
+        ] = "footwear",
+        attribute_id: Annotated[
+            str | None,
+            Query(max_length=128, description="Optional canonical attribute scope."),
+        ] = None,
+        proposer_deadline_ms: Annotated[
+            int,
+            Query(
+                ge=1,
+                le=CATALOG_LANGUAGE_MODEL_MAX_DEADLINE_MS,
+                description="Remote Gemma proposer budget for the fast preview.",
+            ),
+        ] = CATALOG_LANGUAGE_DEFAULT_MODEL_DEADLINE_MS,
+        container: CatalogLanguageApiContainer = catalog_language_container_dependency,
+    ) -> GuidedRunResponse:
+        is_ready, detail = container.check_readiness()
+        if not is_ready:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=detail,
+            )
+        if not term.strip() or not category.strip():
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="term and category must contain non-whitespace text",
+            )
+        request = GuidedLexiconRunRequest(
+            run_id=f"preview-{uuid4().hex}",
+            term=term.strip(),
+            locale=locale.strip(),
+            taxonomy_node_id=category.strip() or None,
+            attribute_id=attribute_id.strip() if attribute_id and attribute_id.strip() else None,
+            proposer_deadline_ms=proposer_deadline_ms,
+            critic_deadline_ms=CATALOG_LANGUAGE_DEFAULT_MODEL_DEADLINE_MS,
+        )
+        try:
+            result = container.run_guided_preview(request)
+            return _guided_preview_response(request, result, container)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="guided preview failed safely; inspect server telemetry",
             ) from exc
 
     @app.post(

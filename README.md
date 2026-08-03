@@ -131,6 +131,11 @@ queries, progress states, a readable expansion card, a complete query list
 (initial phrase, normalized form, and every returned expansion), model/gate
 status, a decision timeline, recent runs, and a copyable one-line summary. It
 does not introduce a second workflow or replace the advanced JSON/API routes.
+The **Full Tier 2 workflow** toggle is on by default. Turn it off for a faster
+proposer-only preview: deterministic target validation still runs, but critic,
+regression, shadow, review, and activation are explicitly skipped and the
+active lexicon cannot change. Use the full mode when testing the complete
+workflow contract.
 
 The useful routes are:
 

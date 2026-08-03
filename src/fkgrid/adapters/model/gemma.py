@@ -99,7 +99,13 @@ class GemmaCatalogLanguageModel(CatalogLanguageModelPort):
         self.settings = settings
         self.prompt_registry = prompt_registry or PromptRegistry()
         self._transport = transport
+        self._client = httpx.Client(transport=transport)
         self._readiness_cache: tuple[float, tuple[bool, str]] | None = None
+
+    def close(self) -> None:
+        """Release the shared HTTP connection pool during application shutdown."""
+
+        self._client.close()
 
     def readiness(self) -> tuple[bool, str]:
         """Return a safe readiness result without exposing provider failures."""
@@ -116,11 +122,11 @@ class GemmaCatalogLanguageModel(CatalogLanguageModelPort):
 
     def _probe_readiness(self) -> tuple[bool, str]:
         try:
-            with httpx.Client(
+            response = self._client.get(
+                self._models_url(),
+                headers=self._headers(),
                 timeout=self.settings.readiness_timeout_seconds,
-                transport=self._transport,
-            ) as client:
-                response = client.get(self._models_url(), headers=self._headers())
+            )
             if response.status_code >= 400:
                 return False, f"Gemma provider returned HTTP {response.status_code}"
             payload = response.json()
@@ -244,13 +250,14 @@ class GemmaCatalogLanguageModel(CatalogLanguageModelPort):
                     },
                 },
             }
-        with httpx.Client(
+        response = self._client.post(
+            url,
+            headers=headers,
+            json=body,
             timeout=max(0.001, request.deadline_ms / 1000),
-            transport=self._transport,
-        ) as client:
-            response = client.post(url, headers=headers, json=body)
-            response.raise_for_status()
-            return response
+        )
+        response.raise_for_status()
+        return response
 
     def _render_prompt(self, request: ModelCallRequest) -> str:
         prompt = self.prompt_registry.read(request.prompt_id)

@@ -42,6 +42,7 @@ def test_health_ready_and_openapi_are_available() -> None:
     paths = openapi.json()["paths"]
     assert "/api/v1/catalog-language/tier2/runs" in paths
     assert "/api/v1/catalog-language/tier2/guided-run" in paths
+    assert "/api/v1/catalog-language/tier2/guided-preview" in paths
     assert "/api/v1/catalog-language/lookup" in paths
 
 
@@ -59,6 +60,25 @@ def test_human_friendly_demo_ui_is_served_with_its_static_assets() -> None:
     assert "guided-run" in script.text
     assert "renderQuerySet" in script.text
     assert "querySet" in script.text
+    assert "guided-preview" in script.text
+    assert "fullWorkflow" in script.text
+
+
+def test_fast_guided_preview_calls_no_activation_gates() -> None:
+    response = client.post(
+        "/api/v1/catalog-language/tier2/guided-preview",
+        params={"term": "sneakers", "locale": "en-IN", "category": "footwear"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "PREVIEW_ONLY"
+    assert body["output"]["expanded_to"][0]["target_id"] == "athletic-shoes"
+    assert body["model"]["proposer_status"] == "OK"
+    assert body["model"]["critic_status"] == "SKIPPED_PREVIEW"
+    assert body["gates"]["validation"] == "VALID"
+    assert body["gates"]["activation"] == "SKIPPED_PREVIEW"
+    assert body["gates"]["activated"] is False
 
 
 def test_capabilities_identify_tier_two_and_forbidden_runtime_actions() -> None:

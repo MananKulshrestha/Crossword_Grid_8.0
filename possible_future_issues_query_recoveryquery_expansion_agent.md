@@ -144,6 +144,14 @@ query, validator, workflow budget, artifact format, or provider boundary.
   canonical target IDs. It is useful for workflow testing, but production UI must
   resolve approved human labels from the version-pinned vocabulary and must not
   present target IDs as shopper-facing catalog copy.
+- The Fast Preview toggle intentionally skips critic, regression, shadow, review,
+  and activation. Its response must remain visibly `PREVIEW_ONLY`; wiring it to
+  the full route or treating its `IN_REVIEW` mapping as active would turn a
+  latency shortcut into an authorization and safety defect.
+- Preview latency still includes one remote proposer call. Provider queueing or
+  cold-start latency can exceed the short preview budget, so the UI must preserve
+  an explicit timeout/safe-stop state instead of retrying invisibly or weakening
+  the full workflow's deadlines.
 - Static UI assets are mounted from the source package path. A wheel/container build
   must verify that `demo.html`, `demo.css`, and `demo.js` are included; otherwise the
   API can remain healthy while `/demo` fails at runtime.

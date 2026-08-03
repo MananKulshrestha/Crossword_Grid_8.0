@@ -83,6 +83,16 @@
                 </div>
               </div>
 
+              <div class="mode-card">
+                <div class="mode-heading"><span class="suggestion-label">RUN MODE</span><span class="mode-badge" id="modeBadge">FULL</span></div>
+                <label class="switch-row" for="fullWorkflow">
+                  <input id="fullWorkflow" type="checkbox" checked />
+                  <span class="switch-track" aria-hidden="true"><span></span></span>
+                  <span class="switch-copy"><strong>Full Tier 2 workflow</strong><small>critic + safety gates + activation</small></span>
+                </label>
+                <p class="mode-hint" id="modeHint">Safest path. Runs both model calls and every release gate.</p>
+              </div>
+
               <div class="suggestion-label">TRY A STARTER</div>
               <div class="starter-chips" aria-label="Starter queries">
                 <button type="button" class="starter-chip" data-term="sneakers">sneakers</button>

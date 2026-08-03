@@ -527,6 +527,17 @@ class LexiconWorkflowResult(StrictModel):
     warnings: list[str] = Field(default_factory=list, max_length=32)
 
 
+class LexiconPreviewResult(StrictModel):
+    """Non-activating proposer preview used by the local testing surface."""
+
+    run_id: str
+    status: Literal["PREVIEW_ONLY", "NO_PROPOSALS", "INSUFFICIENT_EVIDENCE", "FAILED_SAFE"]
+    mapping: LexiconMapping | None = None
+    proposer: ModelCallResponse | None = None
+    trace: list[WorkflowTraceEvent] = Field(default_factory=list, max_length=2_000)
+    warnings: list[str] = Field(default_factory=list, max_length=32)
+
+
 class CatalogLanguageRun(StrictModel):
     """Durable handoff envelope; persistence owns the actual row/transaction."""
 

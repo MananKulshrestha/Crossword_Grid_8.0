@@ -21,6 +21,7 @@ from fkgrid.domain.catalog_language import (
     EvidenceWindow,
     LexiconCandidateVersion,
     LexiconMapping,
+    LexiconPreviewResult,
     LexiconWorkflowRequest,
     LexiconWorkflowResult,
     MappingDecision,
@@ -248,8 +249,8 @@ class CatalogLanguageTier2Workflow:
         return ModelCallRequest(
             call_id=self.ids.new_id("model"),
             logical_call="propose_canonical_mapping",
-            prompt_id="catalog_language_proposer_v1",
-            prompt_version="1",
+            prompt_id="catalog_language_proposer_v2",
+            prompt_version="2",
             input_schema_version="CatalogLanguageProposerInputV1",
             output_schema_version="MappingDraftV1",
             input_payload={
@@ -290,8 +291,8 @@ class CatalogLanguageTier2Workflow:
         return ModelCallRequest(
             call_id=self.ids.new_id("model"),
             logical_call="critique_mapping",
-            prompt_id="catalog_language_critic_v1",
-            prompt_version="1",
+            prompt_id="catalog_language_critic_v2",
+            prompt_version="2",
             input_schema_version="CatalogLanguageCriticInputV1",
             output_schema_version="CriticDraftV1",
             input_payload={
@@ -354,6 +355,177 @@ class CatalogLanguageTier2Workflow:
         ):
             codes.append("MODEL_EVIDENCE_ID_NOT_SUPPLIED")
         return sorted(set(codes))
+
+    def preview(self, request: LexiconWorkflowRequest) -> LexiconPreviewResult:
+        """Run one proposer-only preview without critic or publication side effects.
+
+        This is deliberately separate from ``run``. It retains evidence, vocabulary,
+        target, and mapping validation, but never calls the critic, regression, shadow,
+        review, or activation ports. The result is therefore a preview, never an
+        approved or active lexicon change.
+        """
+
+        events: list[WorkflowTraceEvent] = []
+        self._trace(events, "PREVIEW_STARTED", "RECEIVED", "STARTED")
+        groups = self.evidence.aggregate_query_gap_events(
+            request.evidence_window, request.compatibility
+        )
+        self._trace(events, "TOOL_COMPLETED", "aggregate_query_gap_events", "OK")
+        qualified: list[EvidenceGroup] = []
+        rejected_evidence_codes: set[str] = set()
+        for group in groups:
+            valid, codes = self._qualifies(group, request.evidence_window)
+            if valid:
+                qualified.append(group)
+            else:
+                rejected_evidence_codes.update(codes)
+        if not qualified:
+            self._trace(
+                events,
+                "GATE_DECISION",
+                "threshold_gate",
+                "BLOCKED",
+                sorted(rejected_evidence_codes) or ["NO_EVIDENCE"],
+            )
+            return LexiconPreviewResult(
+                run_id=request.run_id,
+                status="INSUFFICIENT_EVIDENCE",
+                trace=events,
+                warnings=sorted(rejected_evidence_codes) or ["NO_EVIDENCE"],
+            )
+        self._trace(events, "GATE_DECISION", "threshold_gate", "QUALIFIED")
+        vocabulary = self.vocabulary.load_canonical_vocabulary(
+            request.compatibility.catalog_version,
+            request.compatibility.taxonomy_version,
+            request.compatibility.category_schema_version,
+        )
+        self._trace(events, "TOOL_COMPLETED", "load_canonical_vocabulary", "OK")
+        if (
+            vocabulary.catalog_version != request.compatibility.catalog_version
+            or vocabulary.taxonomy_version != request.compatibility.taxonomy_version
+            or vocabulary.category_schema_version != request.compatibility.category_schema_version
+            or vocabulary.normalizer_version != request.compatibility.normalizer_version
+        ):
+            self._trace(
+                events,
+                "INTEGRITY_FAILURE",
+                "load_canonical_vocabulary",
+                "BLOCKED",
+                ["VERSION_MISMATCH"],
+            )
+            return LexiconPreviewResult(
+                run_id=request.run_id,
+                status="FAILED_SAFE",
+                trace=events,
+                warnings=["VOCABULARY_VERSION_MISMATCH"],
+            )
+
+        active_mappings = self.active_lexicon.load_active_mappings(
+            request.active_lexicon_version, request.compatibility
+        )
+        clusters = self._build_clusters(qualified)
+        self._trace(events, "TOOL_COMPLETED", "cluster_surface_forms", "OK")
+        if not clusters:
+            self._trace(events, "PREVIEW_TERMINAL", "proposal_generation", "NO_PROPOSALS")
+            return LexiconPreviewResult(
+                run_id=request.run_id,
+                status="NO_PROPOSALS",
+                trace=events,
+                warnings=["NO_SURFACE_FORM_CLUSTERS"],
+            )
+
+        cluster = clusters[0]
+        evidence = self._combined_evidence(qualified, cluster)
+        candidates = self.targets.retrieve_candidate_targets(cluster, vocabulary, limit=10)
+        self._trace(
+            events,
+            "TOOL_COMPLETED",
+            "retrieve_candidate_targets",
+            "OK" if candidates else "NO_TARGETS",
+        )
+        if not candidates:
+            self._trace(events, "PREVIEW_TERMINAL", "proposal_generation", "NO_PROPOSALS")
+            return LexiconPreviewResult(
+                run_id=request.run_id,
+                status="NO_PROPOSALS",
+                trace=events,
+                warnings=["NO_ALLOWED_TARGETS"],
+            )
+
+        proposer_response = self.model.propose_canonical_mapping(
+            self._proposer_request(request, cluster, candidates, evidence)
+        )
+        self._trace(
+            events,
+            "MODEL_COMPLETED",
+            "propose_canonical_mapping",
+            proposer_response.status.value,
+        )
+        if proposer_response.status != ModelStatus.OK or not isinstance(
+            proposer_response.payload, MappingDraft
+        ):
+            self._trace(events, "PREVIEW_TERMINAL", "propose_canonical_mapping", "SAFE_STOP")
+            return LexiconPreviewResult(
+                run_id=request.run_id,
+                status="NO_PROPOSALS",
+                proposer=proposer_response,
+                trace=events,
+                warnings=[f"PROPOSER_{proposer_response.status.value}"],
+            )
+
+        draft = proposer_response.payload
+        proposer_codes = self._validate_proposer(draft, cluster, candidates)
+        if proposer_codes:
+            self._trace(
+                events,
+                "TOOL_COMPLETED",
+                "validate_proposer",
+                "REJECTED",
+                proposer_codes,
+            )
+            return LexiconPreviewResult(
+                run_id=request.run_id,
+                status="FAILED_SAFE",
+                proposer=proposer_response,
+                trace=events,
+                warnings=proposer_codes,
+            )
+
+        assert draft.evidence_band is not None
+        validation = validate_mapping(
+            draft,
+            vocabulary,
+            request.compatibility,
+            active_mappings,
+            self.ids.new_id("preview-mapping"),
+            cluster.evidence_group_ids,
+            draft.evidence_band,
+            self.clock.now(),
+        )
+        self._trace(
+            events,
+            "TOOL_COMPLETED",
+            "validate_mapping",
+            "VALID" if validation.valid else "REJECTED",
+            validation.codes,
+        )
+        if not validation.valid or validation.mapping is None:
+            return LexiconPreviewResult(
+                run_id=request.run_id,
+                status="FAILED_SAFE",
+                proposer=proposer_response,
+                trace=events,
+                warnings=validation.codes or ["PREVIEW_MAPPING_INVALID"],
+            )
+        self._trace(events, "PREVIEW_TERMINAL", "preview_proposal", "PREVIEW_ONLY")
+        return LexiconPreviewResult(
+            run_id=request.run_id,
+            status="PREVIEW_ONLY",
+            mapping=validation.mapping,
+            proposer=proposer_response,
+            trace=events,
+            warnings=["PREVIEW_ONLY_NO_ACTIVATION"],
+        )
 
     def run(self, request: LexiconWorkflowRequest) -> LexiconWorkflowResult:
         events: list[WorkflowTraceEvent] = []
