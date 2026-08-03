@@ -93,12 +93,32 @@ class RecoveryTools:
         )
 
     def get_recovery_constraints(self, request: RecoveryRequest) -> list[RecoveryConstraint]:
-        return self.constraints.get_constraints(
+        candidates = self.constraints.get_constraints(
             query_state=request.query_state,
             unknown_terms=request.unresolved_terms[: request.policy.max_lookup_terms],
             compatibility=request.compatibility,
             limit=20,
         )
+        selected: list[RecoveryConstraint] = []
+        seen: set[str] = set()
+        for concept in candidates:
+            if concept.concept_id in seen:
+                continue
+            if not concept.active or concept.locale != request.query_state.locale:
+                continue
+            if concept.catalog_version != request.compatibility.catalog_version:
+                continue
+            if concept.taxonomy_version != request.compatibility.taxonomy_version:
+                continue
+            if concept.category_schema_version != request.compatibility.category_schema_version:
+                continue
+            if concept.lexicon_version != request.compatibility.lexicon_version:
+                continue
+            if concept.taxonomy_scope_id not in {None, request.query_state.taxonomy_scope_id}:
+                continue
+            seen.add(concept.concept_id)
+            selected.append(concept)
+        return selected[:20]
 
     def retrieve(
         self,
@@ -121,17 +141,22 @@ class RecoveryTools:
         request: RecoveryRequest,
         *,
         allowed_concepts: list[RecoveryConstraint],
-        approved_suggestions: list[ApprovedExpansion],
+        approved_mappings: list[ApprovedExpansion],
     ) -> RecoveryContext:
+        unresolved_terms = (
+            request.unresolved_terms
+            or request.gate.unknown_terms
+            or request.query_state.query_terms[: request.policy.max_lookup_terms]
+        )
         base = {
-            "unresolved_terms": request.unresolved_terms,
+            "unresolved_terms": unresolved_terms,
             "query_state": request.query_state,
             "hard_filter_hash": hard_filter_hash(request.query_state),
             "gate_reasons": request.gate.reasons,
             "baseline_run_id": request.baseline_run.run_id,
             "baseline_summary": request.gate.signals,
             "allowed_concepts": allowed_concepts,
-            "approved_suggestions": approved_suggestions[:3],
+            "approved_mappings": approved_mappings[:3],
             "compatibility": request.compatibility,
             "locale": "en-IN",
         }
@@ -190,15 +215,15 @@ class RecoveryTools:
             )
             for concept in concepts
         ]
-        labels = ", ".join(option.label for option in options)
-        attributes = {
-            concepts_item.attribute_id
-            for concepts_item in concepts
-            if concepts_item.attribute_id is not None
-        }
-        safe_target = next(iter(attributes), "category") if len(attributes) == 1 else "category"
+        if len(options) == 2:
+            question_labels = f"{options[0].label} or {options[1].label}"
+        else:
+            question_labels = (
+                ", ".join(option.label for option in options[:-1])
+                + f", or {options[-1].label}"
+            )
         return ClarificationPacket(
-            question=f"Which {safe_target} did you mean: {labels}?",
+            question=f"Did you mean {question_labels}?",
             reason_code=reason_code,
             target_field=target_field,
             options=options,

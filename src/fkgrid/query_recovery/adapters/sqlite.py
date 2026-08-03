@@ -6,7 +6,6 @@ PostgreSQL owner can port the statements without changing domain contracts.
 
 from __future__ import annotations
 
-import json
 import sqlite3
 from typing import Any
 
@@ -97,11 +96,12 @@ INSERT INTO recovery_events (
     planner_action, planner_called, planner_validation_codes_json,
     comparator_decisions_json, tool_calls_json, retrieval_run_count, hard_filter_mutation_count,
     added_latency_ms, budget_ms, budget_used_ms, model_prompt_version,
-    model_alias, compatibility_json, cache_hit, warnings_json, created_at
+    model_alias, planner_input_hash, planner_token_count, planner_latency_ms,
+    allowed_concept_count, compatibility_json, cache_hit, warnings_json, created_at
 ) VALUES (
     ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
     ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 )
 """
 
@@ -241,6 +241,10 @@ class SqliteRecoveryRepository:
                 event.budget_used_ms,
                 event.model_prompt_version,
                 event.model_alias,
+                event.planner_input_hash,
+                event.planner_token_count,
+                event.planner_latency_ms,
+                event.allowed_concept_count,
                 canonical_json(event.compatibility),
                 int(event.cache_hit),
                 _json_list(event.warnings),

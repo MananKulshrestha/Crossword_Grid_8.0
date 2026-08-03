@@ -72,7 +72,7 @@ def build_demo_recovery_request(payload: DemoRecoveryInput) -> RecoveryRequest:
         rank_policy_version="rank-swagger-demo",
         gate_policy_version="gate-swagger-demo",
         recovery_policy_version="recovery-policy-v1",
-        recovery_prompt_version="recovery-v1",
+        recovery_prompt_version="recovery-v2",
         recovery_model_alias=DEEPINFRA_GEMMA_4_26B_A4B_IT,
         **_DEMO_VERSIONS,
     )

@@ -26,6 +26,8 @@ The included `recovery_allowed_concepts` table is a materialized read projection
 - before/after hard-filter hashes and mutation count;
 - mapping IDs, planner action/validation codes, comparator decisions;
 - retrieval count, budget/latency, terminal outcome, and sanitized warnings.
+- planner input hash, token/latency counters, and the bounded allowed-concept
+  count when Tier 2 is called.
 
 The DB owner should insert the event in the same authoritative turn/outbox transaction where available, or enqueue it through the transactional outbox. Event-write failure must not change the shopper response.
 

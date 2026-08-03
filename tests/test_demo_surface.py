@@ -88,6 +88,7 @@ class DemoSurfaceTests(unittest.TestCase):
         self.assertEqual(shoes["outcome"], "RECOVERED_TIER1")
         self.assertEqual(formal["outcome"], "CLARIFICATION_REQUIRED")
         self.assertNotEqual(shoes["event"]["original_terms"], formal["event"]["original_terms"])
+        self.assertEqual(formal["clarification"]["question"], "Did you mean Shirts or Blazers?")
         self.assertEqual(
             {option["label"] for option in formal["clarification"]["options"]},
             {"Shirts", "Blazers"},
@@ -102,6 +103,19 @@ class DemoSurfaceTests(unittest.TestCase):
         recovery = response.json()["result"]
         self.assertEqual(recovery["outcome"], "NO_SAFE_RECOVERY")
         self.assertIsNone(recovery["clarification"])
+
+    def test_spelling_mistake_uses_one_constrained_tier2_rewrite(self) -> None:
+        response = self.client.post(
+            "/v1/query-recovery/demo-turn",
+            json={"query": "shooes"},
+        )
+        self.assertEqual(response.status_code, 200)
+        recovery = response.json()["result"]
+        self.assertEqual(recovery["outcome"], "RECOVERED_TIER2")
+        self.assertTrue(recovery["event"]["planner_called"])
+        self.assertEqual(recovery["event"]["retrieval_run_count"], 2)
+        self.assertEqual(recovery["plan"]["added_query_terms"], ["footwear"])
+        self.assertEqual(recovery["event"]["hard_filter_mutation_count"], 0)
 
     def test_builder_places_visible_filters_in_hard_constraints(self) -> None:
         payload = DemoRecoveryInput(

@@ -90,7 +90,7 @@ class ModelGatewayTests(unittest.TestCase):
             "baseline_run_id": "baseline",
             "baseline_summary": BaselineSignals(eligible_count=0),
             "allowed_concepts": [concept],
-            "approved_suggestions": [],
+            "approved_mappings": [],
             "compatibility": compatibility,
             "locale": "en-IN",
         }
@@ -125,11 +125,11 @@ class ModelGatewayTests(unittest.TestCase):
         self.assertEqual(len(gateway.calls), 1)
 
     def test_prompt_manifest_checksum_matches_resource(self) -> None:
-        prompt_path = Path(__file__).parents[1] / "src" / "fkgrid" / "query_recovery" / "prompts" / "recovery_v1.md"
+        prompt_path = Path(__file__).parents[1] / "src" / "fkgrid" / "query_recovery" / "prompts" / "recovery_v2.md"
         manifest_path = prompt_path.with_name("manifest.json")
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         digest = hashlib.sha256(prompt_path.read_bytes()).hexdigest()
-        self.assertEqual(manifest["prompts"]["recovery-v1"]["sha256"], digest)
+        self.assertEqual(manifest["prompts"]["recovery-v2"]["sha256"], digest)
 
     def test_gemini_adapter_filters_thought_parts_and_keeps_secret_out_of_repr(self) -> None:
         context = self.make_context()

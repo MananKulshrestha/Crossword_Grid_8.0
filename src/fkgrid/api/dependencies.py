@@ -93,6 +93,32 @@ class DemoPlanner:
                 0,
                 0,
             )
+        typo_rewrites = {
+            "shooes": "demo-footwear",
+            "shoos": "demo-footwear",
+            "sportshoes": "demo-sports-shoes",
+            "sport shoe": "demo-sports-shoes",
+        }
+        for misspelling, concept_id in typo_rewrites.items():
+            if misspelling not in unresolved:
+                continue
+            concept = next(
+                (item for item in context.allowed_concepts if item.concept_id == concept_id),
+                None,
+            )
+            if concept is not None:
+                from ..query_recovery.domain import RecoveryRewritePlan
+
+                return (
+                    RecoveryRewritePlan(
+                        added_concept_ids=[concept.concept_id],
+                        interpretation_label=concept.label,
+                        preserved_hard_filter_hash=context.hard_filter_hash,
+                    ),
+                    [],
+                    0,
+                    0,
+                )
         from ..query_recovery.domain import RecoveryNoSafePlan
 
         return (

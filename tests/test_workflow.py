@@ -46,7 +46,7 @@ class RecoveryWorkflowTests(unittest.TestCase):
             rank_policy_version="rank-1",
             gate_policy_version="gate-1",
             recovery_policy_version="recovery-policy-v1",
-            recovery_prompt_version="recovery-v1",
+            recovery_prompt_version="recovery-v2",
             recovery_model_alias="fake-recovery",
         )
         self.state = QueryState(
@@ -76,6 +76,9 @@ class RecoveryWorkflowTests(unittest.TestCase):
         retrieval_runs=(),
         tier2_enabled=True,
         cache=None,
+        planner_codes=(),
+        planner_tokens=0,
+        planner_latency_ms=0,
     ):
         policy = self.policy.model_copy(update={"tier2_enabled": tier2_enabled})
         gate = assess_retrieval_confidence(
@@ -86,7 +89,12 @@ class RecoveryWorkflowTests(unittest.TestCase):
         )
         request = self._request(baseline, gate, unknown_terms, policy)
         retrieval = ScriptedRetrieval(retrieval_runs)
-        planner = FakePlanner(planner_output)
+        planner = FakePlanner(
+            planner_output,
+            codes=planner_codes,
+            tokens=planner_tokens,
+            latency_ms=planner_latency_ms,
+        )
         tools = RecoveryTools(
             expansions=InMemoryApprovedExpansions(expansions),
             constraints=InMemoryRecoveryConstraints(constraints),
@@ -237,6 +245,37 @@ class RecoveryWorkflowTests(unittest.TestCase):
         self.assertTrue(response.event.planner_called)
         self.assertEqual(response.event.retrieval_run_count, 2)
 
+    def test_tier2_event_records_bounded_planner_telemetry(self) -> None:
+        baseline = self.run_summary(run_id="baseline", eligible=0, score=None, coverage=None)
+        concept = self.constraint("footwear", "footwear")
+        planner_output = RecoveryRewritePlan(
+            added_concept_ids=[concept.concept_id],
+            interpretation_label="Footwear interpretation",
+            preserved_hard_filter_hash=hard_filter_hash(self.state),
+        )
+        recovered_state = self.state.model_copy(update={"query_terms": ["formal shirt", "footwear"]})
+        recovered = self.run_summary(
+            run_id="generative",
+            eligible=2,
+            score=0.80,
+            products=["p1", "p2"],
+            state=recovered_state,
+        )
+        response, _retrieval, planner = self.run_request(
+            baseline=baseline,
+            unknown_terms=["unknown-item"],
+            constraints=[concept],
+            planner_output=planner_output,
+            retrieval_runs=[recovered],
+            planner_tokens=73,
+            planner_latency_ms=41,
+        )
+        self.assertEqual(response.event.planner_token_count, 73)
+        self.assertEqual(response.event.planner_latency_ms, 41)
+        self.assertEqual(response.event.allowed_concept_count, 1)
+        self.assertEqual(response.event.planner_input_hash, planner.last_context.planner_input_hash)
+        self.assertEqual(len(response.event.planner_input_hash or ""), 64)
+
     def test_arbitrary_planner_id_is_rejected_without_rerun(self) -> None:
         baseline = self.run_summary(run_id="baseline", eligible=0, score=None, coverage=None)
         allowed = self.constraint("allowed", "allowed")
@@ -281,6 +320,65 @@ class RecoveryWorkflowTests(unittest.TestCase):
         self.assertEqual(retrieval.calls, [])
         self.assertEqual(planner.calls, 1)
 
+    def test_planner_no_safe_is_honest_and_does_not_turn_every_concept_into_chat(self) -> None:
+        baseline = self.run_summary(run_id="baseline", eligible=0, score=None, coverage=None)
+        first = self.constraint("category-a", "Category A")
+        second = self.constraint("category-b", "Category B")
+        from fkgrid.query_recovery.domain import RecoveryNoSafePlan
+
+        planner_output = RecoveryNoSafePlan(
+            reason_code="NO_COMPATIBLE_INTERPRETATION",
+            preserved_hard_filter_hash=hard_filter_hash(self.state),
+        )
+        response, retrieval, planner = self.run_request(
+            baseline=baseline,
+            unknown_terms=["moon-boots"],
+            constraints=[first, second],
+            planner_output=planner_output,
+        )
+        self.assertEqual(response.outcome, RecoveryOutcome.NO_SAFE_RECOVERY)
+        self.assertIsNone(response.clarification)
+        self.assertEqual(retrieval.calls, [])
+        self.assertEqual(planner.calls, 1)
+
+    def test_invalid_or_unavailable_planner_falls_back_to_allowed_clarification(self) -> None:
+        baseline = self.run_summary(run_id="baseline", eligible=0, score=None, coverage=None)
+        first = self.constraint("category-a", "Category A")
+        second = self.constraint("category-b", "Category B")
+        response, retrieval, planner = self.run_request(
+            baseline=baseline,
+            unknown_terms=["ambiguous"],
+            constraints=[first, second],
+            planner_output=None,
+            planner_codes=["PROVIDER_TIMEOUT"],
+        )
+        self.assertEqual(response.outcome, RecoveryOutcome.CLARIFICATION_REQUIRED)
+        self.assertEqual(response.clarification.question, "Did you mean Category A or Category B?")
+        self.assertEqual(retrieval.calls, [])
+        self.assertEqual(planner.calls, 1)
+        self.assertIn("PLANNER_FALLBACK_TO_CLARIFICATION", response.warnings)
+
+    def test_retrieval_result_for_wrong_state_is_rejected_before_comparison(self) -> None:
+        baseline = self.run_summary(run_id="baseline", eligible=0, score=None, coverage=None)
+        concept = self.constraint("footwear", "footwear")
+        planner_output = RecoveryRewritePlan(
+            added_concept_ids=[concept.concept_id],
+            interpretation_label="Footwear interpretation",
+            preserved_hard_filter_hash=hard_filter_hash(self.state),
+        )
+        # The adapter returns a baseline-state hash even though Tier 2 asked for a rewrite.
+        wrong_run = self.run_summary(run_id="wrong-state", eligible=2, score=0.90, products=["p1"])
+        response, retrieval, _planner = self.run_request(
+            baseline=baseline,
+            unknown_terms=["unknown-item"],
+            constraints=[concept],
+            planner_output=planner_output,
+            retrieval_runs=[wrong_run],
+        )
+        self.assertEqual(response.outcome, RecoveryOutcome.NO_SAFE_RECOVERY)
+        self.assertEqual(retrieval.calls, ["TIER2_GENERATIVE"])
+        self.assertIn("RETRIEVAL_QUERY_STATE_HASH_MISMATCH", response.event.planner_validation_codes)
+
     def test_hard_filter_hash_change_in_baseline_fails_closed(self) -> None:
         baseline = self.run_summary(run_id="baseline", eligible=0, score=None, coverage=None)
         broken = baseline.model_copy(update={"hard_filter_hash": "0" * 64})
@@ -322,7 +420,7 @@ class RecoveryWorkflowTests(unittest.TestCase):
         )
         self.assertEqual(response.outcome, RecoveryOutcome.NO_SAFE_RECOVERY)
         self.assertEqual(retrieval.calls, [])
-        self.assertIn("CONCEPT_SCOPE_MISMATCH", response.event.planner_validation_codes)
+        self.assertIn("CONCEPT_ID_NOT_ALLOWED", response.event.planner_validation_codes)
 
     def test_cache_replays_only_an_accepted_plan_and_reruns_retrieval(self) -> None:
         cache = InMemoryRecoveryPlanCache(clock=self.clock)

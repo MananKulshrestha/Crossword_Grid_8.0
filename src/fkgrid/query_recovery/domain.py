@@ -253,7 +253,7 @@ class RecoveryContext(StrictModel):
     baseline_run_id: str = Field(min_length=1, max_length=128)
     baseline_summary: BaselineSignals
     allowed_concepts: list[RecoveryConstraint] = Field(default_factory=list, max_length=20)
-    approved_suggestions: list[ApprovedExpansion] = Field(default_factory=list, max_length=3)
+    approved_mappings: list[ApprovedExpansion] = Field(default_factory=list, max_length=3)
     compatibility: CompatibilityTuple
     locale: Literal["en-IN"] = "en-IN"
     planner_input_hash: str = Field(min_length=64, max_length=64)
@@ -395,6 +395,10 @@ class RecoveryEvent(StrictModel):
     budget_used_ms: int = Field(ge=0)
     model_prompt_version: str | None = Field(default=None, max_length=128)
     model_alias: str | None = Field(default=None, max_length=256)
+    planner_input_hash: str | None = Field(default=None, min_length=64, max_length=64)
+    planner_token_count: int = Field(default=0, ge=0)
+    planner_latency_ms: int = Field(default=0, ge=0)
+    allowed_concept_count: int = Field(default=0, ge=0, le=20)
     compatibility: CompatibilityTuple
     cache_hit: bool = False
     warnings: list[str] = Field(default_factory=list, max_length=12)

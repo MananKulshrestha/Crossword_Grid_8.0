@@ -63,7 +63,7 @@ def make_context() -> RecoveryContext:
         rank_policy_version="rank-smoke",
         gate_policy_version="gate-smoke",
         recovery_policy_version="recovery-policy-v1",
-        recovery_prompt_version="recovery-v1",
+        recovery_prompt_version="recovery-v2",
         recovery_model_alias=DEEPINFRA_GEMMA_4_26B_A4B_IT,
     )
     state = QueryState(
@@ -99,7 +99,7 @@ def make_context() -> RecoveryContext:
         "baseline_run_id": "baseline-smoke",
         "baseline_summary": BaselineSignals(eligible_count=0, unknown_terms=["formal wear"]),
         "allowed_concepts": [shirt_concept, blazer_concept],
-        "approved_suggestions": [],
+        "approved_mappings": [],
         "compatibility": compatibility,
         "locale": "en-IN",
     }

@@ -46,14 +46,14 @@ class SharedGatewayRecoveryPlanner(RecoveryPlannerPort):
         self,
         *,
         gateway: StructuredModelGateway,
-        prompt_version: str = "recovery-v1",
+        prompt_version: str = "recovery-v2",
         model_alias: str = "configured-recovery-model",
         prompt_path: Path | None = None,
     ) -> None:
         self.gateway = gateway
         self.prompt_version = prompt_version
         self.model_alias = model_alias
-        self.prompt_path = prompt_path or Path(__file__).resolve().parents[1] / "prompts" / "recovery_v1.md"
+        self.prompt_path = prompt_path or Path(__file__).resolve().parents[1] / "prompts" / "recovery_v2.md"
 
     def plan(
         self,

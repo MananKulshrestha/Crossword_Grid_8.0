@@ -201,7 +201,7 @@ def build_deepinfra_gemma4_recovery_planner(
     selected_gateway = gateway or DeepInfraGemmaGateway(config=selected_config)
     return SharedGatewayRecoveryPlanner(
         gateway=selected_gateway,
-        prompt_version="recovery-v1",
+        prompt_version="recovery-v2",
         model_alias=DEEPINFRA_GEMMA_4_26B_A4B_IT,
         prompt_path=prompt_path,
     )

@@ -33,6 +33,7 @@ from .validation import (
     validate_internal_rewrite_plan,
     validate_planner_plan,
     validate_recovery_context,
+    validate_retrieval_run,
 )
 
 PLANNER_POST_CALL_RESERVE_MS = 250
@@ -125,6 +126,10 @@ class QueryRecoveryWorkflow:
         planner_action: PlannerAction | None = None
         planner_called = False
         planner_codes: list[str] = []
+        planner_input_hash: str | None = None
+        planner_token_count = 0
+        planner_latency_ms = 0
+        allowed_concept_count = 0
         concepts_by_id: dict[str, RecoveryConstraint] = {}
         allowed_concepts: list[RecoveryConstraint] = []
         cache_key = recovery_cache_key(request) if self.cache is not None else None
@@ -162,12 +167,20 @@ class QueryRecoveryWorkflow:
                 direct_state = self._apply_plan(request, direct_plan)
                 if direct_state is not None:
                     try:
-                        direct_run = self.tools.retrieve(
+                        candidate_run = self.tools.retrieve(
                             request,
                             state=direct_state,
                             run_kind="TIER1_DIRECT",
                             remaining_ms=self._remaining(request, started_ms),
                         )
+                        retrieval_issues = validate_retrieval_run(
+                            candidate_run, direct_state, request
+                        )
+                        if retrieval_issues:
+                            warnings.extend(retrieval_issues)
+                            planner_codes.extend(retrieval_issues)
+                        else:
+                            direct_run = candidate_run
                     except Exception as exc:
                         warnings.append("TIER1_RETRIEVAL_UNAVAILABLE")
                         planner_codes.append(f"TIER1_RETRIEVAL:{type(exc).__name__}")
@@ -206,12 +219,16 @@ class QueryRecoveryWorkflow:
                 cached_state = self._apply_plan(request, cached_plan) if not cache_issues else None
                 if cached_state is not None:
                     try:
-                        cached_run = self.tools.retrieve(
+                        cached_candidate = self.tools.retrieve(
                             request,
                             state=cached_state,
                             run_kind="CACHED_PLAN",
                             remaining_ms=self._remaining(request, started_ms),
                         )
+                        if validate_retrieval_run(cached_candidate, cached_state, request):
+                            cached_run = None
+                        else:
+                            cached_run = cached_candidate
                     except Exception:
                         cached_run = None
                     if cached_run is not None:
@@ -297,18 +314,20 @@ class QueryRecoveryWorkflow:
             )
 
         concepts_by_id.update({concept.concept_id: concept for concept in allowed_concepts})
+        allowed_concept_count = len(allowed_concepts)
         context = self.tools.build_context(
             request,
             allowed_concepts=allowed_concepts,
-            approved_suggestions=expansions[:3],
+            approved_mappings=expansions[:3],
         )
+        planner_input_hash = context.planner_input_hash
         planner_called = True
         planner_timeout = max(
             1,
             self._remaining(request, started_ms) - PLANNER_POST_CALL_RESERVE_MS,
         )
         try:
-            planner_output, planner_codes, _tokens, _latency = self.tools.plan_constrained_repair(
+            planner_output, planner_codes, planner_token_count, planner_latency_ms = self.tools.plan_constrained_repair(
                 context,
                 timeout_ms=planner_timeout,
             )
@@ -329,6 +348,10 @@ class QueryRecoveryWorkflow:
                 planner_action=None,
                 planner_called=planner_called,
                 planner_codes=planner_codes,
+                planner_input_hash=planner_input_hash,
+                planner_token_count=planner_token_count,
+                planner_latency_ms=planner_latency_ms,
+                allowed_concept_count=allowed_concept_count,
                 warnings=warnings,
             )
 
@@ -348,6 +371,10 @@ class QueryRecoveryWorkflow:
                 planner_action=planner_action,
                 planner_called=planner_called,
                 planner_codes=[*planner_codes, *plan_issues],
+                planner_input_hash=planner_input_hash,
+                planner_token_count=planner_token_count,
+                planner_latency_ms=planner_latency_ms,
+                allowed_concept_count=allowed_concept_count,
                 warnings=warnings,
             )
 
@@ -372,6 +399,10 @@ class QueryRecoveryWorkflow:
                     planner_action=planner_action,
                     planner_called=planner_called,
                     planner_validation_codes=planner_codes,
+                    planner_input_hash=planner_input_hash,
+                    planner_token_count=planner_token_count,
+                    planner_latency_ms=planner_latency_ms,
+                    allowed_concept_count=allowed_concept_count,
                     comparator_decisions=comparator_decisions,
                     warnings=warnings,
                 )
@@ -387,6 +418,10 @@ class QueryRecoveryWorkflow:
                 validation_codes=[*planner_codes, "CLARIFICATION_OPTIONS_UNAVAILABLE"],
                 planner_action=planner_action,
                 planner_called=planner_called,
+                planner_input_hash=planner_input_hash,
+                planner_token_count=planner_token_count,
+                planner_latency_ms=planner_latency_ms,
+                allowed_concept_count=allowed_concept_count,
             )
 
         if isinstance(planner_output, RecoveryNoSafePlan):
@@ -402,6 +437,10 @@ class QueryRecoveryWorkflow:
                 validation_codes=planner_codes,
                 planner_action=planner_action,
                 planner_called=planner_called,
+                planner_input_hash=planner_input_hash,
+                planner_token_count=planner_token_count,
+                planner_latency_ms=planner_latency_ms,
+                allowed_concept_count=allowed_concept_count,
             )
 
         generative_plan = self.tools.make_internal_rewrite_plan(
@@ -425,6 +464,10 @@ class QueryRecoveryWorkflow:
                 planner_action=planner_action,
                 planner_called=planner_called,
                 planner_codes=[*planner_codes, *plan_issues],
+                planner_input_hash=planner_input_hash,
+                planner_token_count=planner_token_count,
+                planner_latency_ms=planner_latency_ms,
+                allowed_concept_count=allowed_concept_count,
                 warnings=warnings,
             )
         generative_state = self._apply_plan(request, generative_plan)
@@ -442,15 +485,39 @@ class QueryRecoveryWorkflow:
                 planner_action=planner_action,
                 planner_called=planner_called,
                 planner_codes=[*planner_codes, "RECOVERY_PLAN_APPLICATION_FAILED"],
+                planner_input_hash=planner_input_hash,
+                planner_token_count=planner_token_count,
+                planner_latency_ms=planner_latency_ms,
+                allowed_concept_count=allowed_concept_count,
                 warnings=warnings,
             )
         try:
-            generative_run = self.tools.retrieve(
+            candidate_run = self.tools.retrieve(
                 request,
                 state=generative_state,
                 run_kind="TIER2_GENERATIVE",
                 remaining_ms=self._remaining(request, started_ms),
             )
+            retrieval_issues = validate_retrieval_run(candidate_run, generative_state, request)
+            if retrieval_issues:
+                return self._baseline_or_no_safe(
+                    request,
+                    started_ms,
+                    direct_run=direct_run,
+                    direct_plan=direct_plan,
+                    comparator=selected_comparator,
+                    mapping_ids=mapping_ids,
+                    comparator_decisions=comparator_decisions,
+                    warnings=[*warnings, "TIER2_RETRIEVAL_INVALID"],
+                    validation_codes=[*planner_codes, *retrieval_issues],
+                    planner_action=planner_action,
+                    planner_called=planner_called,
+                    planner_input_hash=planner_input_hash,
+                    planner_token_count=planner_token_count,
+                    planner_latency_ms=planner_latency_ms,
+                    allowed_concept_count=allowed_concept_count,
+                )
+            generative_run = candidate_run
         except Exception as exc:
             return self._baseline_or_no_safe(
                 request,
@@ -464,6 +531,10 @@ class QueryRecoveryWorkflow:
                 validation_codes=[*planner_codes, f"TIER2_RETRIEVAL:{type(exc).__name__}"],
                 planner_action=planner_action,
                 planner_called=planner_called,
+                planner_input_hash=planner_input_hash,
+                planner_token_count=planner_token_count,
+                planner_latency_ms=planner_latency_ms,
+                allowed_concept_count=allowed_concept_count,
             )
         comparison = compare_retrieval_runs(
             baseline=request.baseline_run,
@@ -487,6 +558,10 @@ class QueryRecoveryWorkflow:
                 planner_action=planner_action,
                 planner_called=planner_called,
                 planner_validation_codes=planner_codes,
+                planner_input_hash=planner_input_hash,
+                planner_token_count=planner_token_count,
+                planner_latency_ms=planner_latency_ms,
+                allowed_concept_count=allowed_concept_count,
                 comparator_decisions=comparator_decisions,
                 warnings=warnings,
             )
@@ -512,6 +587,10 @@ class QueryRecoveryWorkflow:
                     planner_action=planner_action,
                     planner_called=planner_called,
                     planner_validation_codes=planner_codes,
+                    planner_input_hash=planner_input_hash,
+                    planner_token_count=planner_token_count,
+                    planner_latency_ms=planner_latency_ms,
+                    allowed_concept_count=allowed_concept_count,
                     comparator_decisions=comparator_decisions,
                     warnings=warnings,
                 )
@@ -527,6 +606,10 @@ class QueryRecoveryWorkflow:
             validation_codes=planner_codes,
             planner_action=planner_action,
             planner_called=planner_called,
+            planner_input_hash=planner_input_hash,
+            planner_token_count=planner_token_count,
+            planner_latency_ms=planner_latency_ms,
+            allowed_concept_count=allowed_concept_count,
             generative_run=generative_run,
         )
 
@@ -630,7 +713,9 @@ class QueryRecoveryWorkflow:
             return None
         terms = list(request.query_state.query_terms)
         for term in plan.added_query_terms:
-            if term not in terms:
+            if term not in terms and term.casefold() not in {item.casefold() for item in terms}:
+                if len(terms) >= 20:
+                    return None
                 terms.append(term)
         return request.query_state.model_copy(update={"query_terms": terms})
 
@@ -652,6 +737,10 @@ class QueryRecoveryWorkflow:
         planner_action: PlannerAction | None = None,
         planner_called: bool = False,
         generative_run: RetrievalRun | None = None,
+        planner_input_hash: str | None = None,
+        planner_token_count: int = 0,
+        planner_latency_ms: int = 0,
+        allowed_concept_count: int = 0,
     ) -> RecoveryResponse:
         if request.baseline_run.eligible_count > 0:
             outcome = RecoveryOutcome.BASELINE_PRESERVED
@@ -674,6 +763,10 @@ class QueryRecoveryWorkflow:
             mapping_ids=mapping_ids,
             planner_action=planner_action,
             planner_called=planner_called,
+            planner_input_hash=planner_input_hash,
+            planner_token_count=planner_token_count,
+            planner_latency_ms=planner_latency_ms,
+            allowed_concept_count=allowed_concept_count,
             planner_validation_codes=validation_codes,
             comparator_decisions=comparator_decisions,
             warnings=warnings,
@@ -695,6 +788,10 @@ class QueryRecoveryWorkflow:
         planner_called: bool,
         planner_codes: list[str],
         warnings: list[str],
+        planner_input_hash: str | None = None,
+        planner_token_count: int = 0,
+        planner_latency_ms: int = 0,
+        allowed_concept_count: int = 0,
     ) -> RecoveryResponse:
         clarification = self._clarification_from_constraints(
             request,
@@ -715,6 +812,10 @@ class QueryRecoveryWorkflow:
                 mapping_ids=mapping_ids,
                 planner_action=planner_action,
                 planner_called=planner_called,
+                planner_input_hash=planner_input_hash,
+                planner_token_count=planner_token_count,
+                planner_latency_ms=planner_latency_ms,
+                allowed_concept_count=allowed_concept_count,
                 planner_validation_codes=planner_codes,
                 comparator_decisions=comparator_decisions,
                 warnings=[*warnings, "PLANNER_FALLBACK_TO_CLARIFICATION"],
@@ -731,6 +832,10 @@ class QueryRecoveryWorkflow:
             validation_codes=planner_codes,
             planner_action=planner_action,
             planner_called=planner_called,
+            planner_input_hash=planner_input_hash,
+            planner_token_count=planner_token_count,
+            planner_latency_ms=planner_latency_ms,
+            allowed_concept_count=allowed_concept_count,
         )
 
     def _clarification_from_constraints(
@@ -777,6 +882,10 @@ class QueryRecoveryWorkflow:
         planner_validation_codes: list[str] | None = None,
         comparator_decisions: list[ComparatorDecision] | None = None,
         cache_hit: bool = False,
+        planner_input_hash: str | None = None,
+        planner_token_count: int = 0,
+        planner_latency_ms: int = 0,
+        allowed_concept_count: int = 0,
     ) -> RecoveryResponse:
         used_ms = max(0, self.clock.monotonic_ms() - started_ms)
         before_hash = hard_filter_hash(request.query_state)
@@ -818,6 +927,10 @@ class QueryRecoveryWorkflow:
             budget_used_ms=used_ms,
             model_prompt_version=request.compatibility.recovery_prompt_version if planner_called else None,
             model_alias=request.compatibility.recovery_model_alias if planner_called else None,
+            planner_input_hash=planner_input_hash if planner_called else None,
+            planner_token_count=planner_token_count if planner_called else 0,
+            planner_latency_ms=planner_latency_ms if planner_called else 0,
+            allowed_concept_count=allowed_concept_count if planner_called else 0,
             compatibility=request.compatibility,
             cache_hit=cache_hit,
             warnings=list(dict.fromkeys(warnings))[:12],

@@ -117,6 +117,8 @@ def validate_recovery_context(request: RecoveryRequest) -> list[str]:
         issues.append("GATE_HARD_FILTER_HASH_MISMATCH")
     if request.baseline_run.hard_filter_hash != expected_hash:
         issues.append("BASELINE_HARD_FILTER_HASH_MISMATCH")
+    if request.baseline_run.query_state_hash != query_state_hash(request.query_state):
+        issues.append("BASELINE_QUERY_STATE_HASH_MISMATCH")
     if not compatibility_equal(request.baseline_run.compatibility, request.compatibility):
         issues.append("BASELINE_COMPATIBILITY_MISMATCH")
     if request.query_state.catalog_version != request.compatibility.catalog_version:
@@ -129,6 +131,29 @@ def validate_recovery_context(request: RecoveryRequest) -> list[str]:
         issues.append("QUERY_SCHEMA_VERSION_MISMATCH")
     if request.query_state.lexicon_version != request.compatibility.lexicon_version:
         issues.append("QUERY_LEXICON_VERSION_MISMATCH")
+    if not (request.unresolved_terms or request.gate.unknown_terms or request.query_state.query_terms):
+        issues.append("RECOVERY_TERMS_MISSING")
+    return sorted(set(issues))
+
+
+def validate_retrieval_run(
+    run: Any,
+    state: Any,
+    request: RecoveryRequest,
+) -> list[str]:
+    """Revalidate every retrieval adapter result before comparison or display."""
+
+    issues: list[str] = []
+    expected_state_hash = query_state_hash(state)
+    expected_hard_hash = hard_filter_hash(state)
+    if run.query_state_hash != expected_state_hash:
+        issues.append("RETRIEVAL_QUERY_STATE_HASH_MISMATCH")
+    if run.hard_filter_hash != expected_hard_hash:
+        issues.append("RETRIEVAL_HARD_FILTER_HASH_MISMATCH")
+    if not compatibility_equal(run.compatibility, request.compatibility):
+        issues.append("RETRIEVAL_COMPATIBILITY_MISMATCH")
+    if not run.is_scope_safe:
+        issues.append("RETRIEVAL_SCOPE_UNSAFE")
     return sorted(set(issues))
 
 
@@ -171,6 +196,13 @@ def validate_planner_plan(
             issues.append("CLARIFICATION_OPTION_NOT_ALLOWED")
         if len(set(plan.option_ids)) != len(plan.option_ids):
             issues.append("DUPLICATE_CLARIFICATION_OPTION")
+        allowed_target_fields = {"category", "attribute"} | {
+            concept.attribute_id
+            for concept in context.allowed_concepts
+            if concept.attribute_id is not None
+        }
+        if plan.target_field not in allowed_target_fields:
+            issues.append("CLARIFICATION_TARGET_NOT_ALLOWED")
         for option_id in plan.option_ids:
             concept = concepts_by_id.get(option_id)
             if concept and concept.taxonomy_scope_id not in {None, context.query_state.taxonomy_scope_id}:

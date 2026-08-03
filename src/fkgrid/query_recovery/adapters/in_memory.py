@@ -62,7 +62,12 @@ class InMemoryApprovedExpansions:
             item
             for item in self.values
             if normalize_term(item.normalized_form) in allowed
+            and item.locale == query_state.locale
             and item.lexicon_version == compatibility.lexicon_version
+            and item.catalog_version == compatibility.catalog_version
+            and item.taxonomy_version == compatibility.taxonomy_version
+            and item.category_schema_version == compatibility.category_schema_version
+            and item.taxonomy_scope_id in {None, query_state.taxonomy_scope_id}
         ]
         return values[:limit]
 
@@ -89,6 +94,8 @@ class InMemoryRecoveryConstraints:
             and item.taxonomy_version == compatibility.taxonomy_version
             and item.category_schema_version == compatibility.category_schema_version
             and item.lexicon_version == compatibility.lexicon_version
+            and item.locale == query_state.locale
+            and item.taxonomy_scope_id in {None, query_state.taxonomy_scope_id}
         ][:limit]
 
 

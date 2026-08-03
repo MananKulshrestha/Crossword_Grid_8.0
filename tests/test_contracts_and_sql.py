@@ -7,18 +7,13 @@ import unittest
 from fkgrid.query_recovery.adapters.in_memory import FixedClock
 from fkgrid.query_recovery.adapters.sqlite import SqliteRecoveryRepository, install_recovery_schema
 from fkgrid.query_recovery.domain import (
-    ApprovedExpansion,
     CompatibilityTuple,
-    ConceptType,
-    EvidenceBand,
-    ExpansionAction,
-    MappingType,
-    RecoveryConstraint,
     RecoveryEvent,
     RecoveryOutcome,
+    HardConstraint,
+    QueryState,
 )
 from fkgrid.query_recovery.validation import canonical_hash, canonical_json, hard_filter_hash
-from fkgrid.query_recovery.domain import HardConstraint, QueryState
 
 
 class ContractAndSqlTests(unittest.TestCase):
@@ -33,7 +28,7 @@ class ContractAndSqlTests(unittest.TestCase):
             rank_policy_version="rank-1",
             gate_policy_version="gate-1",
             recovery_policy_version="recovery-policy-v1",
-            recovery_prompt_version="recovery-v1",
+            recovery_prompt_version="recovery-v2",
             recovery_model_alias="fake",
         )
         self.state = QueryState(
@@ -140,20 +135,26 @@ class ContractAndSqlTests(unittest.TestCase):
             retrieval_run_count=2,
             budget_ms=1800,
             budget_used_ms=120,
-            model_prompt_version="recovery-v1",
+            model_prompt_version="recovery-v2",
             model_alias="fake",
+            planner_input_hash="b" * 64,
+            planner_token_count=12,
+            planner_latency_ms=7,
+            allowed_concept_count=2,
             compatibility=self.compatibility,
             warnings=["safe-warning"],
             created_at=FixedClock().now_utc(),
         )
         repository.record(event)
         row = connection.execute(
-            "SELECT outcome, planner_called, retrieval_run_count, compatibility_json FROM recovery_events"
+            "SELECT outcome, planner_called, retrieval_run_count, planner_token_count, "
+            "planner_latency_ms, allowed_concept_count, compatibility_json FROM recovery_events"
         ).fetchone()
         self.assertEqual(row[0], "RECOVERED_TIER2")
         self.assertEqual(row[1], 1)
         self.assertEqual(row[2], 2)
-        self.assertEqual(json.loads(row[3])["catalog_version"], "catalog-1")
+        self.assertEqual(row[3:6], (12, 7, 2))
+        self.assertEqual(json.loads(row[6])["catalog_version"], "catalog-1")
         with self.assertRaises(sqlite3.IntegrityError):
             repository.record(event)
 
