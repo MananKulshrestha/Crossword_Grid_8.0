@@ -48,7 +48,7 @@ _RUN_TURN_BODY = Body(
     ...,
     openapi_examples={
         "demo_clarification": {
-            "summary": "Ambiguous category with two allowed concepts",
+            "summary": "Semantic recovery with bounded alternatives",
             "description": "Copy the response from GET /v1/query-recovery/example.",
             "value": build_example_request().model_dump(mode="json"),
         }
@@ -180,8 +180,8 @@ def create_app(dependencies: RecoveryApiDependencies | None = None) -> FastAPI:
         summary="Run one confidence-gated query-recovery turn",
         description=(
             "Accepts the canonical baseline/gate/compatibility snapshot and runs "
-            "the existing bounded workflow. Safe outcomes such as clarification, "
-            "baseline preservation, and no-safe recovery are returned as 200 responses."
+            "the existing bounded workflow. Safe outcomes such as bounded recovery "
+            "suggestions, baseline preservation, and no-safe recovery are returned as 200 responses."
         ),
     )
     def run_turn(

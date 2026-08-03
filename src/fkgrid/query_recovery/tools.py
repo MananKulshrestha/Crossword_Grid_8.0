@@ -38,6 +38,7 @@ RECOVERY_CAPABILITIES = frozenset(
         "plan_constrained_repair",
         "validate_recovery_plan",
         "build_clarification",
+        "build_suggestions",
         "record_recovery_event",
     }
 )
@@ -84,7 +85,13 @@ class RecoveryTools:
         self.clock = clock
 
     def lookup_approved_expansions(self, request: RecoveryRequest) -> list[ApprovedExpansion]:
-        terms = sorted({normalize_term(term) for term in request.unresolved_terms if term.strip()})
+        normalized = [normalize_term(term) for term in request.unresolved_terms if term.strip()]
+        phrase_terms = [
+            " ".join(normalized[index : index + 2])
+            for index in range(max(0, len(normalized) - 1))
+            if normalized[index] and normalized[index + 1]
+        ]
+        terms = list(dict.fromkeys([*phrase_terms, *normalized]))
         return self.expansions.lookup(
             normalized_terms=terms[: request.policy.max_lookup_terms],
             query_state=request.query_state,

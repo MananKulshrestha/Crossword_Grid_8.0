@@ -48,21 +48,29 @@ class DemoSemanticFamily:
 
     key: str
     aliases: tuple[str, ...]
-    product_id: str
+    product_ids: tuple[str, ...]
     interpretation: str
+    query_branches: tuple[str, ...] = ()
 
 
 _DEMO_SEMANTIC_FAMILIES = (
     DemoSemanticFamily(
+        key="formalwear",
+        aliases=("formalwear", "formal wear", "formalware"),
+        product_ids=("demo-formal-shirt-1", "demo-formal-blazer-1", "demo-formal-pants-1"),
+        interpretation="formalwear / shirts / blazers / pants",
+        query_branches=("shirts", "blazers", "pants"),
+    ),
+    DemoSemanticFamily(
         key="sports-shoes",
         aliases=("trainers", "sports shoes", "athletic shoes", "running shoes"),
-        product_id="demo-sports-shoe-1",
+        product_ids=("demo-sports-shoe-1",),
         interpretation="trainers / sports shoes / athletic shoes",
     ),
     DemoSemanticFamily(
         key="footwear",
         aliases=("shoes", "footwear", "sneakers"),
-        product_id="demo-footwear-1",
+        product_ids=("demo-footwear-1",),
         interpretation="shoes / footwear",
     ),
 )
@@ -73,26 +81,6 @@ class DemoPlanner:
 
     def plan(self, *, context, timeout_ms: int):
         del timeout_ms
-        unresolved = {normalize_term(term) for term in context.unresolved_terms}
-        if unresolved.intersection({"formal", "wear", "formal wear"}):
-            from ..query_recovery.domain import RecoveryClarificationPlan
-
-            option_ids = [
-                concept.concept_id
-                for concept in context.allowed_concepts
-                if concept.concept_id in {"demo-shirts", "demo-blazers"}
-            ]
-            return (
-                RecoveryClarificationPlan(
-                    option_ids=option_ids,
-                    target_field="category",
-                    reason="Formal wear can refer to more than one approved category.",
-                    preserved_hard_filter_hash=context.hard_filter_hash,
-                ),
-                [],
-                0,
-                0,
-            )
         from ..query_recovery.domain import RecoveryNoSafePlan
 
         return (
@@ -120,7 +108,10 @@ class DemoRetrieval:
             (
                 candidate
                 for candidate in _DEMO_SEMANTIC_FAMILIES
-                if normalized_terms.intersection(candidate.aliases)
+                if any(
+                    alias in normalized_terms or all(part in normalized_terms for part in alias.split())
+                    for alias in candidate.aliases
+                )
             ),
             None,
         )
@@ -129,11 +120,12 @@ class DemoRetrieval:
             query_state_hash=query_state_hash(query_state),
             hard_filter_hash=hard_filter_hash(query_state),
             compatibility=compatibility,
-            eligible_count=1 if family else 0,
+            eligible_count=len(family.product_ids) if family else 0,
             top_score=0.86 if family else None,
             top_score_margin=0.22 if family else None,
             required_criteria_coverage=1.0 if family else None,
-            result_product_ids=[family.product_id] if family else [],
+            result_product_ids=list(family.product_ids) if family else [],
+            query_branches=list(family.query_branches) if family else [],
             interpretation_family=family.interpretation if family else None,
         )
 
@@ -170,6 +162,13 @@ def _demo_constraints() -> list[RecoveryConstraint]:
             concept_type=ConceptType.TAXONOMY,
             label="Blazers",
             canonical_term="blazers",
+            **versions,
+        ),
+        RecoveryConstraint(
+            concept_id="demo-pants",
+            concept_type=ConceptType.TAXONOMY,
+            label="Pants",
+            canonical_term="pants",
             **versions,
         ),
         RecoveryConstraint(
@@ -210,7 +209,26 @@ def _demo_expansions() -> list[ApprovedExpansion]:
         "evidence_band": EvidenceBand.APPROVED_HIGH,
         **versions,
     }
+    formal_expansions = [
+        ("demo-shirts", "shirts", 100),
+        ("demo-blazers", "blazers", 100),
+        ("demo-pants", "pants", 100),
+    ]
+    formal_mappings = [
+        ApprovedExpansion(
+            mapping_id=f"demo-{source.replace(' ', '-')}-{index:02d}-{concept_id}",
+            normalized_form=source,
+            original_form=source,
+            canonical_target_id=concept_id,
+            canonical_label=term,
+            priority=priority,
+            **{**common, "mapping_type": MappingType.COMPOUND},
+        )
+        for source in ("formalwear", "formal wear", "formalware")
+        for index, (concept_id, term, priority) in enumerate(formal_expansions, start=1)
+    ]
     return [
+        *formal_mappings,
         ApprovedExpansion(
             mapping_id="demo-shoes-to-footwear",
             normalized_form="shoes",

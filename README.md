@@ -2,7 +2,7 @@
 
 This branch implements the confidence-gated Query Recovery Agent through Tier 2:
 
-`baseline retrieval -> deterministic gate -> Tier 1 approved-lexicon recovery -> deterministic comparison -> one constrained Tier 2 planner call -> optional one rerun -> grounded recovery/clarification/no-safe terminal`
+`baseline retrieval -> deterministic gate -> Tier 1 approved-lexicon recovery -> deterministic comparison -> one constrained Tier 2 planner call -> optional one rerun -> grounded recovery/suggestions/no-safe terminal`
 
 The package is deliberately independent of the unfinished catalog, retrieval, session, and database implementations. It provides strict Pydantic contracts, ports, deterministic tools, a bounded workflow, in-memory fakes, a parameterized SQLite adapter, and a migration fragment. A later DB owner can back the ports with SQLAlchemy/PostgreSQL without changing the recovery workflow.
 
@@ -12,7 +12,7 @@ The package is deliberately independent of the unfinished catalog, retrieval, se
 - Hard constraints are represented canonically and hashed before/after every plan. A changed hash rejects the plan.
 - Approved mappings and recovery concepts are read-only runtime inputs. Recovery cannot publish, mutate catalog data, alter lexicon versions, change cart state, browse the web, or register tools.
 - Tier 1 direct mappings are attempted before Tier 2. Tier 2 makes at most one structured planner call and at most one generative rewrite rerun.
-- Planner output is untrusted JSON. IDs must be a subset of the context allowlist, and clarification options must come from active supplied concepts.
+- Planner output is untrusted JSON. IDs must be a subset of the context allowlist; ambiguous recovery is rendered as bounded alternatives rather than a chat question.
 - Retrieval comparison is deterministic and uses safety/coverage/quality rules before eligible count.
 - Every path records a recovery event, including confident-query skips and provider failures.
 
@@ -50,7 +50,7 @@ Open [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs). `GET /v1/query-re
 
 For an actathon-friendly experience, open `/demo` on the same host. It provides one query box and three intentionally small mock filters (`In stock only`, `Cotton`, and `Under ₹2,000`). Submitting the form calls `POST /v1/query-recovery/demo-turn`, which translates those values into the canonical request and runs the same recovery workflow without requiring anyone to edit the full schema by hand.
 
-The Swagger demo includes approved semantic examples so changing the query changes the recovery result: `shoes` recovers to the footwear family and `trainers` recovers through the sports-shoes family (`trainers / sports shoes / athletic shoes`) without asking a chat-style clarification. `formal wear` remains a deliberate clarification example because Shirts and Blazers are genuinely different allowed categories. These are deterministic demo lexicon/retrieval seams; production catalog, lexicon, retrieval, session, memory, cart, and purchase-context adapters plug into the existing ports.
+The Swagger demo includes approved semantic examples so changing the query changes the recovery result: `shoes` recovers to the footwear family, `trainers` expands to the sports-shoes family (`trainers / sports shoes / athletic shoes`), and `formal wear` or the typo `formalware` expands into Shirts, Blazers, and Pants. The UI keeps the same compact form and shows bounded `Did you mean?` alternatives without asking a chat-style clarification. Each approved interpretation is passed through the catalog retrieval port; the demo records the three formalwear branches as `query_branches`. These are deterministic demo lexicon/retrieval seams; production catalog, lexicon, retrieval, session, memory, cart, and purchase-context adapters plug into the existing ports.
 
 ## Local contract checks
 

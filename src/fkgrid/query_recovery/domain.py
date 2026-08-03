@@ -50,6 +50,7 @@ class RecoveryOutcome(str, Enum):
     RECOVERED_TIER1 = "RECOVERED_TIER1"
     RECOVERED_TIER2 = "RECOVERED_TIER2"
     BASELINE_PRESERVED = "BASELINE_PRESERVED"
+    RECOVERY_SUGGESTIONS = "RECOVERY_SUGGESTIONS"
     CLARIFICATION_REQUIRED = "CLARIFICATION_REQUIRED"
     NO_SAFE_RECOVERY = "NO_SAFE_RECOVERY"
     RECOVERY_UNAVAILABLE = "RECOVERY_UNAVAILABLE"
@@ -179,6 +180,7 @@ class RetrievalRun(StrictModel):
     hard_filter_violations: int = Field(default=0, ge=0)
     protected_exclusion_violations: int = Field(default=0, ge=0)
     result_product_ids: list[str] = Field(default_factory=list, max_length=5)
+    query_branches: list[str] = Field(default_factory=list, max_length=3)
     interpretation_family: str | None = Field(default=None, max_length=128)
     degraded: bool = False
     warnings: list[str] = Field(default_factory=list, max_length=12)
@@ -334,6 +336,16 @@ class ClarificationPacket(StrictModel):
     state_hash: str = Field(min_length=64, max_length=64)
 
 
+class RecoverySuggestion(StrictModel):
+    """Bounded, executable-looking labels for silent query recovery."""
+
+    suggestion_id: str = Field(min_length=1, max_length=128)
+    label: str = Field(min_length=1, max_length=160)
+    query_terms: list[str] = Field(min_length=1, max_length=3)
+    concept_ids: list[str] = Field(min_length=1, max_length=3)
+    source: Literal["APPROVED_LEXICON", "ALLOWED_CONCEPT"]
+
+
 class RecoveryPolicy(StrictModel):
     policy_version: str = Field(min_length=1, max_length=128)
     tier2_enabled: bool = True
@@ -409,6 +421,7 @@ class RecoveryResponse(StrictModel):
     plan: RecoveryPlan | None = None
     comparator: ComparatorResult | None = None
     clarification: ClarificationPacket | None = None
+    suggestions: list[RecoverySuggestion] = Field(default_factory=list, max_length=3)
     interpretation_label: str | None = Field(default=None, max_length=160)
     warnings: list[str] = Field(default_factory=list, max_length=16)
     event: RecoveryEvent

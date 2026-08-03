@@ -53,7 +53,7 @@ DEMO_PAGE = r'''<!doctype html>
   <main>
     <div class="eyebrow">FK GRiD · Query Recovery Agent</div>
     <h1>Describe what you want. We’ll recover the query safely.</h1>
-    <p class="lede">A lightweight actathon surface over the real confidence-gated workflow. Type a shopping request, add a few mock catalogue filters, and inspect whether approved semantic recovery finds meaning, a genuine ambiguity is surfaced, or recovery safely abstains.</p>
+    <p class="lede">A lightweight actathon surface over the real confidence-gated workflow. Type a shopping request, add a few mock catalogue filters, and inspect whether approved semantic recovery finds meaning, offers bounded alternatives, or safely abstains.</p>
     <div class="layout">
       <section class="card">
         <form id="recovery-form">
@@ -79,9 +79,8 @@ DEMO_PAGE = r'''<!doctype html>
           <div id="summary" class="small"></div>
           <div id="semantic" class="small"></div>
           <div id="filters" class="chips"></div>
-          <div id="clarification" hidden>
-            <h3>What the agent needs from you</h3>
-            <div id="question" class="small"></div>
+          <div id="suggestions" hidden>
+            <h3>Did you mean?</h3>
             <div id="options" class="options"></div>
           </div>
           <details>
@@ -98,7 +97,7 @@ DEMO_PAGE = r'''<!doctype html>
     const status = document.getElementById('status');
     const emptyState = document.getElementById('empty-state');
     const result = document.getElementById('result');
-    const clarification = document.getElementById('clarification');
+    const suggestions = document.getElementById('suggestions');
     const options = document.getElementById('options');
 
     function text(node, value) { node.textContent = value || ''; }
@@ -108,7 +107,7 @@ DEMO_PAGE = r'''<!doctype html>
       button.disabled = true;
       status.className = 'status';
       text(status, 'Running baseline retrieval, confidence gate, and recovery...');
-      clarification.hidden = true;
+      suggestions.hidden = true;
       try {
         const response = await fetch('/v1/query-recovery/demo-turn', {
           method: 'POST',
@@ -132,13 +131,12 @@ DEMO_PAGE = r'''<!doctype html>
         const filterHost = document.getElementById('filters');
         filterHost.replaceChildren();
         data.filters.forEach((label) => { const chip = document.createElement('span'); chip.className = 'chip'; chip.textContent = label; filterHost.appendChild(chip); });
-        if (recovery.clarification) {
-          clarification.hidden = false;
-          text(document.getElementById('question'), recovery.clarification.question);
+        if (recovery.suggestions?.length) {
+          suggestions.hidden = false;
           options.replaceChildren();
-          recovery.clarification.options.forEach((option) => { const item = document.createElement('div'); item.className = 'option'; item.textContent = option.label; options.appendChild(item); });
+          recovery.suggestions.forEach((suggestion) => { const item = document.createElement('div'); item.className = 'option'; item.textContent = suggestion.label; options.appendChild(item); });
         }
-        text(document.getElementById('trace'), JSON.stringify({outcome: recovery.outcome, gate: recovery.event.trigger_reasons, planner_called: recovery.event.planner_called, validation_codes: recovery.event.planner_validation_codes, hard_filter_mutations: recovery.event.hard_filter_mutation_count, hard_filter_hash: data.hard_filter_hash}, null, 2));
+        text(document.getElementById('trace'), JSON.stringify({outcome: recovery.outcome, gate: recovery.event.trigger_reasons, planner_called: recovery.event.planner_called, validation_codes: recovery.event.planner_validation_codes, hard_filter_mutations: recovery.event.hard_filter_mutation_count, hard_filter_hash: data.hard_filter_hash, query_branches: recovery.selected_run?.query_branches || [], suggestions: recovery.suggestions || []}, null, 2));
         text(status, 'Recovery complete.');
       } catch (error) {
         status.className = 'status error';
