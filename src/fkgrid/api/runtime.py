@@ -19,6 +19,7 @@ from fkgrid.agentic.contracts import (
     ModelRequest,
     ModelResponse,
     ModelStatus,
+    PublicTrace,
     QueryState,
     SearchEntry,
     TurnSnapshot,
@@ -89,7 +90,7 @@ def demo_compatibility(model_alias: str) -> CompatibilityTuple:
         commerce_policy_version="commerce-fixture-v1",
         research_policy_version="research-fixture-v1",
         suggestion_policy_version="suggestions-fixture-v1",
-        memory_schema_version="memory-fixture-v1",
+        memory_schema_version="memory-fixture-v2",
         query_enhancement_policy_version="enhancement-fixture-v1",
         clarification_prompt_version="2",
         recovery_prompt_version="2",
@@ -147,6 +148,7 @@ class ManagedSession:
     orchestrator: TurnOrchestrator
     state: InMemorySessionState
     lock: threading.RLock
+    trace_history: list[PublicTrace]
 
 
 class ApiRuntime:
@@ -387,6 +389,7 @@ class ApiRuntime:
             orchestrator=orchestrator,
             state=session_state,
             lock=threading.RLock(),
+            trace_history=[],
         )
         with self._sessions_lock:
             if session_id in self._sessions:

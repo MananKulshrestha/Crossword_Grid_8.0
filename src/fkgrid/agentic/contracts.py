@@ -7,10 +7,11 @@ they do not implement those systems.
 
 from __future__ import annotations
 
+import re
+import unicodedata
 from datetime import datetime
 from enum import Enum
 from typing import Annotated, Any, Generic, Literal, TypeVar, Union
-import unicodedata
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -297,11 +298,39 @@ class ActiveResultBinding(StrictModel):
     context_ref: str | None = None
 
 
+class RecentResultContext(StrictModel):
+    """Small, provider-safe rendering of one previously displayed result."""
+
+    result_entry_id: str
+    display_position: int = Field(ge=1, le=10)
+    binding: ProductBinding
+    title: str = Field(min_length=1, max_length=300)
+    matched_criteria: list[str] = Field(default_factory=list, max_length=8)
+    unknown_criteria: list[str] = Field(default_factory=list, max_length=8)
+
+
 class RecentTurnContext(StrictModel):
+    """One complete, bounded shopper/assistant turn pair.
+
+    This is deliberately a compact context record rather than a transcript. The
+    current message and current snapshot remain authoritative; these records
+    only help the enhancement and intent stages resolve natural follow-ups.
+    """
+
     turn_id: str
-    role: Literal["SHOPPER", "ASSISTANT"]
-    redacted_text: str = Field(max_length=500)
-    referenced_result_entry_ids: list[str] = Field(default_factory=list, max_length=4)
+    user_query: str = Field(min_length=1, max_length=2000)
+    assistant_summary: str = Field(max_length=1000)
+    action: Action
+    terminal_state: TerminalState
+    state_version: int = Field(ge=0)
+    hard_constraints: list[Constraint] = Field(default_factory=list, max_length=8)
+    soft_preferences: list[Preference] = Field(default_factory=list, max_length=8)
+    query_terms: list[str] = Field(default_factory=list, max_length=10)
+    result_set_id: str | None = Field(default=None, max_length=128)
+    results: list[RecentResultContext] = Field(default_factory=list, max_length=5)
+    referenced_result_entry_ids: list[str] = Field(default_factory=list, max_length=10)
+    warnings: list[str] = Field(default_factory=list, max_length=12)
+    clarification_reason_code: str | None = Field(default=None, max_length=128)
 
 
 class MemoryCandidate(StrictModel):
@@ -382,7 +411,7 @@ class EnhancedQueryEnvelope(StrictModel):
     normalized_current_message: str = Field(min_length=1, max_length=2000)
     action_context: Literal["FREE_TEXT_CHAT"] = "FREE_TEXT_CHAT"
     current_state: QueryState
-    recent_turn_context: list[RecentTurnContext] = Field(default_factory=list, max_length=6)
+    recent_turn_context: list[RecentTurnContext] = Field(default_factory=list, max_length=4)
     persistent_memory_candidates: list[MemoryCandidate] = Field(default_factory=list, max_length=50)
     verified_purchase_context: list[PurchaseContext] = Field(default_factory=list, max_length=10)
     active_result_bindings: list[ActiveResultBinding] = Field(default_factory=list, max_length=10)
@@ -402,7 +431,7 @@ class IntentContextProjectionV1(StrictModel):
     current_message_verbatim: str = Field(min_length=1, max_length=2000)
     normalized_current_message: str = Field(min_length=1, max_length=2000)
     current_state: QueryState
-    recent_turn_context: list[RecentTurnContext] = Field(default_factory=list, max_length=6)
+    recent_turn_context: list[RecentTurnContext] = Field(default_factory=list, max_length=4)
     persistent_memory_candidates: list[ProjectedMemoryCandidate] = Field(default_factory=list, max_length=50)
     verified_purchase_context: list[ProjectedPurchaseContext] = Field(default_factory=list, max_length=10)
     active_result_bindings: list[ActiveResultBinding] = Field(default_factory=list, max_length=10)
@@ -413,6 +442,104 @@ class IntentContextProjectionV1(StrictModel):
 class ReferenceDraft(StrictModel):
     kind: Literal["ORDINAL", "DEMONSTRATIVE", "CONTEXT_REF", "OWNED_ID", "COMPARISON_SET"]
     value: str = Field(min_length=1, max_length=128)
+
+
+_ORDINAL_ALIASES = {
+    "first": "1",
+    "1st": "1",
+    "one": "1",
+    "second": "2",
+    "2nd": "2",
+    "two": "2",
+    "third": "3",
+    "3rd": "3",
+    "three": "3",
+    "fourth": "4",
+    "4th": "4",
+    "four": "4",
+    "fifth": "5",
+    "5th": "5",
+    "five": "5",
+    "sixth": "6",
+    "6th": "6",
+    "six": "6",
+    "seventh": "7",
+    "7th": "7",
+    "seven": "7",
+    "eighth": "8",
+    "8th": "8",
+    "eight": "8",
+    "ninth": "9",
+    "9th": "9",
+    "nine": "9",
+    "tenth": "10",
+    "10th": "10",
+    "ten": "10",
+}
+
+
+def _canonical_ordinal(value: str) -> str | None:
+    """Return a bounded display position for a lexical ordinal alias.
+
+    Providers and typed clients may naturally use words such as ``first`` or
+    ``the first one``.  The resolver contract uses the displayed numeric
+    position, so this converts only the finite ordinal vocabulary and leaves
+    arbitrary values untouched for safe rejection/clarification.
+    """
+
+    normalized = unicodedata.normalize("NFKC", value).casefold().strip()
+    normalized = " ".join(normalized.split())
+    if normalized.startswith("the "):
+        normalized = normalized[4:]
+    for suffix in (" one", " option", " result", " item"):
+        if normalized.endswith(suffix):
+            normalized = normalized[: -len(suffix)].rstrip()
+            break
+    if normalized in _ORDINAL_ALIASES:
+        return _ORDINAL_ALIASES[normalized]
+    if normalized.isdecimal():
+        position = int(normalized)
+        if 1 <= position <= 10:
+            return str(position)
+    return None
+
+
+def _canonicalize_references(references: list[ReferenceDraft]) -> list[ReferenceDraft]:
+    """Canonicalize provider/client reference spellings before routing.
+
+    ``COMPARISON_SET`` was part of the original provider-facing vocabulary and
+    is still accepted for compatibility.  Expand the safe ordinal form into
+    the individual references consumed by the deterministic resolver.
+    """
+
+    normalized: list[ReferenceDraft] = []
+    for reference in references:
+        if reference.kind == "ORDINAL":
+            ordinal = _canonical_ordinal(reference.value)
+            normalized.append(
+                reference.model_copy(update={"value": ordinal})
+                if ordinal is not None
+                else reference
+            )
+            continue
+        if reference.kind == "COMPARISON_SET":
+            parts = [
+                part.strip()
+                for part in re.split(r"\s*(?:,|\band\b)\s*", reference.value, flags=re.IGNORECASE)
+                if part.strip()
+            ]
+            ordinals = [_canonical_ordinal(part) for part in parts]
+            if len(parts) >= 2 and all(ordinal is not None for ordinal in ordinals):
+                expanded = [
+                    ReferenceDraft(kind="ORDINAL", value=ordinal)
+                    for ordinal in ordinals
+                    if ordinal is not None
+                ]
+                if len(normalized) + len(expanded) <= 5:
+                    normalized.extend(expanded)
+                    continue
+        normalized.append(reference)
+    return normalized
 
 
 class SetHardOperation(StrictModel):
@@ -490,6 +617,13 @@ class IntentDeltaV1(StrictModel):
     unknown_terms: list[str] = Field(default_factory=list, max_length=10)
     candidate_interpretations: list[str] = Field(default_factory=list, max_length=4)
     clarification_candidate: str | None = None
+
+    @model_validator(mode="after")
+    def canonicalize_reference_values(self) -> IntentDeltaV1:
+        normalized = _canonicalize_references(self.references)
+        if normalized != self.references:
+            object.__setattr__(self, "references", normalized)
+        return self
 
 
 class RecoveryRewritePlan(StrictModel):
@@ -1005,7 +1139,7 @@ class TurnSnapshot(StrictModel):
     cart: CartSnapshot
     acknowledged_result_set_id: str | None = None
     acknowledged_entries: list[ActiveResultBinding] = Field(default_factory=list, max_length=10)
-    recent_turns: list[RecentTurnContext] = Field(default_factory=list, max_length=6)
+    recent_turns: list[RecentTurnContext] = Field(default_factory=list, max_length=4)
     memory_profile_id: str | None = None
     memory_version: int | None = Field(default=None, ge=0)
     compatibility_tuple: CompatibilityTuple
@@ -1029,6 +1163,7 @@ class CommitCommand(StrictModel):
     cart_changed: bool = False
     acknowledged_result_set_id: str | None = None
     acknowledged_entries: list[ActiveResultBinding] = Field(default_factory=list, max_length=10)
+    recent_turns: list[RecentTurnContext] = Field(default_factory=list, max_length=4)
 
 
 class CommitResult(StrictModel):
@@ -1061,6 +1196,12 @@ class PublicTrace(StrictModel):
     terminal_state: TerminalState
     events: list[TraceEvent] = Field(default_factory=list, max_length=100)
     compatibility_tuple: CompatibilityTuple
+
+
+class TraceHistoryResponse(StrictModel):
+    session_id: str
+    trace_count: int = Field(ge=0, le=100)
+    traces: list[PublicTrace] = Field(default_factory=list, max_length=100)
 
 
 class TurnResult(StrictModel):

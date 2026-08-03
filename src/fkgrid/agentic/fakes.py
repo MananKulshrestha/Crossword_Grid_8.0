@@ -38,7 +38,6 @@ from .contracts import (
     ProjectedPurchaseContext,
     PurchaseContext,
     QueryState,
-    RecentTurnContext,
     ReferenceDraft,
     ReferenceResolution,
     Reservation,
@@ -185,6 +184,7 @@ class InMemorySessionState(SessionStatePort):
                 "pending_clarification": new_state.pending_clarification,
                 "acknowledged_result_set_id": command.acknowledged_result_set_id,
                 "acknowledged_entries": command.acknowledged_entries,
+                "recent_turns": command.recent_turns,
             },
             deep=True,
         )
@@ -296,7 +296,7 @@ class DeterministicEnhancer(QueryEnhancementPort):
                         )
                 # Keep current message/state/recent turns inside the fixed
                 # budget; historical items are the first material removed.
-                fixed_tokens = min(token_count, 100) + 300 + len(snapshot.recent_turns) * 25 + 50
+                fixed_tokens = min(token_count, 100) + 300 + len(snapshot.recent_turns) * 50 + 50
                 memory_budget = max(0, 1500 - fixed_tokens)
                 allowed_memory = max(0, memory_budget // 10)
                 excluded_source_ids.extend(
@@ -353,7 +353,7 @@ class DeterministicEnhancer(QueryEnhancementPort):
                 1500,
                 min(token_count, 100)
                 + 300
-                + len(snapshot.recent_turns) * 25
+                + len(snapshot.recent_turns) * 50
                 + len(memory_candidates) * 10
                 + len(purchases) * 12
                 + 50,
@@ -424,6 +424,7 @@ class DeterministicEnhancer(QueryEnhancementPort):
                 {
             "current_message_verbatim": verbatim,
                     "current_state": projection_state,
+                    "recent_turn_context": snapshot.recent_turns,
                     "active_result_bindings": snapshot.acknowledged_entries,
                     "persistent_memory_candidates": projected_memory,
                     "verified_purchase_context": projected_purchases,

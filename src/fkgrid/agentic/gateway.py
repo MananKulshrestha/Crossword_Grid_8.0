@@ -9,14 +9,17 @@ import time
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Protocol
+from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 from pydantic import TypeAdapter, ValidationError
 
 from .contracts import (
+    Action,
     ClarificationDraft,
     CompatibilityTuple,
+    ConstraintOperator,
     FollowUpSelection,
     IntentDeltaV1,
     ModelCallType,
@@ -25,6 +28,7 @@ from .contracts import (
     ModelStatus,
     RecoveryPlan,
     ResearchSynthesisV1,
+    SoftOperator,
     ValidationIssue,
 )
 from .validation import canonical_hash, canonical_json
@@ -196,8 +200,25 @@ def _validate_provider_output(request: ModelRequest, output: dict[str, Any]) -> 
             ResearchSynthesisV1.model_validate_json(encoded)
         elif request.logical_call_type is ModelCallType.GENERATE_FOLLOW_UP_SUGGESTIONS:
             FollowUpSelection.model_validate_json(encoded)
-    except ValidationError:
-        return [
+    except ValidationError as exc:
+        issues: list[ValidationIssue] = []
+        for error in exc.errors()[:20]:
+            location = error.get("loc", ())
+            path = "output_payload"
+            if isinstance(location, tuple):
+                path += "".join(f"[{item}]" if isinstance(item, int) else f".{item}" for item in location)
+            error_type = "".join(
+                character if character.isalnum() or character == "_" else "_"
+                for character in str(error.get("type", "validation"))
+            )[:64]
+            issues.append(
+                ValidationIssue(
+                    code=f"OUTPUT_SCHEMA_INVALID_{error_type}",
+                    path=path,
+                    safe_message="Provider output failed the declared contract.",
+                )
+            )
+        return issues or [
             ValidationIssue(
                 code="OUTPUT_SCHEMA_INVALID",
                 path="output_payload",
@@ -402,8 +423,131 @@ _GOOGLE_SCHEMA_KEYS = frozenset(
         "properties",
         "required",
         "propertyOrdering",
+        "$defs",
+        "$ref",
     }
 )
+# Typed values are semantically revalidated by the application.  Gemma's
+# Generate Content schema boundary is most reliable with scalar string hints;
+# the prompt still supplies object-valued examples (such as Money), and the
+# post-response Pydantic contract remains authoritative for those cases.
+_GOOGLE_ANY_VALUE_SCHEMA = {"type": "string"}
+
+
+def _compact_intent_provider_schema() -> dict[str, Any]:
+    """Return a small provider hint for the large intent union.
+
+    The full ``IntentDeltaV1`` schema remains the application contract.  The
+    Gemini endpoint rejects the expanded Pydantic union at its schema boundary,
+    so the transport sends one compact operation object with a discriminator;
+    the gateway and semantic validator still enforce every branch afterward.
+    """
+
+    operation_properties = {
+        "op": {
+            "type": "string",
+            "enum": [
+                "SET_HARD",
+                "REMOVE_HARD",
+                "SET_SOFT",
+                "REMOVE_SOFT",
+                "ADD_SCOPE",
+                "REMOVE_SCOPE",
+                "SET_COMPARATIVE",
+                "CLEAR_SEARCH_STATE",
+            ],
+        },
+        "field_id": {"type": "string"},
+        "operator": {
+            "type": "string",
+            "enum": sorted(
+                {operator.value for operator in (*ConstraintOperator, *SoftOperator)}
+            ),
+        },
+        "typed_values": {"type": "array", "items": _GOOGLE_ANY_VALUE_SCHEMA},
+        "strength": {"type": "string", "enum": ["HARD"]},
+        "weight": {"type": "integer", "minimum": 1, "maximum": 10},
+        "evidence_span": {
+            "type": "array",
+            "items": {"type": "integer"},
+            "minItems": 2,
+            "maxItems": 2,
+        },
+        "context_ref": {"type": "string"},
+        "taxonomy_node_id": {"type": "string"},
+        "kind": {
+            "type": "string",
+            "enum": ["CHEAPER", "LARGER", "BETTER"],
+        },
+        "anchor_reference": {
+            "type": "object",
+            "properties": {
+                "kind": {
+                    "type": "string",
+                    "enum": ["ORDINAL", "DEMONSTRATIVE", "CONTEXT_REF", "OWNED_ID", "COMPARISON_SET"],
+                },
+                "value": {"type": "string"},
+            },
+            "required": ["kind", "value"],
+        },
+        "confirmed": {"type": "boolean"},
+    }
+    reference_schema = {
+        "type": "object",
+        "properties": {
+            "kind": {
+                "type": "string",
+                "enum": ["ORDINAL", "DEMONSTRATIVE", "CONTEXT_REF", "OWNED_ID", "COMPARISON_SET"],
+            },
+            "value": {"type": "string"},
+        },
+        "required": ["kind", "value"],
+    }
+    provider_schema = {
+        "type": "object",
+        "properties": {
+            "schema_version": {"type": "string", "enum": ["IntentDeltaV1"]},
+            "primary_action": {
+                "type": "string",
+                "enum": [action.value for action in Action],
+            },
+            "delta_operations": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": operation_properties,
+                    "required": ["op"],
+                },
+            },
+            "references": {"type": "array", "items": reference_schema},
+            "action_parameters": {
+                "type": "object",
+                "properties": {
+                    "operations": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "type": {"type": "string"},
+                                "operation_id": {"type": "string"},
+                                "result_entry_id": {"type": "string"},
+                                "quantity": {"type": "integer", "minimum": 1, "maximum": 99},
+                            },
+                            "required": ["type"],
+                        },
+                    }
+                },
+            },
+            "unknown_terms": {"type": "array", "items": {"type": "string"}},
+            "candidate_interpretations": {
+                "type": "array",
+                "items": {"type": "string"},
+            },
+            "clarification_candidate": {"type": "string"},
+        },
+        "required": ["schema_version", "primary_action", "delta_operations"],
+    }
+    return provider_schema
 
 
 def _google_schema_projection(value: Any, definitions: dict[str, Any] | None = None) -> Any:
@@ -414,10 +558,7 @@ def _google_schema_projection(value: Any, definitions: dict[str, Any] | None = N
         if "$ref" in value:
             reference = value["$ref"]
             if isinstance(reference, str):
-                definition_name = reference.rsplit("/", 1)[-1]
-                definition = definitions.get(definition_name)
-                if isinstance(definition, dict):
-                    return _google_schema_projection(definition, definitions)
+                return {"$ref": reference}
             return {"type": "object"}
         for union_key in ("oneOf", "anyOf"):
             branches = value.get(union_key)
@@ -429,17 +570,29 @@ def _google_schema_projection(value: Any, definitions: dict[str, Any] | None = N
                 ]
                 if len(non_null_branches) == 1:
                     return _google_schema_projection(non_null_branches[0], definitions)
-                return {"type": "object"}
+                return {
+                    union_key: [
+                        _google_schema_projection(branch, definitions) for branch in branches
+                    ]
+                }
         projected: dict[str, Any] = {}
         for key, item in value.items():
-            if key == "properties" and isinstance(item, dict):
+            if key == "$defs" and isinstance(item, dict):
+                projected[key] = {
+                    definition_name: _google_schema_projection(definition, definitions)
+                    for definition_name, definition in item.items()
+                    if isinstance(definition, dict)
+                }
+            elif key == "properties" and isinstance(item, dict):
                 projected[key] = {
                     property_name: _google_schema_projection(property_schema, definitions)
                     for property_name, property_schema in item.items()
                 }
             elif key in _GOOGLE_SCHEMA_KEYS:
                 projected_item = _google_schema_projection(item, definitions)
-                if projected_item != {}:
+                if key == "items" and projected_item == {}:
+                    projected[key] = _GOOGLE_ANY_VALUE_SCHEMA
+                elif projected_item != {}:
                     projected[key] = projected_item
         if "const" in value and isinstance(value["const"], (float, int, str)):
             projected["enum"] = [value["const"]]
@@ -485,10 +638,6 @@ class GeminiGenerateContentTransport:
             "temperature": payload.get("temperature", 0.0),
             "maxOutputTokens": payload.get("max_tokens", 800),
             "responseMimeType": "application/json",
-            # Gemma 4 supports disabling its internal thinking process with
-            # the minimal level. Shopper intent calls have a strict latency
-            # budget and never request chain-of-thought output.
-            "thinkingConfig": {"thinkingLevel": "minimal"},
         }
         response_format = payload.get("response_format")
         if isinstance(response_format, dict):
@@ -497,9 +646,10 @@ class GeminiGenerateContentTransport:
                 # The application remains the authorization boundary. The
                 # provider schema only constrains shape; the complete contract
                 # is revalidated after the response returns.
-                generation_config["responseJsonSchema"] = _google_schema_projection(
-                    json_schema["schema"]
-                )
+                schema = json_schema["schema"]
+                if schema.get("title") == "IntentDeltaV1":
+                    schema = _compact_intent_provider_schema()
+                generation_config["responseJsonSchema"] = _google_schema_projection(schema)
         google_payload: dict[str, Any] = {
             "contents": contents,
             "generationConfig": generation_config,
@@ -623,7 +773,7 @@ class Gemma4ModelAdapter:
                 return _response(
                     request,
                     ModelStatus.INVALID_OUTPUT,
-                    None,
+                    output,
                     self.provider_name,
                     int((time.perf_counter() - started) * 1000),
                     issues=validation_issues,
@@ -642,6 +792,80 @@ class Gemma4ModelAdapter:
                 None,
                 self.provider_name,
                 int((time.perf_counter() - started) * 1000),
+                issues=[
+                    ValidationIssue(
+                        code="MODEL_TIMEOUT",
+                        path="provider",
+                        safe_message="The model provider exceeded the bounded call deadline.",
+                    )
+                ],
+                retryable=True,
+            )
+        except HTTPError as exc:
+            provider_status = None
+            provider_feature = None
+            try:
+                error_text = exc.read().decode("utf-8", errors="ignore").casefold()
+                error_body = json.loads(error_text)
+                provider_error = error_body.get("error")
+                if isinstance(provider_error, dict) and isinstance(provider_error.get("status"), str):
+                    provider_status = "".join(
+                        character
+                        if character.isalnum() or character == "_"
+                        else "_"
+                        for character in provider_error["status"]
+                    )[:64]
+                for feature in (
+                    "maxitems",
+                    "minitems",
+                    "minimum",
+                    "maximum",
+                    "enum",
+                    "anyof",
+                    "oneof",
+                    "required",
+                    "properties",
+                    "systeminstruction",
+                ):
+                    if feature in error_text:
+                        provider_feature = feature.upper()
+                        break
+            except Exception:
+                provider_status = None
+            issue_code = f"PROVIDER_HTTP_{exc.code}"
+            if provider_status:
+                issue_code += f"_{provider_status}"
+            if provider_feature:
+                issue_code += f"_SCHEMA_{provider_feature}"
+            return _response(
+                request,
+                ModelStatus.UNAVAILABLE,
+                None,
+                self.provider_name,
+                int((time.perf_counter() - started) * 1000),
+                issues=[
+                    ValidationIssue(
+                        code=issue_code,
+                        path="provider",
+                        safe_message="The model provider rejected the request; the response body is omitted.",
+                    )
+                ],
+                retryable=exc.code >= 500,
+            )
+        except URLError:
+            return _response(
+                request,
+                ModelStatus.UNAVAILABLE,
+                None,
+                self.provider_name,
+                int((time.perf_counter() - started) * 1000),
+                issues=[
+                    ValidationIssue(
+                        code="PROVIDER_NETWORK_ERROR",
+                        path="provider",
+                        safe_message="The model provider could not be reached.",
+                    )
+                ],
                 retryable=True,
             )
         except (KeyError, TypeError, ValueError, json.JSONDecodeError):
@@ -665,5 +889,12 @@ class Gemma4ModelAdapter:
                 None,
                 self.provider_name,
                 int((time.perf_counter() - started) * 1000),
+                issues=[
+                    ValidationIssue(
+                        code="PROVIDER_UNAVAILABLE",
+                        path="provider",
+                        safe_message="The model provider returned no usable response.",
+                    )
+                ],
                 retryable=True,
             )

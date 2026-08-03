@@ -8,17 +8,18 @@ from unittest.mock import patch
 from fkgrid.agentic.contracts import (
     Action,
     ActiveResultBinding,
-    Availability,
-    CartSnapshot,
     CompatibilityTuple,
     Constraint,
     ConstraintOperator,
     Fact,
     FactScope,
     MemoryCandidate,
-    PurchaseContext,
+    ModelCallType,
+    ModelResponse,
+    ModelStatus,
     Money,
     ProductBinding,
+    PurchaseContext,
     QueryState,
     SearchEntry,
     TerminalState,
@@ -29,12 +30,12 @@ from fkgrid.agentic.contracts import (
 )
 from fkgrid.agentic.fakes import (
     DeterministicEnhancer,
-    FakeCatalogPort,
     FakeCartPort,
+    FakeCatalogPort,
     FakeClock,
     FakeCommerceHistoryPort,
-    FakeMemorySnapshotPort,
     FakeMarkdownPipeline,
+    FakeMemorySnapshotPort,
     FakeRecoveryPort,
     FakeReferenceResolver,
     FakeResearchPort,
@@ -44,8 +45,8 @@ from fkgrid.agentic.fakes import (
     SequentialIds,
     empty_cart,
 )
-from fkgrid.agentic.gateway import FakeModelGateway
 from fkgrid.agentic.gateway import (
+    FakeModelGateway,
     GeminiGenerateContentTransport,
     Gemma4ModelAdapter,
     PromptRegistry,
@@ -192,6 +193,58 @@ class AgenticWorkflowTests(unittest.TestCase):
         self.assertEqual(len(dependencies["markdown"].handoffs), 1)  # type: ignore[attr-defined]
         self.assertTrue(result.trace.events)
 
+    def test_recent_turn_memory_is_structured_passed_to_intent_and_trimmed(self) -> None:
+        snapshot, entries = fixture()
+        app, dependencies = orchestrator(snapshot, entries)
+        state = dependencies["state"]
+        gateway = dependencies["gateway"]
+        state_version = 0
+
+        for index in range(1, 6):
+            result = app.handle(
+                TurnRequest(
+                    session_id="session_1",
+                    client_turn_id=f"memory-turn-{index}",
+                    idempotency_key=f"memory-key-{index}",
+                    expected_state_version=state_version,
+                    expected_cart_version=0,
+                    message="Find a shirt size m",
+                )
+            )
+            self.assertEqual(result.status, "COMPLETED")
+            state_version += 1
+
+        snapshot_after = state.snapshot  # type: ignore[attr-defined]
+        self.assertEqual(len(snapshot_after.recent_turns), 4)
+        self.assertEqual(
+            [turn.turn_id for turn in snapshot_after.recent_turns],
+            ["memory-turn-2", "memory-turn-3", "memory-turn-4", "memory-turn-5"],
+        )
+        first_memory_turn = snapshot_after.recent_turns[0]
+        self.assertEqual(first_memory_turn.user_query, "Find a shirt size m")
+        self.assertEqual(first_memory_turn.action, Action.SEARCH)
+        self.assertEqual(first_memory_turn.terminal_state, TerminalState.ANSWERED_WITH_GROUNDED_RESULTS)
+        size_constraint = next(
+            constraint
+            for constraint in first_memory_turn.hard_constraints
+            if constraint.field_id == "size"
+        )
+        self.assertEqual(size_constraint.values, ["size_m"])
+        self.assertEqual(first_memory_turn.results[0].title, "Prototype shirt 1")
+
+        calls = gateway.calls  # type: ignore[attr-defined]
+        self.assertEqual(len(calls), 5)
+        second_payload = calls[1].input_payload
+        self.assertEqual(len(second_payload["recent_turn_context"]), 1)
+        self.assertEqual(
+            second_payload["recent_turn_context"][0]["user_query"],
+            "Find a shirt size m",
+        )
+        self.assertEqual(
+            second_payload["recent_turn_context"][0]["results"][0]["title"],
+            "Prototype shirt 1",
+        )
+
     def test_greeting_is_help_and_bypasses_external_intent_model(self) -> None:
         snapshot, entries = fixture()
         app, dependencies = orchestrator(snapshot, entries)
@@ -272,6 +325,184 @@ class AgenticWorkflowTests(unittest.TestCase):
         )
         assert details.response is not None
         self.assertEqual(details.response.terminal_state, TerminalState.ANSWERED_WITH_PRODUCT_DETAILS)
+
+    def test_provider_word_ordinal_is_canonicalized_after_intent_repair(self) -> None:
+        snapshot, entries = fixture()
+        app, dependencies = orchestrator(snapshot, entries)
+        search = app.handle(
+            TurnRequest(
+                session_id="session_1",
+                client_turn_id="turn_word_ordinal_search",
+                idempotency_key="key_word_ordinal_search",
+                expected_state_version=0,
+                expected_cart_version=0,
+                message="Find a shirt",
+            )
+        )
+        assert search.response is not None
+
+        invalid_response = ModelResponse(
+            call_id="model_invalid_intent",
+            status=ModelStatus.INVALID_OUTPUT,
+            input_hash="invalid-input",
+            provider_name="fake",
+            model_alias="gemma-4-26b-a4b-it",
+            prompt_id="intent_v3",
+            prompt_version="3",
+            latency_ms=1,
+        )
+        repaired_payload = {
+            "schema_version": "IntentDeltaV1",
+            "primary_action": "PRODUCT_DETAILS",
+            "delta_operations": [],
+            "references": [{"kind": "ORDINAL", "value": "first"}],
+            "action_parameters": {},
+            "unknown_terms": [],
+            "candidate_interpretations": [],
+            "clarification_candidate": None,
+        }
+        repaired_response = ModelResponse(
+            call_id="model_repaired_intent",
+            status=ModelStatus.OK,
+            output_payload=repaired_payload,
+            input_hash="repaired-input",
+            output_hash="repaired-output",
+            provider_name="fake",
+            model_alias="gemma-4-26b-a4b-it",
+            prompt_id="intent_v3",
+            prompt_version="3",
+            latency_ms=1,
+        )
+        gateway = dependencies["gateway"]  # type: ignore[assignment]
+        gateway.queue_response(ModelCallType.RESOLVE_INTENT_AND_DELTA, invalid_response)  # type: ignore[attr-defined]
+        gateway.queue_response(ModelCallType.RESOLVE_INTENT_AND_DELTA, repaired_response)  # type: ignore[attr-defined]
+
+        details = app.handle(
+            TurnRequest(
+                session_id="session_1",
+                client_turn_id="turn_word_ordinal_details",
+                idempotency_key="key_word_ordinal_details",
+                expected_state_version=1,
+                expected_cart_version=0,
+                message="What is the first one?",
+            )
+        )
+
+        assert details.response is not None
+        self.assertEqual(details.response.terminal_state, TerminalState.ANSWERED_WITH_PRODUCT_DETAILS)
+        self.assertIsNotNone(details.response.details)
+        assert details.response.details is not None
+        self.assertEqual(details.response.details.binding.product_id, "product_1")
+        self.assertIn(
+            "INTENT_REPAIR",
+            [event.stage for event in details.trace.events],
+        )
+
+    def test_reference_follow_up_uses_deterministic_fallback_when_model_and_repair_fail(self) -> None:
+        snapshot, entries = fixture()
+        app, dependencies = orchestrator(snapshot, entries)
+        search = app.handle(
+            TurnRequest(
+                session_id="session_1",
+                client_turn_id="turn_reference_fallback_search",
+                idempotency_key="key_reference_fallback_search",
+                expected_state_version=0,
+                expected_cart_version=0,
+                message="Find a shirt",
+            )
+        )
+        assert search.response is not None
+        invalid_response = ModelResponse(
+            call_id="model_invalid_reference",
+            status=ModelStatus.INVALID_OUTPUT,
+            input_hash="invalid-input",
+            provider_name="fake",
+            model_alias="gemma-4-26b-a4b-it",
+            prompt_id="intent_v3",
+            prompt_version="3",
+            latency_ms=1,
+        )
+        gateway = dependencies["gateway"]  # type: ignore[assignment]
+        gateway.queue_response(ModelCallType.RESOLVE_INTENT_AND_DELTA, invalid_response)  # type: ignore[attr-defined]
+        gateway.queue_response(ModelCallType.RESOLVE_INTENT_AND_DELTA, invalid_response)  # type: ignore[attr-defined]
+
+        details = app.handle(
+            TurnRequest(
+                session_id="session_1",
+                client_turn_id="turn_reference_fallback_details",
+                idempotency_key="key_reference_fallback_details",
+                expected_state_version=1,
+                expected_cart_version=0,
+                message="What is the first one?",
+            )
+        )
+
+        assert details.response is not None
+        self.assertEqual(details.response.terminal_state, TerminalState.ANSWERED_WITH_PRODUCT_DETAILS)
+        self.assertEqual(
+            [event.logical_name for event in details.trace.events if event.stage == "INTENT_FALLBACK"],
+            ["deterministic_reference_grammar"],
+        )
+
+    def test_comparison_set_ordinals_expand_before_reference_resolution(self) -> None:
+        snapshot, entries = fixture()
+        app, dependencies = orchestrator(snapshot, entries)
+        search = app.handle(
+            TurnRequest(
+                session_id="session_1",
+                client_turn_id="turn_comparison_search",
+                idempotency_key="key_comparison_search",
+                expected_state_version=0,
+                expected_cart_version=0,
+                message="Find a shirt",
+            )
+        )
+        assert search.response is not None
+        payload = {
+            "schema_version": "IntentDeltaV1",
+            "primary_action": "COMPARE",
+            "delta_operations": [],
+            "references": [{"kind": "COMPARISON_SET", "value": "first,third"}],
+            "action_parameters": {},
+            "unknown_terms": [],
+            "candidate_interpretations": [],
+            "clarification_candidate": None,
+        }
+        dependencies["gateway"].queue_response(  # type: ignore[attr-defined]
+            ModelCallType.RESOLVE_INTENT_AND_DELTA,
+            ModelResponse(
+                call_id="model_comparison",
+                status=ModelStatus.OK,
+                output_payload=payload,
+                input_hash="comparison-input",
+                output_hash="comparison-output",
+                provider_name="fake",
+                model_alias="gemma-4-26b-a4b-it",
+                prompt_id="intent_v3",
+                prompt_version="3",
+                latency_ms=1,
+            ),
+        )
+
+        comparison = app.handle(
+            TurnRequest(
+                session_id="session_1",
+                client_turn_id="turn_comparison",
+                idempotency_key="key_comparison",
+                expected_state_version=1,
+                expected_cart_version=0,
+                message="Compare the first and third.",
+            )
+        )
+
+        assert comparison.response is not None
+        self.assertEqual(comparison.response.terminal_state, TerminalState.ANSWERED_WITH_COMPARISON)
+        self.assertIsNotNone(comparison.response.comparison)
+        assert comparison.response.comparison is not None
+        self.assertEqual(
+            [binding.product_id for binding in comparison.response.comparison.bindings],
+            ["product_1", "product_3"],
+        )
 
     def test_completed_replay_returns_the_stored_response_without_reloading_old_state(self) -> None:
         snapshot, entries = fixture()
@@ -427,6 +658,25 @@ class AgenticWorkflowTests(unittest.TestCase):
         self.assertEqual(transport.payload["tools"], [])
         self.assertEqual(transport.payload["model"], compatibility().intent_model_alias)
 
+    def test_gemma_provider_failure_keeps_a_safe_traceable_reason(self) -> None:
+        class Transport:
+            def post_json(self, _payload, _timeout_ms):
+                raise RuntimeError("provider detail must not cross the adapter boundary")
+
+        prompts = PromptRegistry()
+        request = prompts.build_request(
+            __import__("fkgrid.agentic.contracts", fromlist=["ModelCallType"]).ModelCallType.RESOLVE_INTENT_AND_DELTA,
+            {"current_message_verbatim": "show cart"},
+            compatibility(),
+            "call-provider-failure",
+            1800,
+            compatibility().intent_model_alias,
+        )
+        response = Gemma4ModelAdapter(Transport()).complete(request)
+        self.assertEqual(response.status.value, "UNAVAILABLE")
+        self.assertEqual(response.validation_issues[0].code, "PROVIDER_UNAVAILABLE")
+        self.assertNotIn("provider detail", response.validation_issues[0].safe_message)
+
     def test_gemma_environment_factory_requires_endpoint_and_never_uses_repository_secrets(self) -> None:
         with self.assertRaisesRegex(ValueError, "FKGRID_MODEL_ENDPOINT_REQUIRED"):
             Gemma4ModelAdapter.from_environment(environment={"FKGRID_MODEL_API_KEY": "test-only"})
@@ -502,21 +752,75 @@ class AgenticWorkflowTests(unittest.TestCase):
         body = json.loads(request.data)
         self.assertEqual(request.get_header("X-goog-api-key"), "test-only-key")
         self.assertEqual(body["generationConfig"]["responseMimeType"], "application/json")
-        self.assertEqual(body["generationConfig"]["thinkingConfig"], {"thinkingLevel": "minimal"})
+        self.assertNotIn("thinkingConfig", body["generationConfig"])
         self.assertEqual(body["generationConfig"]["responseJsonSchema"]["type"], "object")
         self.assertNotIn(
             "minLength", body["generationConfig"]["responseJsonSchema"]["properties"]["ok"]
         )
         self.assertEqual(
-            body["generationConfig"]["responseJsonSchema"]["properties"]["primary_action"]["enum"],
-            ["SEARCH"],
-        )
-        self.assertEqual(
             body["generationConfig"]["responseJsonSchema"]["properties"]["schema_version"]["enum"],
             ["IntentDeltaV1"],
         )
-        self.assertNotIn("$defs", body["generationConfig"]["responseJsonSchema"])
+        self.assertIn("$defs", body["generationConfig"]["responseJsonSchema"])
+        self.assertEqual(
+            body["generationConfig"]["responseJsonSchema"]["properties"]["primary_action"]["$ref"],
+            "#/$defs/Action",
+        )
         self.assertEqual(output["choices"][0]["message"]["content"], '{"ok":true}')
+
+    def test_google_transport_uses_compact_intent_provider_schema(self) -> None:
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self):
+                return json.dumps(
+                    {"candidates": [{"content": {"parts": [{"text": "{}"}]}}]}
+                ).encode()
+
+        transport = GeminiGenerateContentTransport(
+            "https://provider.test/v1beta/models/{model}:generateContent",
+            "test-only-key",
+        )
+        with patch("fkgrid.agentic.gateway.urlopen", return_value=Response()) as opener:
+            transport.post_json(
+                {
+                    "model": "gemma-4-26b-a4b-it",
+                    "messages": [],
+                    "response_format": {
+                        "type": "json_schema",
+                        "json_schema": {
+                            "schema": PromptRegistry().output_schema(
+                                __import__(
+                                    "fkgrid.agentic.contracts",
+                                    fromlist=["ModelCallType"],
+                                ).ModelCallType.RESOLVE_INTENT_AND_DELTA
+                            )
+                        },
+                    },
+                },
+                1000,
+            )
+        body = json.loads(opener.call_args.args[0].data)
+        operation_schema = body["generationConfig"]["responseJsonSchema"]["properties"][
+            "delta_operations"
+        ]["items"]
+        self.assertEqual(operation_schema["type"], "object")
+        self.assertIn("op", operation_schema["properties"])
+        self.assertEqual(len(operation_schema["properties"]["op"]["enum"]), 8)
+        self.assertEqual(operation_schema["properties"]["confirmed"], {"type": "boolean"})
+        self.assertIn(
+            "operations",
+            body["generationConfig"]["responseJsonSchema"]["properties"]["action_parameters"][
+                "properties"
+            ],
+        )
+        typed_values_schema = operation_schema["properties"]["typed_values"]
+        self.assertIn("items", typed_values_schema)
+        self.assertEqual(typed_values_schema["items"], {"type": "string"})
 
     def test_openai_compatible_transport_omits_empty_tools_for_deepinfra(self) -> None:
         class Response:
@@ -575,8 +879,8 @@ class AgenticWorkflowTests(unittest.TestCase):
         app, dependencies = orchestrator(snapshot, entries)
         gateway = dependencies["gateway"]
         # The fake's scripted response is schema-valid but references a foreign ID.
-        from fkgrid.agentic.gateway import _response
         from fkgrid.agentic.contracts import ModelCallType, ModelRequest, ModelStatus
+        from fkgrid.agentic.gateway import _response
 
         request = ModelRequest(
             call_id="scripted",
@@ -702,6 +1006,63 @@ class AgenticWorkflowTests(unittest.TestCase):
         )
         self.assertEqual({item.field_id for item in updated.hard_constraints}, {"material", "size"})
         self.assertIn("material", summary.preserved)
+
+    def test_explicit_color_overrides_provider_colour_alias(self) -> None:
+        from fkgrid.agentic.contracts import IntentDeltaV1, SetHardOperation
+        from fkgrid.agentic.query_lexicon import apply_explicit_catalog_terms
+
+        corrected = apply_explicit_catalog_terms(
+            IntentDeltaV1(
+                primary_action=Action.SEARCH,
+                delta_operations=[
+                    SetHardOperation(
+                        field_id="colour",
+                        operator=ConstraintOperator.EQ,
+                        typed_values=["red"],
+                        evidence_span=(0, 3),
+                    )
+                ],
+            ),
+            "recommend a red t-shirt",
+        )
+        fields = [operation.field_id for operation in corrected.delta_operations if hasattr(operation, "field_id")]
+        self.assertNotIn("colour", fields)
+        self.assertIn("color", fields)
+
+    def test_explicit_cart_terms_enrich_incomplete_provider_operation(self) -> None:
+        from fkgrid.agentic.contracts import ActiveResultBinding, IntentDeltaV1, ReferenceDraft
+        from fkgrid.agentic.query_lexicon import apply_explicit_cart_terms
+
+        corrected = apply_explicit_cart_terms(
+            IntentDeltaV1(
+                primary_action=Action.UPDATE_CART,
+                references=[ReferenceDraft(kind="DEMONSTRATIVE", value="the first one")],
+                action_parameters={
+                    "operations": [{"type": "ADD_ITEM", "quantity": 3}]
+                },
+            ),
+            "Add 3 to the cart.",
+            [
+                ActiveResultBinding(
+                    result_entry_id="entry_1",
+                    display_position=3,
+                    binding=ProductBinding(
+                        product_id="product_1",
+                        sku_id="sku_1",
+                        offer_id="offer_1",
+                        catalog_version="catalog-v1",
+                    ),
+                )
+            ],
+        )
+        operation = corrected.action_parameters["operations"][0]
+        self.assertEqual(operation["result_entry_id"], "entry_1")
+        self.assertEqual(operation["operation_id"], "chat_add_ordinal_3")
+        self.assertEqual(operation["quantity"], 3)
+        self.assertIn(
+            {"kind": "ORDINAL", "value": "3"},
+            [reference.model_dump() for reference in corrected.references],
+        )
 
 
 if __name__ == "__main__":
