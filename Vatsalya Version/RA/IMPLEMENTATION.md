@@ -27,19 +27,39 @@ folder consumes. This document picks up from there.
   though the source architecture doc mentions Gemini 2.5 Flash as the
   project's default model. This was an explicit choice for this testing
   phase: stay fully local via the project's Ollama cluster.
-- NanoVectorDB + NetworkX (LightRAG's local-file defaults) for vector and
-  graph storage — **not** Qdrant. The architecture doc's Tier 3 target is
-  Qdrant-backed; this folder is closer to a Tier 1/2-equivalent semantic
-  branch used to validate the LightRAG mechanics cheaply before any
-  Qdrant/infra decision is made. Swapping to Qdrant later means only
-  changing `vector_storage="QdrantVectorDBStorage"` in `ingest.py`'s
-  `LightRAG(...)` call plus pointing it at a running Qdrant instance —
-  nothing else in this folder's design depends on the storage backend.
+- **Qdrant-backed vector storage** — `ingest.py`'s `LightRAG(...)` call sets
+  `vector_storage="QdrantVectorDBStorage"`. Confirmed working end-to-end
+  (construction, `initialize_storages()`, real collection creation, a
+  persistence check across a container restart) against a real local Qdrant
+  container — verified without needing Ollama at all, since storage
+  initialization is independent of the LLM/embedding calls. Three
+  collections get created: `lightrag_vdb_chunks_<model>_<dim>d`,
+  `..._entities_...`, `..._relationships_...` — see
+  `lightrag-implementation.md` section 3.1 for why LightRAG uses three
+  separate vector stores, not one.
+- **Coverage-based graph-extraction subset** (`graph_sampling.py`) — rather
+  than running full entity/relation extraction over all ~20,000 products
+  (estimated multiple days of LLM calls), a 2,673-SKU subset (13.4% of the
+  catalog) is chosen by *coverage* over structured metadata, not randomly.
+  `ingest.py` reads this subset (`graph_sampling_output/full_extraction_skus.txt`)
+  to set each SKU's `process_options` — `""` for full extraction, `"!"`
+  (LightRAG's native `skip_kg` flag) for everyone else, who still get
+  chunk-embedded into Qdrant, just not graph-extracted. Full design and
+  measured coverage numbers in `lightrag-implementation.md`, section 5.
+- **A real, fixed entity-extraction prompt.** An earlier version passed
+  `addon_params={"entity_types": [...]}` — a key `lightrag-hku` never reads
+  at all (confirmed by a zero-match source search on the installed 1.5.5
+  release), so every extraction would have silently used LightRAG's generic
+  default ontology instead of ours. Fixed via
+  `addon_params={"entity_type_prompt_file": "ecommerce_catalog.yml"}`
+  (`prompts/entity_type/ecommerce_catalog.yml`), which LightRAG's own
+  loader validates at startup. Full before/after example in
+  `lightrag-implementation.md`, section 6.
 - SQL hard-filter branch (`sql_filter.py`) — `eligible_skus(hard_constraints)`
   against `product_metadata`, tested against the real Docker MySQL
   container (`tests/test_sql_filter.py`).
 - BM25 lexical branch (`bm25_index.py`) — indexes every product with a
-  usable description (19998 SKUs, all of them, not just the LightRAG test
+  usable description (19998 SKUs, all of them, not just a LightRAG test
   batch), persisted under `bm25_storage/`, tested against the real index
   (`tests/test_bm25.py`) with real exact-token queries.
 
@@ -50,9 +70,13 @@ folder consumes. This document picks up from there.
 - Any wiring into an actual `search_catalog(query_state)` function —
   this folder is still a set of standalone components, not yet plugged
   into a larger agent/tool pipeline.
-- The LightRAG branch specifically has never been executed end-to-end
-  (no `lightrag_storage/` exists yet) — it's blocked on the team's shared
-  Ollama server being reachable, unrelated to SQL/BM25's status.
+- **Actual ingestion has still never been run end-to-end** (no
+  `lightrag_storage/` or real Qdrant data survives between sessions) — the
+  code path, Qdrant wiring, and prompt profile are all verified correct and
+  reachable, but the real multi-hour `ingest.py` run itself is blocked on
+  the team's shared Ollama server being reachable. That's the one thing
+  left for whoever has Ollama access: pull the models (README.md section 2)
+  and run `python ingest.py`.
 
 Whoever picks this up next: don't assume LightRAG alone constitutes
 `search_catalog`. SQL and BM25 are real, tested branches now — the merge
@@ -87,20 +111,35 @@ belong in the text corpus. The text corpus exists only for what
 structured fields can't answer (loose phrasing, use-case language,
 descriptive text never worth promoting to a column).
 
-### 2. Entity extraction is scoped to a fixed type list
+### 2. Entity extraction is scoped to a fixed type list, via the real mechanism
 
-`config.py` defines `ENTITY_TYPES = ["PRODUCT", "BRAND", "CATEGORY",
-"MATERIAL", "OCCASION", "STYLE"]`, passed into `LightRAG(...,
-addon_params={"entity_types": ENTITY_TYPES})` in `ingest.py`.
+`prompts/entity_type/ecommerce_catalog.yml` defines the entity-type
+guidance (`PRODUCT`, `BRAND`, `CATEGORY`, `MATERIAL`, `OCCASION`, `STYLE`,
+matching `retrieval-architecture.md`'s "Entity/relationship schema" table
+exactly) plus two real, worked extraction examples from this catalog.
+`ingest.py` passes `addon_params={"entity_type_prompt_file":
+"ecommerce_catalog.yml"}`, and `config.py`'s `PROMPT_DIR` (an absolute
+path) is set via `os.environ.setdefault(...)` so LightRAG finds it
+regardless of the working directory `ingest.py` is launched from.
 
 Without this, LightRAG's extraction defaults to a generic ontology
 (person, organization, location, event...) which doesn't fit a shopping
 catalog and would pollute the graph with irrelevant node types pulled out
-of product description text. This list matches
-`retrieval-architecture.md`'s "Entity/relationship schema" table exactly
-— don't diverge from it without updating that doc too, since other
-branches/agents in the wider project are expected to rely on the same
-entity vocabulary.
+of product description text — and that's exactly what would have happened
+here: an earlier version of this file passed
+`addon_params={"entity_types": ENTITY_TYPES}` (a bare list of type names),
+which **lightrag-hku 1.5.5 does not read at all** — confirmed by a
+full-package source search returning zero matches for that key anywhere in
+the library. The only keys LightRAG's prompt resolver actually checks are
+`entity_types_guidance` (inline text) and `entity_type_prompt_file` (a YAML
+profile, validated at load time) — see `lightrag-implementation.md` section
+6 for the full investigation, and for a worked before/after example showing
+what the generic fallback would have produced on a real product
+description.
+
+Don't diverge from the six-type schema without updating
+`retrieval-architecture.md` too, since other branches/agents in the wider
+project are expected to rely on the same entity vocabulary.
 
 ### 3. Query returns raw context, not a generated answer
 
@@ -128,21 +167,31 @@ specifically.
 
 ### 5. Per-document error tracking, no soft fallbacks
 
-`ingest.py` inserts documents one at a time (concurrency capped by
-`asyncio.Semaphore(LLM_MAX_ASYNC)`) instead of one batched `rag.ainsert()`
-call over the whole list. This was a deliberate change: a single batched
-call gives no visibility into which specific SKU failed if something goes
-wrong mid-batch, and doesn't let you distinguish "everything succeeded"
-from "most things succeeded." Per-document insertion means every attempted
-SKU ends the run in exactly one of three accounted-for states: succeeded,
-failed (with its exception captured and printed), or skipped upstream (no
-usable description, counted by `load_documents.build_documents()` and
-reported, not silently dropped).
+`ingest.py` uses `apipeline_enqueue_documents` + `apipeline_process_enqueue_documents`
+(not the `rag.ainsert()` convenience wrapper) — the only pair that accepts
+a per-document `process_options` selector, which is how each SKU gets
+marked full-extraction (`""`) vs. `skip_kg` (`"!"`) per `graph_sampling.py`'s
+subset. This is also how the LightRAG server itself ingests (per
+`ainsert()`'s own docstring), not a workaround.
+
+Because this pipeline manages its own per-document status internally
+(LightRAG's `doc_status` store: `PENDING` → `PROCESSING` → `PROCESSED` /
+`FAILED`), failure accounting no longer comes from a Python-level
+try/except per call site — it comes from reading that store back after
+the run: `rag.get_processing_status()` for counts, `rag.get_docs_by_status(DocStatus.FAILED)`
+for which SKUs failed and why (`.error_msg`). The discipline is the same as
+before, just sourced differently: every attempted SKU ends the run in
+exactly one of three accounted-for states: processed, failed (with its
+error message printed), or skipped upstream (no usable description,
+counted by `load_documents.build_documents()` and reported, not silently
+dropped).
 
 `ingest.py` exits non-zero and prints every failed `sku_id` with its error
 if anything failed — it never continues past a failure by substituting a
-placeholder/empty value for that SKU. The same discipline applies
-elsewhere in this folder:
+placeholder/empty value for that SKU. It also hard-fails immediately
+(`FileNotFoundError`, not a silent "treat everyone as skip_kg" fallback) if
+`graph_sampling_output/full_extraction_skus.txt` doesn't exist yet. The
+same no-soft-fallback discipline applies elsewhere in this folder:
 
 - `load_documents.load_md_blocks()` raises `CorpusParseError` immediately
   if a block in `flipkart_lightrag_corpus.md` doesn't have a parseable
@@ -184,31 +233,34 @@ papered over with a default.
 
 | File | Role |
 |---|---|
-| `config.py` | All tunables: Ollama host, model names, context length, concurrency, entity types, batch size, source file paths |
+| `config.py` | All tunables: Ollama host, model names, context length, concurrency, Qdrant URL, prompt-profile path, graph-sampling subset path, batch size, source file paths |
 | `load_documents.py` | Parses `../flipkart_lightrag_corpus.md` into `(sku_id, product_name, description)` tuples, builds the LightRAG document text |
-| `ingest.py` | Initializes `LightRAG(...)` (Ollama LLM/embedding funcs, local storage, concurrency, entity-type constraint), inserts the document batch |
+| `graph_sampling.py` | Coverage-based selection of which SKUs get full graph extraction (see `lightrag-implementation.md` section 5); outputs to `graph_sampling_output/` |
+| `prompts/entity_type/ecommerce_catalog.yml` | Entity-type guidance + worked examples for LightRAG's extraction prompt (see `lightrag-implementation.md` section 6) |
+| `sql_filter.py` | SQL hard-filter branch — `eligible_skus(hard_constraints)` against `product_metadata` |
+| `bm25_index.py` | BM25 lexical branch — full-catalog index over the same description-only corpus |
+| `ingest.py` | Initializes `LightRAG(...)` (Ollama LLM/embedding funcs, Qdrant vector storage, entity-type prompt profile), ingests via `apipeline_enqueue_documents` + `apipeline_process_enqueue_documents` with per-SKU `process_options` from `graph_sampling.py`'s subset |
 | `query.py` | Runs a `mode="mix"`, `only_need_context=True` query against the built index |
 | `run.sh` | Installs deps, checks Ollama reachability + pulled models, runs ingest and/or query |
-| `README.md` | Setup/run instructions, model/context/concurrency rationale, time estimates |
-| `lightrag_storage/` (generated) | LightRAG's local storage: graph (NetworkX), vector DB (NanoVectorDB), KV store, doc status — created on first `ingest.py` run |
+| `README.md` | Setup/run instructions (Qdrant/MySQL provisioning, models, ingest, query), time estimates |
+| `lightrag-implementation.md` | Deep dive: graph-subset sampling design + measured results, entity-extraction prompt investigation and fix |
+| `lightrag_storage/` (generated, gitignored) | LightRAG's local storage: graph (NetworkX), KV store, doc status — created on first `ingest.py` run. Vector embeddings go to Qdrant, not here. |
 
 ## Next steps for whoever builds on this
 
-1. Run `ingest.py` against the 150-product test batch once Ollama is
-   live, confirm graph/vector output looks sane (check
-   `lightrag_storage/` contents, run a few `query.py` calls) before
-   raising `BATCH_SIZE` toward the full 20,000-product catalog.
-2. Build the SQL hard-filter branch against `product_metadata`
-   (`../flipkart_metadata.sql` / the MySQL container from
-   `../README.md`) as a separate, independent component — it doesn't
-   depend on anything in this folder.
-3. Build the BM25 branch (`rank_bm25` over the *same*
-   `flipkart_lightrag_corpus.md` corpus this folder reads — reuse
-   `load_documents.load_md_blocks()` rather than re-parsing the file a
-   third way).
-4. Build the union/intersect/rerank merge step
+1. **Run `ingest.py` for real, against live Ollama** — the only piece
+   that's actually still pending. Everything else (Qdrant wiring, the
+   graph-extraction subset, the entity-type prompt fix) is built, tested
+   without needing an LLM, and ready. Pull the models (README.md section
+   2), confirm Qdrant + MySQL containers are up (README.md section 0), then
+   `python ingest.py`.
+2. Build the union/intersect/rerank merge step
    (`retrieval-architecture.md`'s "Candidate fusion & rerank" section)
-   that combines this branch's output with the other two.
-5. Only after that's working, consider the Qdrant swap and/or a hosted
-   model swap — neither is needed to validate correctness of the
-   retrieval logic itself.
+   that combines SQL, BM25, and the LightRAG/Qdrant branch's output — can
+   be scaffolded against a stubbed semantic-branch output now, finished
+   once step 1's real query output shape is confirmed.
+3. Wrap the semantic branch as a plain candidate function
+   (`semantic_search.py` per `plan.md` step 6) once step 1 confirms what
+   `only_need_context=True` actually returns.
+4. Wire all three branches into the actual `search_catalog(query_state)`
+   entrypoint.

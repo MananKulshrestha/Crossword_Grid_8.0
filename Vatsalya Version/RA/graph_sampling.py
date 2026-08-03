@@ -1,3 +1,4 @@
+
 """Graph-extraction subset selector (lightrag-implementation.md, section 5):
 chooses which SKUs get full LightRAG entity/relation extraction
 (``process_options=""``) versus chunk-embedding-only

@@ -3,3 +3,4 @@ ollama
 PyMySQL
 pytest
 rank_bm25
+qdrant-client

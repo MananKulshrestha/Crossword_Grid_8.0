@@ -1,0 +1,55 @@
+# Entity-extraction prompt profile for the Flipkart catalog (lightrag-implementation.md,
+# section 6). Loaded via addon_params={"entity_type_prompt_file": "ecommerce_catalog.yml"}
+# in ingest.py -- LightRAG resolves this from PROMPT_DIR/entity_type/ (see config.py's
+# PROMPT_DIR, set to an absolute path so this doesn't depend on the working directory).
+#
+# Fixes a real bug: an earlier version of this project passed
+# addon_params={"entity_types": [...]} -- a key lightrag-hku (confirmed on the
+# installed 1.5.5 release) never reads at all, so every extraction silently fell
+# back to LightRAG's generic default ontology (Person, Organization, Location,
+# Event, ...). This file uses the two keys LightRAG actually resolves:
+# entity_types_guidance and entity_extraction_examples.
+#
+# entity_extraction_examples must use the literal {tuple_delimiter} /
+# {completion_delimiter} placeholder tokens, not raw "<|#|>" characters --
+# LightRAG calls .format() on the joined examples string at render time
+# (lightrag/operate.py) to substitute the real delimiters, matching the
+# built-in default example's own convention.
+
+entity_types_guidance: |
+  Classify each entity using one of the following types. If no type fits, use `Other`.
+
+  - PRODUCT: A specific sellable item/SKU in the catalog (e.g. a named shirt, sofa, ring, phone case)
+  - BRAND: The manufacturer or brand name selling the product
+  - CATEGORY: The product category or type (e.g. Cycling Shorts, Bangle Set, Sofa Bed)
+  - MATERIAL: The fabric, metal, or substance the product is made of (e.g. Cotton Lycra, Acrylic, Sterling Silver)
+  - OCCASION: A use-case or event the product is marketed as suitable for (e.g. Wedding, Party, Office, Daily Wear)
+  - STYLE: A design, pattern, or aesthetic descriptor (e.g. Solid, Ethnic, Printed, Slim Fit)
+
+entity_extraction_examples:
+  - |
+    entity{tuple_delimiter}Alisha{tuple_delimiter}BRAND{tuple_delimiter}Alisha is the brand manufacturing the Solid Womens Cycling Shorts product.
+    entity{tuple_delimiter}Alisha Solid Womens Cycling Shorts{tuple_delimiter}PRODUCT{tuple_delimiter}A women's cycling shorts product sold in a pack of 3, made of Cotton Lycra fabric with a solid pattern.
+    entity{tuple_delimiter}Cycling Shorts{tuple_delimiter}CATEGORY{tuple_delimiter}The product category for shorts designed for cycling activity.
+    entity{tuple_delimiter}Cotton Lycra{tuple_delimiter}MATERIAL{tuple_delimiter}The fabric blend used to manufacture the shorts.
+    entity{tuple_delimiter}Solid{tuple_delimiter}STYLE{tuple_delimiter}The pattern style of the shorts -- a plain, single-color design.
+    relation{tuple_delimiter}Alisha Solid Womens Cycling Shorts{tuple_delimiter}Alisha{tuple_delimiter}brand, manufacturer{tuple_delimiter}Alisha Solid Womens Cycling Shorts is manufactured by the brand Alisha.
+    relation{tuple_delimiter}Alisha Solid Womens Cycling Shorts{tuple_delimiter}Cotton Lycra{tuple_delimiter}made of, fabric{tuple_delimiter}The shorts are made of Cotton Lycra fabric.
+    relation{tuple_delimiter}Alisha Solid Womens Cycling Shorts{tuple_delimiter}Solid{tuple_delimiter}has style, pattern{tuple_delimiter}The shorts have a solid pattern style.
+    relation{tuple_delimiter}Alisha Solid Womens Cycling Shorts{tuple_delimiter}Cycling Shorts{tuple_delimiter}category of, type{tuple_delimiter}The product belongs to the cycling shorts category.
+    {completion_delimiter}
+  - |
+    entity{tuple_delimiter}GAJ IMPEX{tuple_delimiter}BRAND{tuple_delimiter}GAJ IMPEX is the brand manufacturing the Acrylic Bangle Set product.
+    entity{tuple_delimiter}GAJ IMPEX Acrylic Bangle Set{tuple_delimiter}PRODUCT{tuple_delimiter}A pack-of-2 acrylic bangle set with Kundan work, designed for women.
+    entity{tuple_delimiter}Bangle Set{tuple_delimiter}CATEGORY{tuple_delimiter}The product category for a matched set of bangles.
+    entity{tuple_delimiter}Acrylic{tuple_delimiter}MATERIAL{tuple_delimiter}The base material the bangle set is made from.
+    entity{tuple_delimiter}Wedding{tuple_delimiter}OCCASION{tuple_delimiter}An occasion the bangle set is marketed as suitable for.
+    entity{tuple_delimiter}Party{tuple_delimiter}OCCASION{tuple_delimiter}Another occasion the bangle set is marketed as suitable for.
+    entity{tuple_delimiter}Ethnic{tuple_delimiter}STYLE{tuple_delimiter}The design collection / aesthetic style of the bangle set.
+    relation{tuple_delimiter}GAJ IMPEX Acrylic Bangle Set{tuple_delimiter}GAJ IMPEX{tuple_delimiter}brand, manufacturer{tuple_delimiter}The bangle set is manufactured by the brand GAJ IMPEX.
+    relation{tuple_delimiter}GAJ IMPEX Acrylic Bangle Set{tuple_delimiter}Acrylic{tuple_delimiter}made of, material{tuple_delimiter}The bangle set is made of acrylic.
+    relation{tuple_delimiter}GAJ IMPEX Acrylic Bangle Set{tuple_delimiter}Bangle Set{tuple_delimiter}category of, type{tuple_delimiter}The product belongs to the bangle set category.
+    relation{tuple_delimiter}GAJ IMPEX Acrylic Bangle Set{tuple_delimiter}Wedding{tuple_delimiter}suitable for occasion{tuple_delimiter}The bangle set is marketed as suitable for weddings.
+    relation{tuple_delimiter}GAJ IMPEX Acrylic Bangle Set{tuple_delimiter}Party{tuple_delimiter}suitable for occasion{tuple_delimiter}The bangle set is marketed as suitable for parties.
+    relation{tuple_delimiter}GAJ IMPEX Acrylic Bangle Set{tuple_delimiter}Ethnic{tuple_delimiter}has style{tuple_delimiter}The bangle set belongs to an ethnic style collection.
+    {completion_delimiter}

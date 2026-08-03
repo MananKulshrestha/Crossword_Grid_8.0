@@ -488,13 +488,28 @@ observe the extraction output, which stays blocked until the cluster's back.
 2. Occasion/style keyword vocabulary (§5.2) — done as part of step 1
    (`OCCASION_KEYWORDS` / `STYLE_KEYWORDS` in `graph_sampling.py`); both hit
    100% coverage on the real corpus.
-3. `entity_types_guidance` + worked examples (§6.5) — not yet started.
-   Content can be drafted and reviewed now; can't be *validated* (does it
-   actually produce the right entity types) until Ollama is back.
-4. `ingest.py` changes to use `apipeline_enqueue_documents` with per-document
-   `process_options`, reading `graph_sampling_output/full_extraction_skus.txt`
-   to decide `""` vs `"!"` per SKU (§3.2) — not yet started. Small,
-   mechanical change, blocked on Ollama only for testing, not for writing.
+3. **`entity_types_guidance` + worked examples (§6.5) — built.**
+   `prompts/entity_type/ecommerce_catalog.yml` — guidance text for all six
+   types, plus two real worked examples (the Alisha cycling shorts from §6.4,
+   and a second from Jewellery with an OCCASION/STYLE-positive example, per
+   §6.5's recommendation not to make every example clothing or
+   occasion-free). Validated through LightRAG's own loader
+   (`resolve_entity_extraction_prompt_profile`) and confirmed it renders
+   correctly with real delimiters substituted — this doesn't require Ollama,
+   only running LightRAG's own (LLM-free) prompt-resolution code. What's
+   *not* yet validated is whether the LLM actually follows it well — that
+   needs a real ingest run.
+4. **`ingest.py` changes — built.** Now uses `apipeline_enqueue_documents` +
+   `apipeline_process_enqueue_documents` with per-document `process_options`
+   read from `graph_sampling_output/full_extraction_skus.txt` (§3.2), plus
+   `vector_storage="QdrantVectorDBStorage"` and the fixed entity-type prompt
+   profile from step 3. Verified as far as possible without Ollama: real
+   construction, real `initialize_storages()` against the live Qdrant
+   container, real collection creation confirmed via Qdrant's own API (see
+   §3.2's update and `plan.md` Step 3). Actual ingestion — the LLM/embedding
+   calls themselves — is the one thing left, blocked on the team's Ollama
+   server.
 
-Steps 1–2 are done; step 3 can proceed in parallel without Ollama; step 4 is
-mechanical once steps 1 and 3 both land.
+All four steps are done. The only remaining blocked piece across this whole
+document is running `ingest.py` for real against live Ollama — everything
+that could be built, wired, and verified without an LLM has been.

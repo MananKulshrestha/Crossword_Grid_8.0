@@ -102,50 +102,69 @@ something had to be fixed.
 
 ## Step 2 — Provision Qdrant
 
-Same Docker pattern already used for MySQL (`Vatsalya Version/README.md`):
+**Status: DONE, refined beyond the original plan.** Provisioned as below,
+but the original `docker run` here had no restart policy or persistent
+volume — Qdrant's own startup log warns about exactly that risk
+("storage might be lost with container re-creation"), and the container
+was in fact found stopped later (a manual `docker stop` while closing
+Docker Desktop, not a crash). Recreated with:
 
 ```bash
+docker volume create flipkart_qdrant_data
+
 docker run -d \
   --name flipkart-qdrant \
+  --restart unless-stopped \
   -p 6333:6333 \
   -p 6334:6334 \
+  -v flipkart_qdrant_data:/qdrant/storage \
   qdrant/qdrant
 ```
 
-Document connection details (host `127.0.0.1`, REST port `6333`, gRPC port
-`6334`) in a new "Qdrant Setup" section of `RA/README.md`, matching the
-style of `Vatsalya Version/README.md`'s MySQL section.
+Connection details documented in `RA/README.md`'s "Provision Qdrant and
+MySQL" section.
 
-**Test:** `curl http://localhost:6333/collections` returns a valid (empty)
-JSON response — confirms the container is actually reachable before any
-code gets wired against it.
+**Test:** done, and re-verified after the recreation above — `curl
+http://localhost:6333/collections` returns 200; a full functional smoke
+test (create collection → insert a point → search → delete) passed; a
+point was confirmed to survive a real `docker restart` (proves the volume
+mount actually persists, not just that it's configured).
 
-Commit & push: `RA: document and provision Qdrant`
+Commit & push: `RA: document and provision Qdrant` (original); the
+restart-policy/volume fix is infra-only, not a code change, so it isn't a
+separate commit.
 
 ---
 
 ## Step 3 — Swap LightRAG to Qdrant-backed vector storage
 
-Edit `ingest.py`'s `LightRAG(...)` call: add
-`vector_storage="QdrantVectorDBStorage"` plus whatever connection kwargs
-LightRAG's Qdrant backend needs (host/port from Step 2), exactly as the doc
-specifies ("set `vector_storage=\"QdrantVectorDBStorage\"` and point it at
-a Qdrant instance instead of LightRAG's default `NanoVectorDBStorage`").
+**Status: DONE.** `ingest.py`'s `LightRAG(...)` call sets
+`vector_storage="QdrantVectorDBStorage"`. The connection itself isn't a
+constructor kwarg — `QdrantVectorDBStorage` reads `QDRANT_URL` /
+`QDRANT_API_KEY` straight from `os.environ` at its own `initialize()` time
+(confirmed by reading `lightrag/kg/qdrant_impl.py` directly), so
+`config.py`'s `QDRANT_URL` is applied via `os.environ.setdefault(...)` in
+`ingest.py` before `LightRAG(...)` is constructed.
 
-Re-run `./run.sh ingest` against the same 150-product batch — this time
-vectors land in Qdrant instead of local `NanoVectorDBStorage`.
+**Test: done, without needing Ollama.** Storage initialization
+(`rag.initialize_storages()`) doesn't call any LLM or embedding function —
+only `apipeline_process_enqueue_documents()` (actual ingestion) does. This
+made it possible to verify the real Qdrant wiring end-to-end today: built
+`rag` for real, called `initialize_storages()` against the live container,
+and confirmed via Qdrant's own REST API that three real collections were
+created — `lightrag_vdb_chunks_<model>_<dim>d`, `..._entities_...`,
+`..._relationships_...` (one collection per LightRAG vector store — see
+`lightrag-implementation.md` section 3.1). Cleaned up the smoke-test
+collections afterward so Qdrant starts empty for the real ingest run. The
+one thing this can't test without Ollama is the *content* ending up
+correct — that needs a real `ingest.py` run.
 
-**Test:** `RA/tests/test_qdrant_ingest.py`
-- After ingest, query Qdrant directly via `qdrant_client` and assert the
-  expected collection exists with a point count matching the successfully-
-  ingested SKU count from the ingestion summary.
-- Re-run the same sample queries from Step 1 and confirm comparable
-  results (same/similar top candidates) now that retrieval reads from
-  Qdrant instead of local storage.
+**Dependency added:** `qdrant-client` (in `requirements.txt`) — required
+even though `lightrag-hku` itself only lists it as an optional
+`offline-storage` extra, not a base dependency.
 
-**Dependency to add:** `qdrant-client`
-
-Commit & push: `RA: swap LightRAG to Qdrant-backed vector storage`
+Commit & push: as part of `RA: wire Qdrant storage, graph-sampling subset,
+and entity-type prompt fix into ingest.py`.
 
 ---
 
