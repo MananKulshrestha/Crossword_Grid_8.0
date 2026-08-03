@@ -1,11 +1,16 @@
 # Implementation Notes — `RA/` LightRAG Semantic/Graph Branch
 
-This folder implements **one of three** retrieval branches described in
+This folder now holds all **three** retrieval branches described in
 `retrieval-architecture.md` (see `~/Downloads/retrieval-architecture.md`,
 or wherever that doc lives in the project repo) for the `search_catalog`
-tool's internals: the **semantic/graph branch**, via LightRAG. It does
-not implement the SQL hard-filter branch or the BM25 lexical branch —
-those are explicitly out of scope for this folder, planned for later.
+tool's internals. It started as just the **semantic/graph branch**, via
+LightRAG (see below for that part specifically) — the SQL hard-filter
+branch (`sql_filter.py`) and the BM25 lexical branch (`bm25_index.py`)
+were added afterward, as separate, independent components per
+`plan.md`. The rest of this document, written when only the LightRAG
+piece existed, still describes that piece's design decisions accurately;
+read `sql_filter.py` and `bm25_index.py` directly for the other two —
+their docstrings cover the same ground.
 
 Read `../IMPLEMENTATION.md` first — it explains the upstream pipeline
 (`flipkart_to_lightrag.py`) that produces the three source files this
@@ -30,21 +35,28 @@ folder consumes. This document picks up from there.
   changing `vector_storage="QdrantVectorDBStorage"` in `ingest.py`'s
   `LightRAG(...)` call plus pointing it at a running Qdrant instance —
   nothing else in this folder's design depends on the storage backend.
+- SQL hard-filter branch (`sql_filter.py`) — `eligible_skus(hard_constraints)`
+  against `product_metadata`, tested against the real Docker MySQL
+  container (`tests/test_sql_filter.py`).
+- BM25 lexical branch (`bm25_index.py`) — indexes every product with a
+  usable description (19998 SKUs, all of them, not just the LightRAG test
+  batch), persisted under `bm25_storage/`, tested against the real index
+  (`tests/test_bm25.py`) with real exact-token queries.
 
-**Not built (explicitly deferred by the user, "later"):**
-- SQL hard-filter branch (query `product_metadata` for price/stock/
-  category/size eligibility).
-- BM25 lexical branch (`rank_bm25` over the same corpus).
+**Not built:**
 - The union/intersect/rerank merge step that combines all three branches
   (`retrieval-architecture.md`'s "Candidate fusion & rerank" section).
 - Cross-encoder reranking.
 - Any wiring into an actual `search_catalog(query_state)` function —
-  this folder is a standalone ingestion/query harness, not yet plugged
+  this folder is still a set of standalone components, not yet plugged
   into a larger agent/tool pipeline.
+- The LightRAG branch specifically has never been executed end-to-end
+  (no `lightrag_storage/` exists yet) — it's blocked on the team's shared
+  Ollama server being reachable, unrelated to SQL/BM25's status.
 
 Whoever picks this up next: don't assume LightRAG alone constitutes
-`search_catalog`. It's one input branch. The other two branches and the
-merge step still need to be built and unioned with what's here, per
+`search_catalog`. SQL and BM25 are real, tested branches now — the merge
+step still needs to be built to combine all three, per
 `retrieval-architecture.md`.
 
 ## Design decisions and why (read before changing anything)

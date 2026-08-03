@@ -256,6 +256,9 @@ pulls any missing models, then runs the requested step.
   question argument (errors with a usage message otherwise, no default
   question substituted), and a failed ingestion never gets replaced with
   placeholder content — see the ingestion summary behavior above.
-- This folder currently implements **only** the semantic/graph retrieval
-  branch. SQL hard-filtering and BM25 lexical search (the other two
-  branches in `retrieval-architecture.md`'s design) are not built here yet.
+- SQL hard-filtering (`sql_filter.py`) and BM25 lexical search
+  (`bm25_index.py`) are also now built in this folder, each tested against
+  real data (`tests/test_sql_filter.py`, `tests/test_bm25.py`) — see
+  `IMPLEMENTATION.md` for details. Only the union/intersect/rerank merge
+  step that combines all three branches, and the `search_catalog(query_state)`
+  entrypoint itself, are still missing.

@@ -2,3 +2,4 @@ lightrag-hku
 ollama
 PyMySQL
 pytest
+rank_bm25
