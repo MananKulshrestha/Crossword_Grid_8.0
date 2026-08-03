@@ -5,8 +5,12 @@ from fastapi.testclient import TestClient
 from fkgrid.agentic.contracts import (
     Constraint,
     ConstraintOperator,
+    ModelCallType,
+    ModelResponse,
+    ModelStatus,
     QueryState,
     SearchRequest,
+    ValidationIssue,
 )
 from fkgrid.agentic.gateway import (
     FakeModelGateway,
@@ -79,6 +83,15 @@ class FastApiWorkflowTests(unittest.TestCase):
             details.json()["response"]["terminal_state"],
             "ANSWERED_WITH_PRODUCT_DETAILS",
         )
+        detail_events = details.json()["trace"]["events"]
+        eligibility_event = next(
+            event
+            for event in detail_events
+            if event["logical_name"] == "check_commerce_eligibility"
+        )
+        self.assertEqual(eligibility_event["status"], "ALLOWED")
+        self.assertEqual(eligibility_event["safe_metadata"]["tool_output"]["eligible"], True)
+        self.assertIn("route_primary_action", [event["logical_name"] for event in detail_events])
 
     def test_trace_exposes_structured_model_tool_output_and_recent_memory(self) -> None:
         created = self.client.post("/v1/sessions", json={"session_id": "trace-session"})
@@ -86,7 +99,11 @@ class FastApiWorkflowTests(unittest.TestCase):
 
         first = self.client.post(
             "/v1/sessions/trace-session/turns",
-            json={"message": "Find a shirt size m", "idempotency_key": "trace-key-1"},
+            json={
+                "client_turn_id": "trace-turn-1",
+                "message": "Find a shirt size m",
+                "idempotency_key": "trace-key-1",
+            },
         )
         self.assertEqual(first.status_code, 200)
         first_trace = first.json()["trace"]
@@ -99,16 +116,24 @@ class FastApiWorkflowTests(unittest.TestCase):
             intent_event["safe_metadata"]["structured_output"]["primary_action"],
             "SEARCH",
         )
+        self.assertTrue(intent_event["safe_metadata"]["call_id"])
+        self.assertEqual(intent_event["safe_metadata"]["status"], "OK")
         search_event = next(
             event
             for event in first_trace["events"]
             if event["logical_name"] == "search_catalog"
         )
         self.assertEqual(search_event["safe_metadata"]["tool_output"]["status"], "OK")
+        self.assertTrue(search_event["safe_metadata"]["tool_run_id"])
+        self.assertTrue(search_event["safe_metadata"]["trace_span_id"])
 
         second = self.client.post(
             "/v1/sessions/trace-session/turns",
-            json={"message": "Find another shirt", "idempotency_key": "trace-key-2"},
+            json={
+                "client_turn_id": "trace-turn-2",
+                "message": "Find another shirt",
+                "idempotency_key": "trace-key-2",
+            },
         )
         self.assertEqual(second.status_code, 200)
         enhancement_event = next(
@@ -118,16 +143,101 @@ class FastApiWorkflowTests(unittest.TestCase):
         )
         self.assertEqual(enhancement_event["safe_metadata"]["recent_turn_count"], 1)
         self.assertEqual(
-            enhancement_event["safe_metadata"]["recent_turn_context"][0]["user_query"],
-            "Find a shirt size m",
+            enhancement_event["safe_metadata"]["recent_turn_ids"],
+            ["trace-turn-1"],
         )
+        self.assertTrue(enhancement_event["safe_metadata"]["recent_memory_used"])
+        self.assertNotIn("recent_turn_context", enhancement_event["safe_metadata"])
 
         session = self.client.get("/v1/sessions/trace-session")
         self.assertEqual(len(session.json()["recent_turns"]), 2)
+        self.assertEqual(session.json()["recent_turns"][0]["user_query"], "Find a shirt size m")
+        self.assertEqual(
+            session.json()["recent_turns"][0]["assistant_summary"],
+            first.json()["response"]["summary"],
+        )
         history = self.client.get("/v1/sessions/trace-session/trace")
         self.assertEqual(history.status_code, 200)
         self.assertEqual(history.json()["trace_count"], 2)
         self.assertEqual(len(history.json()["traces"]), 2)
+        history_intent = next(
+            event
+            for event in history.json()["traces"][0]["events"]
+            if event["logical_name"] == "resolve_intent_and_delta"
+        )
+        self.assertEqual(
+            history_intent["safe_metadata"]["structured_output"]["primary_action"],
+            "SEARCH",
+        )
+
+    def test_trace_exposes_safe_invalid_model_diagnostics_without_raw_output(self) -> None:
+        runtime = ApiRuntime(
+            gateway=FakeModelGateway(),
+            model_mode="live",
+            model_alias=Gemma4ModelAdapter.default_model_alias,
+            protocol="test",
+        )
+        runtime.gateway.queue_response(
+            ModelCallType.RESOLVE_INTENT_AND_DELTA,
+            ModelResponse(
+                call_id="invalid-model-call",
+                status=ModelStatus.INVALID_OUTPUT,
+                output_payload={"primary_action": "NOT_A_REAL_ACTION", "unsafe field": "secret"},
+                raw_output_hash="raw-hash",
+                input_hash="input-hash",
+                output_hash="output-hash",
+                provider_name="test-provider",
+                model_alias=Gemma4ModelAdapter.default_model_alias,
+                prompt_id="intent_v3",
+                prompt_version="3",
+                latency_ms=12,
+                validation_issues=[
+                    ValidationIssue(
+                        code="OUTPUT_SCHEMA_INVALID",
+                        path="output_payload.primary_action",
+                        safe_message="Provider output failed the declared contract.",
+                    )
+                ],
+            ),
+        )
+        runtime.gateway.queue_response(
+            ModelCallType.RESOLVE_INTENT_AND_DELTA,
+            ModelResponse(
+                call_id="invalid-model-repair-call",
+                status=ModelStatus.INVALID_OUTPUT,
+                output_payload=None,
+                input_hash="repair-input-hash",
+                provider_name="test-provider",
+                model_alias=Gemma4ModelAdapter.default_model_alias,
+                prompt_id="intent_v3",
+                prompt_version="3",
+                latency_ms=8,
+            ),
+        )
+        client = TestClient(create_app(runtime))
+        client.post("/v1/sessions", json={"session_id": "invalid-trace-session"})
+
+        response = client.post(
+            "/v1/sessions/invalid-trace-session/turns",
+            json={
+                "message": "find something unusual",
+                "idempotency_key": "invalid-trace-key",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        intent_event = next(
+            event
+            for event in response.json()["trace"]["events"]
+            if event["logical_name"] == "resolve_intent_and_delta"
+        )
+        metadata = intent_event["safe_metadata"]
+        self.assertEqual(metadata["status"], "INVALID_OUTPUT")
+        self.assertEqual(metadata["output_summary"]["output_hash"], "output-hash")
+        self.assertIn("<redacted>", metadata["output_summary"]["keys"])
+        self.assertEqual(metadata["output_summary"]["shape"]["type"], "object")
+        self.assertEqual(metadata["structured_output"], None)
+        self.assertEqual(metadata["validation_issues"][0]["path"], "output_payload.primary_action")
+        self.assertNotIn("unsafe field", str(metadata))
 
     def test_swagger_exposes_rich_fixture_catalog_and_facets(self) -> None:
         page = self.client.get("/v1/catalog", params={"limit": 20})
@@ -573,6 +683,99 @@ class FastApiWorkflowTests(unittest.TestCase):
                 any(fact["typed_value"] == "sneakers" for fact in entry["facts"] if fact["label"] == "category")
                 for entry in shoes.json()["response"]["search_entries"]
             )
+        )
+
+    def test_category_switch_drops_incompatible_apparel_size_before_cart_follow_up(self) -> None:
+        runtime = ApiRuntime(
+            gateway=UnavailableModelGateway(
+                Gemma4ModelAdapter.default_model_alias,
+                "MODEL_TIMEOUT",
+            ),
+            model_mode="live",
+            model_alias=Gemma4ModelAdapter.default_model_alias,
+            protocol="test",
+        )
+        client = TestClient(create_app(runtime))
+        client.post("/v1/sessions", json={"session_id": "category-switch-session"})
+
+        first = client.post(
+            "/v1/sessions/category-switch-session/turns",
+            json={
+                "message": "red tshirt size L",
+                "idempotency_key": "category-switch-search-key",
+            },
+        )
+        self.assertEqual(
+            first.json()["response"]["terminal_state"],
+            "ANSWERED_WITH_GROUNDED_RESULTS",
+        )
+
+        shoes = client.post(
+            "/v1/sessions/category-switch-session/turns",
+            json={
+                "message": "shoes",
+                "idempotency_key": "category-switch-shoes-key",
+            },
+        )
+        self.assertEqual(
+            shoes.json()["response"]["terminal_state"],
+            "ANSWERED_WITH_GROUNDED_RESULTS",
+        )
+        self.assertEqual(
+            {
+                next(fact["typed_value"] for fact in entry["facts"] if fact["label"] == "category")
+                for entry in shoes.json()["response"]["search_entries"]
+            },
+            {"sneakers"},
+        )
+
+        cart = client.post(
+            "/v1/sessions/category-switch-session/turns",
+            json={
+                "message": "add 1 to the cart",
+                "idempotency_key": "category-switch-cart-key",
+            },
+        )
+        self.assertNotEqual(cart.json()["response"]["terminal_state"], "INTERPRETATION_UNAVAILABLE")
+        self.assertIn(
+            "deterministic_cart_grammar",
+            [event["logical_name"] for event in cart.json()["trace"]["events"]],
+        )
+
+    def test_explicit_quantity_ordinal_cart_phrase_is_deterministic(self) -> None:
+        runtime = ApiRuntime(
+            gateway=UnavailableModelGateway(
+                Gemma4ModelAdapter.default_model_alias,
+                "MODEL_TIMEOUT",
+            ),
+            model_mode="live",
+            model_alias=Gemma4ModelAdapter.default_model_alias,
+            protocol="test",
+        )
+        client = TestClient(create_app(runtime))
+        client.post("/v1/sessions", json={"session_id": "quantity-cart-session"})
+        search = client.post(
+            "/v1/sessions/quantity-cart-session/turns",
+            json={
+                "message": "red tshirt size L",
+                "idempotency_key": "quantity-search-key",
+            },
+        )
+        self.assertEqual(search.json()["response"]["terminal_state"], "ANSWERED_WITH_GROUNDED_RESULTS")
+
+        cart = client.post(
+            "/v1/sessions/quantity-cart-session/turns",
+            json={
+                "message": "add 2 units of the first one",
+                "idempotency_key": "quantity-cart-key",
+            },
+        )
+        response = cart.json()["response"]
+        self.assertEqual(response["terminal_state"], "CART_UPDATED")
+        self.assertEqual(response["cart"]["items"][0]["quantity"], 2)
+        self.assertIn(
+            "deterministic_cart_grammar",
+            [event["logical_name"] for event in cart.json()["trace"]["events"]],
         )
 
     def test_sessions_are_isolated(self) -> None:

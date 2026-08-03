@@ -15,9 +15,11 @@ from .contracts import (
     Action,
     ActiveResultBinding,
     AddScopeOperation,
+    ClearSearchStateOperation,
     ConstraintOperator,
     DeltaOperation,
     IntentDeltaV1,
+    QueryState,
     ReferenceDraft,
     RemoveHardOperation,
     RemoveScopeOperation,
@@ -88,7 +90,8 @@ _NON_SEARCH_MARKERS = re.compile(
     flags=re.IGNORECASE,
 )
 _CART_ADD_PATTERN = re.compile(
-    r"\b(?:put|add|place|save)\b.{0,48}\bcart\b|\bcart\b.{0,48}\b(?:put|add|place|save)\b",
+    r"\b(?:put|add|place|save)\b.{0,48}\bcart\b|\bcart\b.{0,48}\b(?:put|add|place|save)\b|"
+    r"\b(?:put|add|place|save)\b.{0,48}\b(?:units?|copies?)\b",
     flags=re.IGNORECASE,
 )
 _ORDINAL_PATTERN = re.compile(
@@ -117,6 +120,11 @@ _ORDINAL_VALUES = {
     "4th": "4",
     "four": "4",
 }
+_QUANTITY_PATTERN = re.compile(
+    r"\b(?P<quantity>\d+|one|two|three|four)\s+(?:units?|copies?)\b",
+    flags=re.IGNORECASE,
+)
+_QUANTITY_VALUES = {"one": 1, "two": 2, "three": 3, "four": 4}
 
 _GREETING_OR_HELP_MESSAGES = frozenset(
     {
@@ -296,13 +304,25 @@ def is_greeting_or_help_message(text: str) -> bool:
 
 
 def _cart_ordinal_match(text: str) -> re.Match[str] | None:
-    word_match = _ORDINAL_PATTERN.search(text)
+    quantity_marker = _EXPLICIT_QUANTITY_MARKER.search(text)
+    search_text = text[quantity_marker.end() :] if quantity_marker is not None else text
+    word_match = _ORDINAL_PATTERN.search(search_text)
     if word_match is not None:
         return word_match
-    numeric_match = _NUMERIC_ORDINAL_PATTERN.search(text)
-    if numeric_match is not None and _EXPLICIT_QUANTITY_MARKER.search(text) is None:
+    numeric_match = _NUMERIC_ORDINAL_PATTERN.search(search_text)
+    if numeric_match is not None:
         return numeric_match
     return None
+
+
+def _explicit_cart_quantity(text: str) -> int:
+    match = _QUANTITY_PATTERN.search(text)
+    if match is None:
+        return 1
+    raw_quantity = match.group("quantity").casefold()
+    if raw_quantity in _QUANTITY_VALUES:
+        return _QUANTITY_VALUES[raw_quantity]
+    return int(raw_quantity)
 
 
 def _matches(text: str, patterns: tuple[tuple[str, tuple[str, ...]], ...]) -> list[_TermMatch]:
@@ -357,7 +377,11 @@ def _size_match(text: str) -> _TermMatch | None:
     return _TermMatch(f"size_{match.group(1).casefold()}", match.start(), match.end())
 
 
-def apply_explicit_catalog_terms(intent: IntentDeltaV1, message: str) -> IntentDeltaV1:
+def apply_explicit_catalog_terms(
+    intent: IntentDeltaV1,
+    message: str,
+    current_state: QueryState | None = None,
+) -> IntentDeltaV1:
     """Overlay explicit category/color terms from the current shopper turn.
 
     Category words are hard taxonomy scope changes, so ``shoes`` replaces a
@@ -402,11 +426,33 @@ def apply_explicit_catalog_terms(intent: IntentDeltaV1, message: str) -> IntentD
             for operation in operations
             if not isinstance(operation, (AddScopeOperation, RemoveScopeOperation))
         ]
+        current_categories = {
+            value
+            for constraint in (current_state.hard_constraints if current_state else [])
+            if constraint.field_id == "taxonomy_node_id"
+            for value in constraint.values
+        }
+        if current_categories and category_matches[0].value not in current_categories:
+            # Category-specific constraints such as apparel size L are not
+            # valid filters for a different taxonomy (for example, sneakers
+            # use numeric sizes). Start a fresh category search while keeping
+            # same-category follow-ups and remembered preferences intact.
+            operations.insert(0, ClearSearchStateOperation())
         operations.append(AddScopeOperation(taxonomy_node_id=category_matches[0].value))
 
     if color_matches:
         unique_colors = list(dict.fromkeys(match.value for match in color_matches))
-        operations = _replace_field_operations(operations, "color")
+        operations = [
+            operation
+            for operation in operations
+            if not (
+                isinstance(
+                    operation,
+                    (SetHardOperation, RemoveHardOperation, SetSoftOperation, RemoveSoftOperation),
+                )
+                and operation.field_id.casefold() in {"color", "colour", "colours"}
+            )
+        ]
         first = color_matches[0]
         if _strict_color_request(text, color_matches):
             operations.append(
@@ -455,7 +501,10 @@ def apply_explicit_catalog_terms(intent: IntentDeltaV1, message: str) -> IntentD
 
 
 def deterministic_catalog_intent(
-    message: str, *, refine_existing_query: bool = False
+    message: str,
+    *,
+    refine_existing_query: bool = False,
+    current_state: QueryState | None = None,
 ) -> IntentDeltaV1 | None:
     """Return a conservative fallback for fully recognized catalog wording.
 
@@ -480,7 +529,7 @@ def deterministic_catalog_intent(
     base = IntentDeltaV1(
         primary_action=Action.REFINE if refine_existing_query else Action.SEARCH
     )
-    resolved = apply_explicit_catalog_terms(base, message)
+    resolved = apply_explicit_catalog_terms(base, message, current_state)
     return resolved if resolved.delta_operations else None
 
 
@@ -547,7 +596,7 @@ def apply_explicit_cart_terms(
             "type": "ADD_ITEM",
             "operation_id": f"chat_add_ordinal_{ordinal}",
             "result_entry_id": entry.result_entry_id,
-            "quantity": 1,
+            "quantity": _explicit_cart_quantity(text),
         }
     ]
     return intent.model_copy(

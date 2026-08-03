@@ -7,59 +7,49 @@ grounding, and terminal states.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import Any, Sequence
+from typing import Any
 
+from .capabilities import SHOPPER_CAPABILITIES
 from .contracts import (
     Action,
-    AddItemOperation,
     ActiveResultBinding,
-    CartSnapshot,
+    AddItemOperation,
+    Availability,
     ClarificationDraft,
     ClarificationOption,
     ClarificationPacket,
+    ClearCartOperation,
     CommitCommand,
+    Comparison,
     CompatibilityTuple,
     FallbackState,
     IntentDeltaV1,
     ModelCallType,
     ModelStatus,
+    Money,
+    PendingClarification,
+    ProductDetails,
     PublicTrace,
     QueryState,
+    RecentResultContext,
+    RecentTurnContext,
     ReferenceDraft,
+    ResearchSynthesisV1,
+    SearchRequest,
     ShopperResponse,
     StateDeltaSummary,
     TerminalState,
+    ToolStatus,
     TraceEvent,
     TurnRequest,
     TurnResult,
     UpdateCartRequest,
     ValidatedResearch,
-    ToolStatus,
-    SearchRequest,
-    ResearchSynthesisV1,
-    SetComparativeOperation,
-    SetHardOperation,
-    SetSoftOperation,
-    RemoveHardOperation,
-    RemoveSoftOperation,
-    AddScopeOperation,
-    RemoveScopeOperation,
-    ClearSearchStateOperation,
-    ClearCartOperation,
-    ProductBinding,
-    Money,
-    PendingClarification,
-    SearchResult,
-    ProductDetails,
-    Comparison,
-    Availability,
-    RecentResultContext,
-    RecentTurnContext,
 )
 from .gateway import PromptRegistry, StructuredModelGateway
-from .capabilities import SHOPPER_CAPABILITIES
 from .ports import (
     CartPort,
     CatalogSearchPort,
@@ -75,21 +65,21 @@ from .ports import (
     SuggestionPort,
     TraceSinkPort,
 )
+from .query_lexicon import (
+    apply_explicit_cart_terms,
+    apply_explicit_catalog_terms,
+    deterministic_cart_intent,
+    deterministic_catalog_intent,
+    is_greeting_or_help_message,
+)
 from .validation import (
-    canonical_json,
     canonical_hash,
+    canonical_json,
     merge_query_state,
     normalize_action,
     parse_intent_payload,
     validate_clarifying_question,
     validate_intent_semantics,
-)
-from .query_lexicon import (
-    apply_explicit_cart_terms,
-    apply_explicit_catalog_terms,
-    deterministic_catalog_intent,
-    deterministic_cart_intent,
-    is_greeting_or_help_message,
 )
 
 
@@ -164,6 +154,20 @@ class TurnOrchestrator:
             )
             self._event(events, trace_id, request.client_turn_id, "RECEIVED", "reserve_idempotency", "OK")
             reservation = self.state.reserve(request, request_hash, trace_id)
+            self._event(
+                events,
+                trace_id,
+                request.client_turn_id,
+                "IDEMPOTENCY_RESERVED",
+                "reserve_idempotency",
+                reservation.status,
+                safe_metadata={
+                    "reservation_id": reservation.reservation_id,
+                    "reservation_status": reservation.status,
+                    "has_replay_response": reservation.stored_response is not None,
+                    "has_status_ref": reservation.status_ref is not None,
+                },
+            )
             if reservation.status == "REPLAY" and reservation.stored_response:
                 trace = self._trace(
                     trace_id,
@@ -200,7 +204,22 @@ class TurnOrchestrator:
 
             snapshot = self.state.load_snapshot(request.session_id, request.expected_state_version)
             compatibility = snapshot.compatibility_tuple
-            self._event(events, trace_id, request.client_turn_id, "SESSION_LOADED", "load_snapshot", "OK")
+            self._event(
+                events,
+                trace_id,
+                request.client_turn_id,
+                "SESSION_LOADED",
+                "load_snapshot",
+                "OK",
+                safe_metadata={
+                    "state_version": snapshot.state_version,
+                    "cart_version": snapshot.cart_version,
+                    "recent_turn_count": len(snapshot.recent_turns),
+                    "acknowledged_result_count": len(snapshot.acknowledged_entries),
+                    "cart_item_count": snapshot.cart.item_count,
+                    "pending_clarification": snapshot.pending_clarification is not None,
+                },
+            )
 
             projection = None
             fallback = FallbackState.NONE
@@ -216,15 +235,34 @@ class TurnOrchestrator:
                     "enhance_chat_query",
                     "OK",
                     latency_ms=enhanced.latency_ms,
+                    input_hash=canonical_hash(enhanced.envelope.current_message_verbatim),
+                    output_hash=enhanced.envelope.context_hash,
                     fallback=enhanced.fallback,
                     safe_metadata={
+                        "enhancement_id": enhanced.envelope.enhancement_id,
+                        "enhancement_policy_version": enhanced.envelope.enhancement_policy_version,
                         "token_count": enhanced.token_count,
+                        "token_count_approximate": enhanced.envelope.token_count_approximate,
+                        "context_truncated": enhanced.envelope.context_truncated,
                         "context_hash": enhanced.envelope.context_hash,
-                        "memory_used": bool(enhanced.envelope.persistent_memory_candidates),
+                        "memory_used": bool(
+                            enhanced.envelope.recent_turn_context
+                            or enhanced.envelope.persistent_memory_candidates
+                        ),
+                        "recent_memory_used": bool(enhanced.envelope.recent_turn_context),
+                        "persistent_memory_used": bool(
+                            enhanced.envelope.persistent_memory_candidates
+                        ),
                         "recent_turn_count": len(enhanced.envelope.recent_turn_context),
-                        "recent_turn_context": [
-                            turn.model_dump(mode="json")
-                            for turn in enhanced.envelope.recent_turn_context
+                        "recent_turn_ids": [
+                            turn.turn_id for turn in enhanced.envelope.recent_turn_context
+                        ],
+                        "persistent_memory_count": len(enhanced.envelope.persistent_memory_candidates),
+                        "verified_purchase_count": len(enhanced.envelope.verified_purchase_context),
+                        "conflict_count": len(enhanced.envelope.conflicts),
+                        "exclusions_summary": [
+                            item.model_dump(mode="json")
+                            for item in enhanced.envelope.exclusions_summary
                         ],
                         "active_result_count": len(enhanced.envelope.active_result_bindings),
                         "warnings": enhanced.warnings,
@@ -232,6 +270,16 @@ class TurnOrchestrator:
                 )
                 intent, intent_issues = self._resolve_intent(projection, compatibility, trace_id, events, request)
                 if intent is None:
+                    self._event(
+                        events,
+                        trace_id,
+                        request.client_turn_id,
+                        "INTENT_FAILED",
+                        "resolve_intent_and_delta",
+                        "INTERPRETATION_UNAVAILABLE",
+                        validation_codes=intent_issues,
+                        fallback=FallbackState.DETERMINISTIC_TEMPLATE,
+                    )
                     response = self._interpretation_unavailable(snapshot, compatibility, trace_id, intent_issues)
                     return self._commit_and_finish(
                         request,
@@ -245,7 +293,15 @@ class TurnOrchestrator:
                     )
             else:
                 intent = self._typed_action_to_intent(request.ui_action, snapshot)
-                self._event(events, trace_id, request.client_turn_id, "INTENT_RESOLVED", "typed_ui_action", "OK")
+                self._event(
+                    events,
+                    trace_id,
+                    request.client_turn_id,
+                    "INTENT_RESOLVED",
+                    "typed_ui_action",
+                    "OK",
+                    safe_metadata={"action": request.ui_action.action.value},
+                )
 
             assert intent is not None
             action = normalize_action(intent.primary_action)
@@ -329,6 +385,18 @@ class TurnOrchestrator:
                     events,
                 )
 
+            self._event(
+                events,
+                trace_id,
+                request.client_turn_id,
+                "ACTION_ROUTED",
+                "route_primary_action",
+                "OK",
+                safe_metadata={
+                    "action": action.value,
+                    "capabilities": sorted(SHOPPER_CAPABILITIES.get(action, frozenset())),
+                },
+            )
             response, cart_changed = self._route(
                 action,
                 intent,
@@ -438,7 +506,8 @@ class TurnOrchestrator:
                 model_response,
                 ModelCallType.RESOLVE_INTENT_AND_DELTA,
                 {
-                    "current_message": projection.current_message_verbatim,
+                    "current_message_hash": canonical_hash(projection.current_message_verbatim),
+                    "projection_hash": projection.projection_hash,
                     "recent_turn_count": len(projection.recent_turn_context),
                     "active_result_count": len(projection.active_result_bindings),
                     "cart_item_count": projection.cart_summary.item_count,
@@ -481,7 +550,8 @@ class TurnOrchestrator:
                     repair_response,
                     ModelCallType.RESOLVE_INTENT_AND_DELTA,
                     {
-                        "current_message": projection.current_message_verbatim,
+                        "current_message_hash": canonical_hash(projection.current_message_verbatim),
+                        "projection_hash": projection.projection_hash,
                         "recent_turn_count": len(projection.recent_turn_context),
                         "active_result_count": len(projection.active_result_bindings),
                         "cart_item_count": projection.cart_summary.item_count,
@@ -533,6 +603,7 @@ class TurnOrchestrator:
                 or projection.current_state.soft_preferences
                 or projection.current_state.query_terms
             ),
+            current_state=projection.current_state,
         )
         if fallback is not None:
             self._event(
@@ -556,7 +627,11 @@ class TurnOrchestrator:
         # Provider output is valid but may omit an obvious catalog term.  The
         # reviewed deterministic lexicon restores only explicit current-turn
         # category/color semantics before the normal semantic validator runs.
-        intent = apply_explicit_catalog_terms(intent, projection.current_message_verbatim)
+        intent = apply_explicit_catalog_terms(
+            intent,
+            projection.current_message_verbatim,
+            projection.current_state,
+        )
         intent = apply_explicit_cart_terms(
             intent,
             projection.current_message_verbatim,
@@ -658,6 +733,14 @@ class TurnOrchestrator:
                 "search_catalog",
                 result.status.value,
                 safe_metadata={
+                    "input_summary": {
+                        "action": action.value,
+                        "state_version": proposed_state.state_version,
+                        "hard_constraint_count": len(proposed_state.hard_constraints),
+                        "soft_preference_count": len(proposed_state.soft_preferences),
+                        "query_term_count": len(proposed_state.query_terms),
+                        "top_k": 5,
+                    },
                     "tool_output": result.model_dump(mode="json"),
                     "entries": len(result.entries),
                     "hard_filter_hash": result.hard_filter_hash,
@@ -685,6 +768,11 @@ class TurnOrchestrator:
                 "assess_retrieval_confidence",
                 confidence.decision,
                 safe_metadata={
+                    "input_summary": {
+                        "entry_count": len(result.entries),
+                        "eligible_count": result.eligible_count,
+                        "hard_filter_hash": result.hard_filter_hash,
+                    },
                     "tool_output": confidence.model_dump(mode="json"),
                     "reasons": confidence.reasons,
                 },
@@ -703,7 +791,13 @@ class TurnOrchestrator:
                     "RECOVERY_EXECUTED",
                     "bounded_recovery",
                     result.status.value,
-                    safe_metadata={"tool_output": result.model_dump(mode="json")},
+                    safe_metadata={
+                        "input_summary": {
+                            "baseline_entry_count": len(result.entries),
+                            "hard_filter_hash": result.hard_filter_hash,
+                        },
+                        "tool_output": result.model_dump(mode="json"),
+                    },
                 )
             terminal = TerminalState.ANSWERED_WITH_GROUNDED_RESULTS if result.entries else TerminalState.NO_ELIGIBLE_MATCH
             summary = (
@@ -742,6 +836,11 @@ class TurnOrchestrator:
                 "resolve_reference",
                 resolution.status,
                 safe_metadata={
+                    "input_summary": {
+                        "action": action.value,
+                        "reference_count": len(intent.references),
+                        "acknowledged_result_count": len(snapshot.acknowledged_entries),
+                    },
                     "tool_output": resolution.model_dump(mode="json"),
                     "resolved_count": len(resolution.references),
                 },
@@ -760,6 +859,21 @@ class TurnOrchestrator:
             bindings = [item.binding for item in resolution.references]
             if action is Action.PRODUCT_DETAILS:
                 eligibility = self.catalog.check_eligibility(bindings[0], "DETAILS", self.config.local_tool_budget_ms)
+                self._event(
+                    events,
+                    trace_id,
+                    request.client_turn_id,
+                    "TOOL_EXECUTED",
+                    "check_commerce_eligibility",
+                    eligibility.policy_status,
+                    safe_metadata={
+                        "input_summary": {
+                            "purpose": "DETAILS",
+                            "binding": bindings[0].model_dump(mode="json"),
+                        },
+                        "tool_output": eligibility.model_dump(mode="json"),
+                    },
+                )
                 if not eligibility.eligible:
                     return self._action_failed(action, compatibility, trace_id, delta_summary, "POLICY_BLOCKED"), False
                 details = self.catalog.get_details(bindings[0], compatibility, self.config.local_tool_budget_ms)
@@ -770,7 +884,10 @@ class TurnOrchestrator:
                     "TOOL_EXECUTED",
                     "get_product_details",
                     details.status.value,
-                    safe_metadata={"tool_output": details.model_dump(mode="json")},
+                    safe_metadata={
+                        "input_summary": {"binding": bindings[0].model_dump(mode="json")},
+                        "tool_output": details.model_dump(mode="json"),
+                    },
                 )
                 return self._details_response(action, details, compatibility, trace_id, delta_summary), False
             if action is Action.COMPARE:
@@ -782,7 +899,13 @@ class TurnOrchestrator:
                     "TOOL_EXECUTED",
                     "compare_products",
                     comparison.status.value,
-                    safe_metadata={"tool_output": comparison.model_dump(mode="json")},
+                    safe_metadata={
+                        "input_summary": {
+                            "binding_count": len(bindings),
+                            "bindings": [binding.model_dump(mode="json") for binding in bindings[:4]],
+                        },
+                        "tool_output": comparison.model_dump(mode="json"),
+                    },
                 )
                 return self._comparison_response(action, comparison, compatibility, trace_id, delta_summary), False
             availability = self.catalog.check_availability(bindings[0], compatibility, self.config.local_tool_budget_ms)
@@ -793,7 +916,10 @@ class TurnOrchestrator:
                 "TOOL_EXECUTED",
                 "check_availability",
                 availability.status.value,
-                safe_metadata={"tool_output": availability.model_dump(mode="json")},
+                safe_metadata={
+                    "input_summary": {"binding": bindings[0].model_dump(mode="json")},
+                    "tool_output": availability.model_dump(mode="json"),
+                },
             )
             return self._availability_response(action, availability, compatibility, trace_id, delta_summary), False
 
@@ -806,7 +932,13 @@ class TurnOrchestrator:
                 "TOOL_EXECUTED",
                 "show_cart",
                 "OK",
-                safe_metadata={"tool_output": cart.model_dump(mode="json")},
+                safe_metadata={
+                    "input_summary": {
+                        "cart_version": snapshot.cart_version,
+                        "state_version": snapshot.state_version,
+                    },
+                    "tool_output": cart.model_dump(mode="json"),
+                },
             )
             return (
                 ShopperResponse(
@@ -848,6 +980,10 @@ class TurnOrchestrator:
                         "check_cart_eligibility",
                         eligibility.policy_status,
                         safe_metadata={
+                            "input_summary": {
+                                "purpose": "CART_UPDATE",
+                                "binding": binding.model_dump(mode="json"),
+                            },
                             "tool_output": eligibility.model_dump(mode="json"),
                         },
                     )
@@ -868,6 +1004,14 @@ class TurnOrchestrator:
                 "update_cart",
                 update.status,
                 safe_metadata={
+                    "input_summary": {
+                        "operation_count": len(cart_request.operations),
+                        "operation_types": [
+                            operation.__class__.__name__ for operation in cart_request.operations
+                        ],
+                        "expected_state_version": cart_request.expected_state_version,
+                        "expected_cart_version": cart_request.expected_cart_version,
+                    },
                     "tool_output": update.model_dump(mode="json"),
                     "operations": update.applied_operation_ids,
                 },
@@ -913,7 +1057,13 @@ class TurnOrchestrator:
                 "RESEARCH_EXECUTED",
                 "detect_research_need",
                 decision.decision,
-                safe_metadata={"tool_output": decision.model_dump(mode="json")},
+                safe_metadata={
+                    "input_summary": {
+                        "selected_entity_count": len(selected_ids),
+                        "message_hash": canonical_hash(request.message or ""),
+                    },
+                    "tool_output": decision.model_dump(mode="json"),
+                },
             )
             if decision.decision != "REQUIRED":
                 return (
@@ -936,7 +1086,13 @@ class TurnOrchestrator:
                 "RESEARCH_EXECUTED",
                 "online_search",
                 search_result.status,
-                safe_metadata={"tool_output": search_result.model_dump(mode="json")},
+                safe_metadata={
+                    "input_summary": {
+                        "decision": decision.decision,
+                        "source_limit": 5,
+                    },
+                    "tool_output": search_result.model_dump(mode="json"),
+                },
             )
             if not search_result.sources:
                 research = ValidatedResearch(status="UNAVAILABLE", warnings=search_result.warnings + [search_result.status])
@@ -965,6 +1121,29 @@ class TurnOrchestrator:
                     except Exception:
                         synthesis = None
                 research = self.research.validate(decision, search_result, synthesis)
+                self._event(
+                    events,
+                    trace_id,
+                    request.client_turn_id,
+                    "RESEARCH_EXECUTED",
+                    "validate_research_claims",
+                    research.status,
+                    safe_metadata={
+                        "input_summary": {
+                            "source_count": len(search_result.sources),
+                            "synthesis_available": synthesis is not None,
+                        },
+                        "tool_output": {
+                            "status": research.status,
+                            "claim_count": len(research.claims),
+                            "warning_count": len(research.warnings),
+                            "citation_source_ids": [
+                                claim.support_source_ids
+                                for claim in research.claims
+                            ],
+                        },
+                    },
+                )
                 self._event(
                     events,
                     trace_id,
@@ -1199,6 +1378,12 @@ class TurnOrchestrator:
                 "STATE_COMMITTED",
                 "commit_turn",
                 "STATE_CONFLICT",
+                safe_metadata={
+                    "committed": False,
+                    "state_version": commit.state_version,
+                    "cart_version": commit.cart_version,
+                    "safe_reason": commit.safe_reason,
+                },
             )
             trace = self._trace(
                 trace_id,
@@ -1210,7 +1395,19 @@ class TurnOrchestrator:
             )
             return TurnResult(status="REJECTED", http_status=409, response=conflict_response, trace=trace)
         committed_response = commit.response or response
-        self._event(events, trace_id, request.client_turn_id, "STATE_COMMITTED", "commit_turn", "COMMITTED")
+        self._event(
+            events,
+            trace_id,
+            request.client_turn_id,
+            "STATE_COMMITTED",
+            "commit_turn",
+            "COMMITTED",
+            safe_metadata={
+                "committed": commit.committed,
+                "state_version": commit.state_version,
+                "cart_version": commit.cart_version,
+            },
+        )
         try:
             post_commit_snapshot = self.state.load_snapshot(request.session_id, commit.state_version)
         except Exception:
@@ -1230,7 +1427,25 @@ class TurnOrchestrator:
                 "FOLLOW_UPS_ATTACHED",
                 "build_follow_up_candidates",
                 "OK",
-                safe_metadata={"count": len(suggestion_set.suggestions)},
+                safe_metadata={
+                    "count": len(suggestion_set.suggestions),
+                    "tool_output": {
+                        "suggestion_set_id": suggestion_set.suggestion_set_id,
+                        "state_version": suggestion_set.state_version,
+                        "cart_version": suggestion_set.cart_version,
+                        "active_result_set_id": suggestion_set.active_result_set_id,
+                        "suggestions": [
+                            {
+                                "suggestion_id": suggestion.suggestion_id,
+                                "action_type": suggestion.candidate.action_type.value,
+                                "label": suggestion.label,
+                                "target_ids": suggestion.candidate.target_ids,
+                                "reason_code": suggestion.candidate.reason_code,
+                            }
+                            for suggestion in suggestion_set.suggestions
+                        ],
+                    },
+                },
             )
         else:
             self._event(
@@ -1497,6 +1712,7 @@ class TurnOrchestrator:
                 )
             elif call_type is ModelCallType.PLAN_CONSTRAINED_REPAIR:
                 from pydantic import TypeAdapter
+
                 from .contracts import RecoveryPlan
 
                 value = TypeAdapter(RecoveryPlan).validate_json(
@@ -1508,6 +1724,58 @@ class TurnOrchestrator:
             return None
         return value.model_dump(mode="json")
 
+    @staticmethod
+    def _safe_model_output_summary(model_response: Any) -> dict[str, Any]:
+        """Expose shape/fingerprint diagnostics without exposing invalid values."""
+
+        def shape(value: Any, depth: int = 0) -> dict[str, Any]:
+            if depth >= 3:
+                return {"type": type(value).__name__, "truncated": True}
+            if isinstance(value, dict):
+                fields = []
+                for key, child in list(value.items())[:40]:
+                    safe_key = (
+                        key
+                        if isinstance(key, str) and key.isidentifier() and len(key) <= 64
+                        else "<redacted>"
+                    )
+                    fields.append({"key": safe_key, "shape": shape(child, depth + 1)})
+                return {
+                    "type": "object",
+                    "field_count": len(value),
+                    "fields": fields,
+                    "truncated": len(value) > 40,
+                }
+            if isinstance(value, list):
+                return {
+                    "type": "array",
+                    "length": len(value),
+                    "items": [shape(item, depth + 1) for item in value[:5]],
+                    "truncated": len(value) > 5,
+                }
+            if isinstance(value, str):
+                return {"type": "string", "length": len(value)}
+            if value is None:
+                return {"type": "null"}
+            return {"type": type(value).__name__}
+
+        payload = model_response.output_payload
+        if not isinstance(payload, dict):
+            return {"present": False, "type": type(payload).__name__ if payload is not None else None}
+        safe_keys = [
+            key if isinstance(key, str) and key.isidentifier() and len(key) <= 64 else "<redacted>"
+            for key in payload
+        ]
+        return {
+            "present": True,
+            "type": "object",
+            "field_count": len(payload),
+            "keys": safe_keys[:40],
+            "truncated": len(payload) > 40,
+            "output_hash": model_response.output_hash,
+            "shape": shape(payload),
+        }
+
     @classmethod
     def _model_trace_metadata(
         cls,
@@ -1516,10 +1784,23 @@ class TurnOrchestrator:
         input_summary: dict[str, Any],
     ) -> dict[str, Any]:
         return {
+            "call_id": model_response.call_id,
+            "status": model_response.status.value,
             "model_alias": model_response.model_alias,
             "provider": model_response.provider_name,
             "prompt_id": model_response.prompt_id,
             "prompt_version": model_response.prompt_version,
+            "input_tokens": model_response.input_tokens,
+            "output_tokens": model_response.output_tokens,
+            "cost_minor_units": model_response.cost_minor_units,
+            "retryable": model_response.retryable,
+            "input_hash": model_response.input_hash,
+            "output_hash": model_response.output_hash,
+            "raw_output_hash": model_response.raw_output_hash,
+            "validation_issues": [
+                issue.model_dump(mode="json") for issue in model_response.validation_issues
+            ],
+            "output_summary": cls._safe_model_output_summary(model_response),
             "input_summary": input_summary,
             "structured_output": cls._safe_model_output(model_response, call_type),
         }
@@ -1540,6 +1821,10 @@ class TurnOrchestrator:
         fallback: FallbackState = FallbackState.NONE,
         safe_metadata: dict[str, Any] | None = None,
     ) -> None:
+        metadata = dict(safe_metadata or {})
+        metadata.setdefault("trace_span_id", self.ids.new_id("span"))
+        if stage in {"TOOL_EXECUTED", "RETRIEVAL_ASSESSED", "RECOVERY_EXECUTED", "RESEARCH_EXECUTED"}:
+            metadata.setdefault("tool_run_id", self.ids.new_id("tool"))
         event = TraceEvent(
             event_name="shopper_agentic_stage",
             trace_id=trace_id,
@@ -1552,7 +1837,7 @@ class TurnOrchestrator:
             output_hash=output_hash,
             validation_codes=list(validation_codes)[:20],
             fallback=fallback,
-            safe_metadata=safe_metadata or {},
+            safe_metadata=metadata,
         )
         events.append(event)
         if self.trace_sink:
