@@ -1,0 +1,13 @@
+{
+  "schema_version": "prompt-manifest-v1",
+  "prompts": {
+    "recovery-v2": {
+      "path": "recovery_v2.md",
+      "model_schema": "RecoveryPlannerOutputV1",
+      "sha256": "933d0e4d6ec2b45fb1739b6a56c191de43b75d01e3376047ceaed04699641535",
+      "provider": "deepinfra-openai-compatible",
+      "model_alias": "google/gemma-4-26B-A4B-it",
+      "structured_output": "json_object"
+    }
+  }
+}
