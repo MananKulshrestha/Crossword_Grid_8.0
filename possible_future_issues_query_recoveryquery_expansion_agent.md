@@ -140,6 +140,10 @@ query, validator, workflow budget, artifact format, or provider boundary.
 - A model can safely abstain, as `trainers` did during live verification. The UI must
   preserve that safe-stop state and must not turn a missing target into a guessed
   label, fallback synonym, or successful-looking activation.
+- The demo query list is a readable projection of normalized text plus opaque
+  canonical target IDs. It is useful for workflow testing, but production UI must
+  resolve approved human labels from the version-pinned vocabulary and must not
+  present target IDs as shopper-facing catalog copy.
 - Static UI assets are mounted from the source package path. A wheel/container build
   must verify that `demo.html`, `demo.css`, and `demo.js` are included; otherwise the
   API can remain healthy while `/demo` fails at runtime.

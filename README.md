@@ -121,15 +121,16 @@ For a cleaner presentation than Swagger, run the same FastAPI app on the demo
 port:
 
 ```text
-python -m uvicorn fkgrid.api.main:app --app-dir src --host 127.0.0.1 --port 8510
+python -m uvicorn fkgrid.api.main:app --app-dir src --host 127.0.0.1 --port 8520
 ```
 
-Then open [Query Expansion Lab](http://127.0.0.1:8510/demo). The page uses the
+Then open [Query Expansion Lab](http://127.0.0.1:8520/demo). The page uses the
 same live `POST /api/v1/catalog-language/tier2/guided-run` endpoint, so Gemma
 proposer and critic calls remain active. It adds a field-based input, starter
-queries, progress states, a readable expansion card, model/gate status, a
-decision timeline, recent runs, and a copyable one-line summary. It does not
-introduce a second workflow or replace the advanced JSON/API routes.
+queries, progress states, a readable expansion card, a complete query list
+(initial phrase, normalized form, and every returned expansion), model/gate
+status, a decision timeline, recent runs, and a copyable one-line summary. It
+does not introduce a second workflow or replace the advanced JSON/API routes.
 
 The useful routes are:
 

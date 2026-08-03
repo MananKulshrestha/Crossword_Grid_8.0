@@ -13,6 +13,8 @@ const runState = document.querySelector("#runState");
 const termError = document.querySelector("#termError");
 const recentBlock = document.querySelector("#recentBlock");
 const recentRuns = document.querySelector("#recentRuns");
+const querySet = document.querySelector("#querySet");
+const queryCount = document.querySelector("#queryCount");
 const liveRuns = [];
 let latestResponse = null;
 let loadingTimer = null;
@@ -88,6 +90,28 @@ function formatLabel(value) {
   return String(value ?? "").replaceAll("_", " ").toLowerCase().replace(/(^|\s)\S/g, (letter) => letter.toUpperCase());
 }
 
+function renderQuerySet(body) {
+  const input = body.input ?? {};
+  const output = body.output ?? {};
+  const expansions = Array.isArray(output.expanded_to) ? output.expanded_to : [];
+  const terms = [
+    { label: "INITIAL QUERY", value: input.term || "—", meta: "what you entered" },
+    { label: "NORMALIZED", value: output.normalized_query || "—", meta: "canonical text form" },
+    ...expansions.map((expansion) => ({
+      label: "EXPANDED TERM",
+      value: expansion.target_id,
+      meta: formatLabel(expansion.expansion_action),
+    })),
+  ];
+  queryCount.textContent = `${terms.length} ${terms.length === 1 ? "TERM" : "TERMS"}`;
+  querySet.innerHTML = terms.map((term, index) => `<div class="query-row">
+    <span class="query-index">${index + 1}</span>
+    <span class="query-row-label">${escapeHtml(term.label)}</span>
+    <strong class="query-row-value">${escapeHtml(term.value)}</strong>
+    <span class="query-row-meta">${escapeHtml(term.meta)}</span>
+  </div>`).join("");
+}
+
 function renderTimeline(body) {
   const gateLabels = [
     ["PROPOSER", body.model?.proposer_status],
@@ -125,6 +149,7 @@ function renderResult(body) {
   resultHeading.textContent = expansion ? "Here is the safe expansion" : "No safe expansion proposed";
   runState.textContent = body.gates?.activated ? "WORKFLOW COMPLETE" : "SAFE STOP";
   runState.dataset.state = body.gates?.activated ? "complete" : "error";
+  renderQuerySet(body);
   renderTimeline(body);
   setPanel("result");
   pushRecentRun(input.term, expansion?.target_id, body.gates?.activated);

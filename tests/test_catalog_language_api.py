@@ -57,6 +57,8 @@ def test_human_friendly_demo_ui_is_served_with_its_static_assets() -> None:
     assert "workspace-grid" in stylesheet.text
     assert script.status_code == 200
     assert "guided-run" in script.text
+    assert "renderQuerySet" in script.text
+    assert "querySet" in script.text
 
 
 def test_capabilities_identify_tier_two_and_forbidden_runtime_actions() -> None:

@@ -26,6 +26,7 @@
         </a>
         <div class="topbar-actions">
           <a class="quiet-link" href="/docs">API docs <span aria-hidden="true">↗</span></a>
+          <span class="demo-only-badge">TEST-ONLY</span>
           <div class="ready-badge" id="readyBadge" data-state="checking">
             <span class="status-dot" aria-hidden="true"></span>
             <span id="readyText">Checking Gemma</span>
@@ -142,6 +143,18 @@
                   <strong id="shownTarget">—</strong>
                   <span class="node-sub" id="shownAction">—</span>
                 </div>
+              </div>
+
+              <div class="query-set-card surface-inner">
+                <div class="query-set-heading">
+                  <div>
+                    <span class="card-label">QUERY LIST</span>
+                    <h3>What the initial query became</h3>
+                    <p>Every term returned by this run, in the order you can inspect.</p>
+                  </div>
+                  <span class="query-count" id="queryCount">0 TERMS</span>
+                </div>
+                <div class="query-set" id="querySet"></div>
               </div>
 
               <div class="insight-grid">
