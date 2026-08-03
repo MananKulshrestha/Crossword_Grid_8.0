@@ -145,3 +145,22 @@ python tests/manual_shopper_chat.py --model live --intent-budget-ms 5000
 Use `--intent-budget-ms 1800` to observe the production safety budget and its
 deterministic fallback behavior. The harness records the typed markdown
 handoff but intentionally does not render markdown.
+
+## Optional voice input
+
+The Swagger chat panel has an opt-in microphone button. Microphone permission
+is requested only after the button is pressed. Pressing it again stops the
+recording and sends one audio blob to the isolated
+`POST /v1/speech/transcriptions` route; the returned transcript is placed in
+the composer for review and is not submitted automatically. Ordinary text
+turns never call the speech adapter or add a speech wait to the existing
+orchestrator path.
+
+The adapter uses DeepInfra's native
+`openai/whisper-large-v3-turbo` endpoint and reads `DEEPINFRA_API_KEY` only
+from the process environment. Its fixed versioned prompt preserves shopping
+terms such as categories, brands, colors, sizes, quantities, rupees, prices,
+comparison, availability, and cart language while asking Whisper to return
+only the shopper's spoken words. Configure it with the `FKGRID_SPEECH_*`
+values in `.env.example`; set `FKGRID_SPEECH_MODE=disabled` to hide the
+provider path while keeping text chat available.

@@ -6,7 +6,8 @@ import unicodedata
 import uuid
 from typing import Literal
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.encoders import jsonable_encoder
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -25,6 +26,7 @@ from fkgrid.agentic.contracts import (
     TurnResult,
     UiAction,
 )
+from fkgrid.speech import SpeechStatus
 
 from .runtime import ApiRuntime
 
@@ -53,6 +55,16 @@ class ReadinessResponse(StrictModel):
     ready: bool
     service: str
     model: ModelRuntimeStatus
+
+
+class SpeechTranscriptionResponse(StrictModel):
+    text: str
+    language: str
+    model_alias: str
+    provider: str
+    latency_ms: int
+    prompt_id: str
+    prompt_version: str
 
 
 class SessionCreateRequest(StrictModel):
@@ -119,6 +131,11 @@ class ApiTurnRequest(StrictModel):
                 {
                     "message": "Find a black cotton t-shirt in size m under 1500 rupees"
                 },
+                {"message": "hey"},
+                {"message": "show me some red T-shirts in size L"},
+                {"message": "add 2 to the cart"},
+                {"message": "add 2 units of the first result to my cart"},
+                {"message": "research the latest cotton-care guidance"},
                 {"ui_action": {"action": "SHOW_CART", "payload": {}}},
                 {
                     "ui_action": {
@@ -156,9 +173,14 @@ class ApiTurnRequest(StrictModel):
         max_length=2000,
         description="Free-text shopper request. This uses the configured Gemma 4 26B model.",
         examples=[
+            "hey",
             "Find a black cotton t-shirt in size m under 1500 rupees",
+            "show me some red T-shirts in size L",
             "Compare the first and second result",
             "Check availability for the first one",
+            "add 2 to the cart",
+            "add 2 units of the first result to my cart",
+            "research the latest cotton-care guidance",
         ],
     )
     ui_action: ApiUiAction | None = Field(
@@ -299,7 +321,7 @@ def _swagger_chat_html(openapi_url: str) -> HTMLResponse:
     border-radius: 7px;
     font: inherit;
   }
-  #fkgrid-chat-send, #fkgrid-chat-new {
+  #fkgrid-chat-send, #fkgrid-chat-new, #fkgrid-chat-speech {
     border: 0;
     border-radius: 7px;
     cursor: pointer;
@@ -307,7 +329,10 @@ def _swagger_chat_html(openapi_url: str) -> HTMLResponse:
   }
   #fkgrid-chat-send { min-height: 44px; padding: 0 18px; color: #fff; background: #2563eb; }
   #fkgrid-chat-new { padding: 7px 11px; color: #344054; background: #eef2f6; font-size: 12px; }
-  #fkgrid-chat-send:disabled, #fkgrid-chat-new:disabled { cursor: wait; opacity: .65; }
+  #fkgrid-chat-speech { min-height: 44px; padding: 0 14px; color: #344054; background: #eef2f6; }
+  #fkgrid-chat-speech[data-recording="true"] { color: #fff; background: #b42318; }
+  #fkgrid-chat-send:disabled, #fkgrid-chat-new:disabled,
+  #fkgrid-chat-speech:disabled { cursor: wait; opacity: .65; }
   #fkgrid-chat-hint { margin: 7px 0 0; color: #667085; font-size: 11px; }
   #fkgrid-chat-json { margin-top: 7px; }
   #fkgrid-chat-json summary { color: #475467; cursor: pointer; font-size: 11px; }
@@ -340,9 +365,12 @@ def _swagger_chat_html(openapi_url: str) -> HTMLResponse:
   <form id="fkgrid-chat-form">
     <textarea id="fkgrid-chat-input" maxlength="2000"
       placeholder="Ask about products, comparisons, availability, or your cart..."></textarea>
+    <button id="fkgrid-chat-speech" type="button" aria-pressed="false">🎙 Start voice</button>
     <button id="fkgrid-chat-send" type="submit">Send</button>
   </form>
-  <div id="fkgrid-chat-hint">Enter sends a message. Use Shift+Enter for a new line.</div>
+  <div id="fkgrid-chat-hint">Enter sends a message. Use Shift+Enter for a new line.
+    Voice recording starts only when you press the microphone button; the
+    transcript is inserted for review before sending.</div>
 </section>
 """
     chat_script = """
@@ -352,10 +380,14 @@ def _swagger_chat_html(openapi_url: str) -> HTMLResponse:
   const input = document.getElementById('fkgrid-chat-input');
   const form = document.getElementById('fkgrid-chat-form');
   const send = document.getElementById('fkgrid-chat-send');
+  const speechButton = document.getElementById('fkgrid-chat-speech');
   const newChat = document.getElementById('fkgrid-chat-new');
   const status = document.getElementById('fkgrid-chat-status');
   let sessionId = null;
   let turnNumber = 0;
+  let mediaRecorder = null;
+  let mediaStream = null;
+  let speechChunks = [];
 
   const requestId = (prefix) => `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const setStatus = (text, state) => {
@@ -417,7 +449,97 @@ def _swagger_chat_html(openapi_url: str) -> HTMLResponse:
     turnNumber = 0;
     setStatus(`Ready · ${body.model?.model_alias || 'configured model'}`, 'ready');
   };
+  const clearMedia = () => {
+    if (mediaStream) mediaStream.getTracks().forEach((track) => track.stop());
+    mediaStream = null;
+    mediaRecorder = null;
+    speechChunks = [];
+    speechButton.disabled = false;
+    speechButton.dataset.recording = 'false';
+    speechButton.setAttribute('aria-pressed', 'false');
+    speechButton.textContent = '🎙 Start voice';
+  };
+  const transcribeRecordedAudio = async (mimeType) => {
+    const blob = new Blob(speechChunks, {type: mimeType || 'audio/webm'});
+    clearMedia();
+    if (!blob.size) {
+      setStatus('No audio was captured', 'error');
+      return;
+    }
+    speechButton.disabled = true;
+    send.disabled = true;
+    setStatus('Transcribing voice…', 'starting');
+    try {
+      const response = await fetch('/v1/speech/transcriptions', {
+        method: 'POST',
+        headers: {'Content-Type': mimeType || 'audio/webm'},
+        body: blob
+      });
+      const body = await response.json();
+      if (!response.ok) {
+        throw new Error(body.detail || `Speech request failed (${response.status})`);
+      }
+      const transcript = (body.text || '').trim();
+      if (!transcript) throw new Error('No speech was recognized');
+      input.value = input.value.trim() ? `${input.value.trim()} ${transcript}` : transcript;
+      setStatus('Voice transcript ready · review and press Send', 'ready');
+      input.focus();
+    } catch (error) {
+      setStatus(error.message || 'Speech transcription failed', 'error');
+      addBubble('error', error.message || 'Speech transcription failed');
+    } finally {
+      speechButton.disabled = false;
+      send.disabled = false;
+    }
+  };
+  const stopVoice = () => {
+    if (!mediaRecorder || mediaRecorder.state === 'inactive') return;
+    speechButton.disabled = true;
+    speechButton.textContent = 'Transcribing…';
+    mediaRecorder.stop();
+  };
+  const startVoice = async () => {
+    if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+      setStatus('This browser does not support microphone recording', 'error');
+      return;
+    }
+    try {
+      mediaStream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: 1, echoCancellation: true, noiseSuppression: true,
+          autoGainControl: true
+        }
+      });
+      const preferredTypes = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus'];
+      const mimeType = preferredTypes.find((type) => MediaRecorder.isTypeSupported(type)) || '';
+      mediaRecorder = mimeType
+        ? new MediaRecorder(mediaStream, {mimeType})
+        : new MediaRecorder(mediaStream);
+      speechChunks = [];
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size) speechChunks.push(event.data);
+      };
+      mediaRecorder.onstop = () => transcribeRecordedAudio(
+        mediaRecorder.mimeType || mimeType || 'audio/webm'
+      );
+      mediaRecorder.start(250);
+      speechButton.dataset.recording = 'true';
+      speechButton.setAttribute('aria-pressed', 'true');
+      speechButton.textContent = '■ Stop & transcribe';
+      send.disabled = true;
+      newChat.disabled = true;
+      setStatus('Listening… press the microphone button to stop', 'starting');
+    } catch (error) {
+      clearMedia();
+      setStatus(error.message || 'Microphone permission was not granted', 'error');
+    }
+  };
   const resetChat = async () => {
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+      mediaRecorder.onstop = null;
+      mediaRecorder.stop();
+    }
+    clearMedia();
     newChat.disabled = true;
     send.disabled = true;
     log.replaceChildren();
@@ -483,6 +605,10 @@ def _swagger_chat_html(openapi_url: str) -> HTMLResponse:
     }
   });
   newChat.addEventListener('click', resetChat);
+  speechButton.addEventListener('click', () => {
+    if (mediaRecorder && mediaRecorder.state === 'recording') stopVoice();
+    else startVoice();
+  });
   resetChat();
 })();
 </script>
@@ -533,6 +659,63 @@ def create_app(runtime: ApiRuntime | None = None) -> FastAPI:
         """Show safe model configuration metadata; never returns the API key."""
 
         return _model_status(api_runtime)
+
+    @application.post(
+        "/v1/speech/transcriptions",
+        response_model=SpeechTranscriptionResponse,
+        tags=["speech"],
+        summary="Transcribe one explicitly recorded shopper voice clip",
+        description=(
+            "This opt-in endpoint accepts one raw browser audio blob and sends it "
+            "to the configured DeepInfra Whisper large-v3-turbo adapter. It is "
+            "not called by normal text turns. The returned text is inserted into "
+            "the chat composer for review; it is not automatically submitted."
+        ),
+    )
+    async def transcribe_speech(request: Request) -> SpeechTranscriptionResponse:
+        content_type = request.headers.get("content-type", "").split(";", 1)[0].strip()
+        if not content_type:
+            raise HTTPException(status_code=415, detail="AUDIO_CONTENT_TYPE_REQUIRED")
+        content_length = request.headers.get("content-length")
+        if content_length:
+            try:
+                if int(content_length) > 20 * 1024 * 1024:
+                    raise HTTPException(status_code=413, detail="AUDIO_TOO_LARGE")
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail="AUDIO_CONTENT_LENGTH_INVALID") from exc
+        audio = await request.body()
+        if not audio:
+            raise HTTPException(status_code=422, detail="AUDIO_EMPTY")
+        if len(audio) > 20 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="AUDIO_TOO_LARGE")
+        result = await run_in_threadpool(
+            api_runtime.speech_to_text.transcribe,
+            audio,
+            content_type,
+            language=api_runtime.speech_language,
+            deadline_ms=api_runtime.speech_deadline_ms,
+        )
+        if result.status is not SpeechStatus.OK:
+            status_codes = {
+                SpeechStatus.INVALID_AUDIO: 422,
+                SpeechStatus.EMPTY_TRANSCRIPTION: 422,
+                SpeechStatus.TIMEOUT: 504,
+                SpeechStatus.UNAVAILABLE: 503,
+                SpeechStatus.ERROR: 502,
+            }
+            raise HTTPException(
+                status_code=status_codes.get(result.status, 502),
+                detail=result.error_code or result.status.value,
+            )
+        return SpeechTranscriptionResponse(
+            text=result.text,
+            language=result.language,
+            model_alias=result.model_alias,
+            provider=result.provider_name,
+            latency_ms=result.latency_ms,
+            prompt_id=result.prompt_id,
+            prompt_version=result.prompt_version,
+        )
 
     @application.get(
         "/v1/catalog/facets",

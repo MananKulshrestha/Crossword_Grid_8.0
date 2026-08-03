@@ -56,11 +56,19 @@ from fkgrid.api.catalog import (
     build_catalog_entries,
     fixture_facets,
 )
+from fkgrid.speech import (
+    DEFAULT_SPEECH_MODEL_ALIAS,
+    DeepInfraWhisperAdapter,
+    SpeechToTextPort,
+    UnavailableSpeechToText,
+)
 
 DEFAULT_GEMINI_ENDPOINT = (
     "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 )
 DEFAULT_DEEPINFRA_MODEL_ALIAS = "google/gemma-4-26b-a4b-it"
+DEFAULT_SPEECH_DEADLINE_MS = 8_000
+DEFAULT_SPEECH_LANGUAGE = "en"
 
 
 def demo_compatibility(model_alias: str) -> CompatibilityTuple:
@@ -75,7 +83,7 @@ def demo_compatibility(model_alias: str) -> CompatibilityTuple:
         lexicon_version="lexicon-fixture-v1",
         rank_policy_version="rank-fixture-v1",
         gate_policy_version="gate-fixture-v1",
-        intent_prompt_version="1",
+        intent_prompt_version="3",
         intent_model_alias=model_alias,
         response_template_version="response-fixture-v1",
         commerce_policy_version="commerce-fixture-v1",
@@ -83,8 +91,11 @@ def demo_compatibility(model_alias: str) -> CompatibilityTuple:
         suggestion_policy_version="suggestions-fixture-v1",
         memory_schema_version="memory-fixture-v1",
         query_enhancement_policy_version="enhancement-fixture-v1",
-        research_prompt_version="1",
+        clarification_prompt_version="2",
+        recovery_prompt_version="2",
+        research_prompt_version="2",
         research_model_alias=model_alias,
+        suggestion_prompt_version="2",
     )
 
 
@@ -153,6 +164,10 @@ class ApiRuntime:
         catalog_size: int = DEFAULT_CATALOG_SIZE,
         model_error: str | None = None,
         catalog_entries: Sequence[SearchEntry] | None = None,
+        speech_to_text: SpeechToTextPort | None = None,
+        speech_deadline_ms: int = DEFAULT_SPEECH_DEADLINE_MS,
+        speech_language: str = DEFAULT_SPEECH_LANGUAGE,
+        speech_error: str | None = None,
     ) -> None:
         self.gateway = gateway
         self.model_mode = model_mode
@@ -163,6 +178,12 @@ class ApiRuntime:
         self.catalog_size = len(catalog_entries) if catalog_entries is not None else catalog_size
         self.catalog_profile = FIXTURE_PROFILE
         self.model_error = model_error
+        self.speech_to_text = speech_to_text or UnavailableSpeechToText(
+            speech_error or "FKGRID_SPEECH_API_KEY_REQUIRED"
+        )
+        self.speech_deadline_ms = speech_deadline_ms
+        self.speech_language = speech_language
+        self.speech_error = speech_error
         self.catalog_entries = list(
             catalog_entries
             if catalog_entries is not None
@@ -204,6 +225,33 @@ class ApiRuntime:
             raise ValueError("FKGRID_TEST_CATALOG_CONFIG_INVALID") from exc
         if not MIN_CATALOG_SIZE <= catalog_size <= MAX_CATALOG_SIZE:
             raise ValueError("FKGRID_TEST_CATALOG_SIZE_OUT_OF_RANGE")
+        speech_mode = values.get("FKGRID_SPEECH_MODE", "live").casefold()
+        if speech_mode not in {"live", "disabled"}:
+            raise ValueError("FKGRID_SPEECH_MODE_INVALID")
+        try:
+            speech_deadline_ms = int(
+                values.get("FKGRID_SPEECH_DEADLINE_MS", str(DEFAULT_SPEECH_DEADLINE_MS))
+            )
+        except ValueError as exc:
+            raise ValueError("FKGRID_SPEECH_DEADLINE_MS_INVALID") from exc
+        if speech_deadline_ms <= 0:
+            raise ValueError("FKGRID_SPEECH_DEADLINE_MS_INVALID")
+        speech_language = values.get("FKGRID_SPEECH_LANGUAGE", DEFAULT_SPEECH_LANGUAGE)
+        speech_model_alias = values.get("FKGRID_SPEECH_MODEL_ALIAS", DEFAULT_SPEECH_MODEL_ALIAS)
+        if speech_mode == "disabled":
+            speech_to_text: SpeechToTextPort = UnavailableSpeechToText(
+                "SPEECH_DISABLED", speech_model_alias
+            )
+            speech_error = "SPEECH_DISABLED"
+        else:
+            try:
+                speech_to_text = DeepInfraWhisperAdapter.from_environment(environment=values)
+                speech_error = None
+            except ValueError as exc:
+                # Keep application startup and the text-chat path available when
+                # optional speech credentials are absent or malformed.
+                speech_to_text = UnavailableSpeechToText(str(exc), speech_model_alias)
+                speech_error = str(exc)
         protocol = values.get("FKGRID_MODEL_PROTOCOL")
         if not protocol:
             if values.get("DEEPINFRA_API_KEY") or values.get("FKGRID_MODEL_API_KEY"):
@@ -229,6 +277,10 @@ class ApiRuntime:
                 intent_budget_ms=intent_budget_ms,
                 catalog_seed=catalog_seed,
                 catalog_size=catalog_size,
+                speech_to_text=speech_to_text,
+                speech_deadline_ms=speech_deadline_ms,
+                speech_language=speech_language,
+                speech_error=speech_error,
             )
 
         provider_values = dict(values)
@@ -252,6 +304,10 @@ class ApiRuntime:
                 catalog_seed=catalog_seed,
                 catalog_size=catalog_size,
                 model_error=reason_code,
+                speech_to_text=speech_to_text,
+                speech_deadline_ms=speech_deadline_ms,
+                speech_language=speech_language,
+                speech_error=speech_error,
             )
         return cls(
             gateway=gateway,
@@ -261,6 +317,10 @@ class ApiRuntime:
             intent_budget_ms=intent_budget_ms,
             catalog_seed=catalog_seed,
             catalog_size=catalog_size,
+            speech_to_text=speech_to_text,
+            speech_deadline_ms=speech_deadline_ms,
+            speech_language=speech_language,
+            speech_error=speech_error,
         )
 
     @property

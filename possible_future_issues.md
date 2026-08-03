@@ -44,3 +44,22 @@ This implementation intentionally stops at the shopper-facing orchestration boun
 ## Integration gates
 
 Before enabling real adapters, add contract tests for timeout, malformed output, arbitrary IDs, prompt injection, version mismatch, cancellation, stale references, cross-session ownership, mixed evidence, research-source conflict, cart revalidation, and stale suggestions. Keep the fake-provider path green with all optional features disabled.
+
+## Optional speech input
+
+- Voice input is an additive, opt-in route behind `FKGRID_SPEECH_MODE`; the
+  normal text-turn path does not call or wait on the speech adapter.
+- The browser requests microphone permission only after the voice button is
+  pressed, sends one recorded blob after stop, and inserts the returned text
+  for shopper review before the existing turn endpoint is called.
+- The adapter is a separate DeepInfra native multipart call with a bounded
+  upload size and deadline. Provider failures return a safe error and never
+  fall back to a fake transcript or mutate shopper state.
+- Audio is transient request data: it is not persisted, included in traces, or
+  echoed in API responses. The DeepInfra credential remains process-secret
+  only. Rollback is disabling `FKGRID_SPEECH_MODE` or removing the route; no
+  database or compatibility-tuple migration is required.
+- Before production enablement, verify the browser's recorded MIME types
+  against the provider's accepted audio formats, measure provider P95 on
+  representative English/Hinglish shopping clips, and add cancellation,
+  provider-auth, rate-limit, and microphone-permission UI tests.

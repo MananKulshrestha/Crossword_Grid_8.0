@@ -15,7 +15,7 @@ from fkgrid.agentic.gateway import (
 )
 from fkgrid.api.catalog import FixtureCatalogPort
 from fkgrid.api.main import create_app
-from fkgrid.api.runtime import ApiRuntime, demo_compatibility
+from fkgrid.api.runtime import ApiRuntime, UnavailableModelGateway, demo_compatibility
 
 
 class FastApiWorkflowTests(unittest.TestCase):
@@ -227,6 +227,197 @@ class FastApiWorkflowTests(unittest.TestCase):
         ]
         self.assertEqual(set(second_categories), {"sneakers"})
         self.assertTrue(all("T-Shirt" not in entry["title"] for entry in second_entries))
+
+    def test_remembered_size_does_not_create_reference_clarification(self) -> None:
+        runtime = ApiRuntime(
+            gateway=FakeModelGateway(),
+            model_mode="fake",
+            model_alias=Gemma4ModelAdapter.default_model_alias,
+            protocol="test",
+        )
+        client = TestClient(create_app(runtime))
+        created = client.post("/v1/sessions", json={"session_id": "remember-size-session"})
+        self.assertEqual(created.status_code, 201)
+
+        messages = (
+            "my tshirt size is L remember that",
+            "green tshirt",
+            "show me some green tshirts",
+        )
+        state_version = 0
+        cart_version = 0
+        responses = []
+        for index, message in enumerate(messages, start=1):
+            turn = client.post(
+                "/v1/sessions/remember-size-session/turns",
+                json={
+                    "client_turn_id": f"remember-size-turn-{index}",
+                    "idempotency_key": f"remember-size-key-{index}",
+                    "expected_state_version": state_version,
+                    "expected_cart_version": cart_version,
+                    "message": message,
+                },
+            )
+            self.assertEqual(turn.status_code, 200)
+            body = turn.json()["response"]
+            responses.append(body)
+            session = client.get("/v1/sessions/remember-size-session").json()
+            state_version = session["state_version"]
+            cart_version = session["cart_version"]
+
+        for response in responses:
+            self.assertEqual(response["terminal_state"], "ANSWERED_WITH_GROUNDED_RESULTS")
+            self.assertNotEqual(response["clarification_reason_code"], "REFERENCE_REQUIRED")
+            self.assertEqual(len(response["search_entries"]), 5)
+        for response in responses[1:]:
+            for entry in response["search_entries"]:
+                category = next(
+                    fact["typed_value"]
+                    for fact in entry["facts"]
+                    if fact["label"] == "category"
+                )
+                size = next(
+                    fact["typed_value"]
+                    for fact in entry["facts"]
+                    if fact["label"] == "size"
+                )
+                self.assertEqual(category, "tshirts")
+                self.assertEqual(size, "size_l")
+
+    def test_natural_language_add_first_result_to_cart(self) -> None:
+        runtime = ApiRuntime(
+            gateway=FakeModelGateway(),
+            model_mode="fake",
+            model_alias=Gemma4ModelAdapter.default_model_alias,
+            protocol="test",
+        )
+        client = TestClient(create_app(runtime))
+        created = client.post("/v1/sessions", json={"session_id": "cart-language-session"})
+        self.assertEqual(created.status_code, 201)
+        search = client.post(
+            "/v1/sessions/cart-language-session/turns",
+            json={
+                "client_turn_id": "cart-language-search",
+                "idempotency_key": "cart-language-search-key",
+                "message": "Find a shirt size m",
+            },
+        )
+        self.assertEqual(search.status_code, 200)
+        search_response = search.json()["response"]
+        first_binding = search_response["search_entries"][0]["binding"]
+        state = client.get("/v1/sessions/cart-language-session").json()
+
+        cart_turn = client.post(
+            "/v1/sessions/cart-language-session/turns",
+            json={
+                "client_turn_id": "cart-language-add",
+                "idempotency_key": "cart-language-add-key",
+                "expected_state_version": state["state_version"],
+                "expected_cart_version": state["cart_version"],
+                "message": "put the first option in my cart",
+            },
+        )
+        self.assertEqual(cart_turn.status_code, 200)
+        response = cart_turn.json()["response"]
+        self.assertEqual(response["terminal_state"], "CART_UPDATED")
+        self.assertIsNotNone(response["cart"])
+        self.assertEqual(response["cart"]["item_count"], 1)
+        self.assertEqual(response["cart"]["items"][0]["binding"], first_binding)
+
+    def test_numeric_result_shorthand_adds_the_third_acknowledged_result(self) -> None:
+        runtime = ApiRuntime(
+            gateway=FakeModelGateway(),
+            model_mode="fake",
+            model_alias=Gemma4ModelAdapter.default_model_alias,
+            protocol="test",
+        )
+        client = TestClient(create_app(runtime))
+        created = client.post("/v1/sessions", json={"session_id": "cart-numeric-session"})
+        self.assertEqual(created.status_code, 201)
+        search = client.post(
+            "/v1/sessions/cart-numeric-session/turns",
+            json={
+                "client_turn_id": "cart-numeric-search",
+                "idempotency_key": "cart-numeric-search-key",
+                "message": "Find a shirt size m",
+            },
+        )
+        self.assertEqual(search.status_code, 200)
+        entries = search.json()["response"]["search_entries"]
+        third_binding = entries[2]["binding"]
+        state = client.get("/v1/sessions/cart-numeric-session").json()
+
+        cart_turn = client.post(
+            "/v1/sessions/cart-numeric-session/turns",
+            json={
+                "client_turn_id": "cart-numeric-add",
+                "idempotency_key": "cart-numeric-add-key",
+                "expected_state_version": state["state_version"],
+                "expected_cart_version": state["cart_version"],
+                "message": "add 3 to the cart",
+            },
+        )
+        self.assertEqual(cart_turn.status_code, 200)
+        response = cart_turn.json()["response"]
+        self.assertEqual(response["terminal_state"], "CART_UPDATED")
+        self.assertEqual(response["cart"]["item_count"], 1)
+        self.assertEqual(response["cart"]["items"][0]["binding"], third_binding)
+
+    def test_catalog_fallback_answers_recognized_query_when_live_model_is_unavailable(self) -> None:
+        runtime = ApiRuntime(
+            gateway=UnavailableModelGateway(
+                Gemma4ModelAdapter.default_model_alias,
+                "MODEL_TIMEOUT",
+            ),
+            model_mode="live",
+            model_alias=Gemma4ModelAdapter.default_model_alias,
+            protocol="test",
+        )
+        client = TestClient(create_app(runtime))
+        created = client.post("/v1/sessions", json={"session_id": "catalog-fallback-session"})
+        self.assertEqual(created.status_code, 201)
+
+        turn = client.post(
+            "/v1/sessions/catalog-fallback-session/turns",
+            json={
+                "client_turn_id": "catalog-fallback-turn",
+                "idempotency_key": "catalog-fallback-key",
+                "message": "red tshirt size L",
+            },
+        )
+        self.assertEqual(turn.status_code, 200)
+        response = turn.json()["response"]
+        self.assertEqual(response["action"], "SEARCH")
+        self.assertEqual(response["terminal_state"], "ANSWERED_WITH_GROUNDED_RESULTS")
+        self.assertEqual(len(response["search_entries"]), 5)
+        self.assertIn("REQUESTED_COLOR_NOT_IN_DATASET", response["warnings"])
+
+    def test_catalog_fallback_does_not_drop_unsupported_constraints(self) -> None:
+        runtime = ApiRuntime(
+            gateway=UnavailableModelGateway(
+                Gemma4ModelAdapter.default_model_alias,
+                "MODEL_TIMEOUT",
+            ),
+            model_mode="live",
+            model_alias=Gemma4ModelAdapter.default_model_alias,
+            protocol="test",
+        )
+        client = TestClient(create_app(runtime))
+        client.post("/v1/sessions", json={"session_id": "catalog-fallback-unsafe-session"})
+
+        turn = client.post(
+            "/v1/sessions/catalog-fallback-unsafe-session/turns",
+            json={
+                "client_turn_id": "catalog-fallback-unsafe-turn",
+                "idempotency_key": "catalog-fallback-unsafe-key",
+                "message": "red cotton tshirt under 1500",
+            },
+        )
+        self.assertEqual(turn.status_code, 200)
+        self.assertEqual(
+            turn.json()["response"]["terminal_state"],
+            "INTERPRETATION_UNAVAILABLE",
+        )
 
     def test_sessions_are_isolated(self) -> None:
         first = self.client.post("/v1/sessions", json={"session_id": "session-one"})
