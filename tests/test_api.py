@@ -38,6 +38,7 @@ class FastApiWorkflowTests(unittest.TestCase):
         self.assertIn("/v1/sessions/", docs.text)
         self.assertIn("fkgrid-chat-input", docs.text)
         self.assertIn("/v1/sessions/{session_id}/turns", schema["paths"])
+        self.assertIn("/v1/sessions/{session_id}/trace", schema["paths"])
         self.assertIn("/v1/catalog/facets", schema["paths"])
         self.assertIn("examples", schema["components"]["schemas"]["ApiTurnRequest"])
         self.assertEqual(schema["info"]["title"], "FK GRiD Shopper Agentic API")
@@ -78,6 +79,55 @@ class FastApiWorkflowTests(unittest.TestCase):
             details.json()["response"]["terminal_state"],
             "ANSWERED_WITH_PRODUCT_DETAILS",
         )
+
+    def test_trace_exposes_structured_model_tool_output_and_recent_memory(self) -> None:
+        created = self.client.post("/v1/sessions", json={"session_id": "trace-session"})
+        self.assertEqual(created.status_code, 201)
+
+        first = self.client.post(
+            "/v1/sessions/trace-session/turns",
+            json={"message": "Find a shirt size m", "idempotency_key": "trace-key-1"},
+        )
+        self.assertEqual(first.status_code, 200)
+        first_trace = first.json()["trace"]
+        intent_event = next(
+            event
+            for event in first_trace["events"]
+            if event["logical_name"] == "resolve_intent_and_delta"
+        )
+        self.assertEqual(
+            intent_event["safe_metadata"]["structured_output"]["primary_action"],
+            "SEARCH",
+        )
+        search_event = next(
+            event
+            for event in first_trace["events"]
+            if event["logical_name"] == "search_catalog"
+        )
+        self.assertEqual(search_event["safe_metadata"]["tool_output"]["status"], "OK")
+
+        second = self.client.post(
+            "/v1/sessions/trace-session/turns",
+            json={"message": "Find another shirt", "idempotency_key": "trace-key-2"},
+        )
+        self.assertEqual(second.status_code, 200)
+        enhancement_event = next(
+            event
+            for event in second.json()["trace"]["events"]
+            if event["logical_name"] == "enhance_chat_query"
+        )
+        self.assertEqual(enhancement_event["safe_metadata"]["recent_turn_count"], 1)
+        self.assertEqual(
+            enhancement_event["safe_metadata"]["recent_turn_context"][0]["user_query"],
+            "Find a shirt size m",
+        )
+
+        session = self.client.get("/v1/sessions/trace-session")
+        self.assertEqual(len(session.json()["recent_turns"]), 2)
+        history = self.client.get("/v1/sessions/trace-session/trace")
+        self.assertEqual(history.status_code, 200)
+        self.assertEqual(history.json()["trace_count"], 2)
+        self.assertEqual(len(history.json()["traces"]), 2)
 
     def test_swagger_exposes_rich_fixture_catalog_and_facets(self) -> None:
         page = self.client.get("/v1/catalog", params={"limit": 20})
@@ -417,6 +467,67 @@ class FastApiWorkflowTests(unittest.TestCase):
         self.assertEqual(
             turn.json()["response"]["terminal_state"],
             "INTERPRETATION_UNAVAILABLE",
+        )
+
+    def test_cart_fallback_adds_numeric_acknowledged_result_when_model_unavailable(self) -> None:
+        runtime = ApiRuntime(
+            gateway=UnavailableModelGateway(
+                Gemma4ModelAdapter.default_model_alias,
+                "MODEL_TIMEOUT",
+            ),
+            model_mode="live",
+            model_alias=Gemma4ModelAdapter.default_model_alias,
+            protocol="test",
+        )
+        client = TestClient(create_app(runtime))
+        client.post("/v1/sessions", json={"session_id": "cart-fallback-session"})
+
+        search = client.post(
+            "/v1/sessions/cart-fallback-session/turns",
+            json={
+                "message": "red tshirt size L",
+                "idempotency_key": "cart-fallback-search-key",
+            },
+        )
+        self.assertEqual(search.json()["response"]["terminal_state"], "ANSWERED_WITH_GROUNDED_RESULTS")
+        expected_binding = search.json()["response"]["search_entries"][2]["binding"]
+        available_binding = search.json()["response"]["search_entries"][0]["binding"]
+
+        cart = client.post(
+            "/v1/sessions/cart-fallback-session/turns",
+            json={
+                "message": "add 3 to the cart",
+                "idempotency_key": "cart-fallback-add-key",
+            },
+        )
+        self.assertEqual(cart.status_code, 200)
+        body = cart.json()
+        self.assertEqual(body["response"]["terminal_state"], "ACTION_FAILED_WITH_REASON")
+        self.assertIn("COMMERCE_POLICY_BLOCKED", body["response"]["warnings"])
+        self.assertIn("unavailable", body["response"]["summary"])
+        self.assertNotIn("INTERPRETATION_UNAVAILABLE", body["response"]["terminal_state"])
+        self.assertIn(
+            "deterministic_cart_grammar",
+            [event["logical_name"] for event in body["trace"]["events"]],
+        )
+        eligibility_event = next(
+            event
+            for event in body["trace"]["events"]
+            if event["logical_name"] == "check_cart_eligibility"
+        )
+        self.assertEqual(eligibility_event["status"], "UNAVAILABLE")
+
+        available_cart = client.post(
+            "/v1/sessions/cart-fallback-session/turns",
+            json={
+                "message": "add 1 to the cart",
+                "idempotency_key": "cart-fallback-add-available-key",
+            },
+        )
+        self.assertEqual(available_cart.json()["response"]["terminal_state"], "CART_UPDATED")
+        self.assertEqual(
+            available_cart.json()["response"]["cart"]["items"][0]["binding"],
+            available_binding,
         )
 
     def test_catalog_fallback_covers_reviewed_fixture_colors_and_categories(self) -> None:

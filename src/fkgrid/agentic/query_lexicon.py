@@ -484,6 +484,23 @@ def deterministic_catalog_intent(
     return resolved if resolved.delta_operations else None
 
 
+def deterministic_cart_intent(
+    message: str, active_result_bindings: list[ActiveResultBinding]
+) -> IntentDeltaV1 | None:
+    """Recover an ordinal cart request without inventing a target.
+
+    This is intentionally limited to the reviewed ``add/put ... cart``
+    grammar. It returns an intent only when the ordinal resolves against the
+    current acknowledged result set; model failure must never create a new
+    product target.
+    """
+
+    base = IntentDeltaV1(primary_action=Action.UPDATE_CART)
+    resolved = apply_explicit_cart_terms(base, message, active_result_bindings)
+    operations = resolved.action_parameters.get("operations")
+    return resolved if isinstance(operations, list) and operations else None
+
+
 def apply_explicit_cart_terms(
     intent: IntentDeltaV1,
     message: str,

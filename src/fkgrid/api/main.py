@@ -20,7 +20,9 @@ from fkgrid.agentic.contracts import (
     Fact,
     ProductBinding,
     QueryState,
+    RecentTurnContext,
     StrictModel,
+    TraceHistoryResponse,
     TurnRequest,
     TurnResult,
     UiAction,
@@ -67,6 +69,7 @@ class SessionView(StrictModel):
     cart: CartSnapshot
     acknowledged_result_set_id: str | None
     acknowledged_entries: list[ActiveResultBinding]
+    recent_turns: list[RecentTurnContext]
     compatibility_tuple: CompatibilityTuple
     model: ModelRuntimeStatus
 
@@ -217,6 +220,7 @@ def _session_view(runtime: ApiRuntime, session_id: str) -> SessionView:
         cart=snapshot.cart,
         acknowledged_result_set_id=snapshot.acknowledged_result_set_id,
         acknowledged_entries=snapshot.acknowledged_entries,
+        recent_turns=snapshot.recent_turns,
         compatibility_tuple=snapshot.compatibility_tuple,
         model=_model_status(runtime),
     )
@@ -319,9 +323,13 @@ def _swagger_chat_html(openapi_url: str) -> HTMLResponse:
   #fkgrid-chat-new { padding: 7px 11px; color: #344054; background: #eef2f6; font-size: 12px; }
   #fkgrid-chat-send:disabled, #fkgrid-chat-new:disabled { cursor: wait; opacity: .65; }
   #fkgrid-chat-hint { margin: 7px 0 0; color: #667085; font-size: 11px; }
-  #fkgrid-chat-json { margin-top: 7px; }
-  #fkgrid-chat-json summary { color: #475467; cursor: pointer; font-size: 11px; }
-  #fkgrid-chat-json pre {
+  #fkgrid-chat-json, .fkgrid-chat-json { margin-top: 7px; }
+  #fkgrid-chat-json summary, .fkgrid-chat-json summary {
+    color: #475467;
+    cursor: pointer;
+    font-size: 11px;
+  }
+  #fkgrid-chat-json pre, .fkgrid-chat-json pre {
     max-height: 220px;
     overflow: auto;
     margin: 5px 0 0;
@@ -352,7 +360,11 @@ def _swagger_chat_html(openapi_url: str) -> HTMLResponse:
       placeholder="Ask about products, comparisons, availability, or your cart..."></textarea>
     <button id="fkgrid-chat-send" type="submit">Send</button>
   </form>
-  <div id="fkgrid-chat-hint">Enter sends a message. Use Shift+Enter for a new line.</div>
+  <div id="fkgrid-chat-hint">
+    Enter sends a message. Use Shift+Enter for a new line. Each reply includes its
+    execution trace; the full session trace is available at
+    <code>/v1/sessions/{session_id}/trace</code>.
+  </div>
 </section>
 """
     chat_script = """
@@ -406,8 +418,18 @@ def _swagger_chat_html(openapi_url: str) -> HTMLResponse:
     meta.textContent =
       `${response.terminal_state || 'UNKNOWN'} · HTTP ${body.http_status ?? 'n/a'}`;
     bubble.appendChild(meta);
+    const trace = raw.trace || {};
+    const traceDetails = document.createElement('details');
+    traceDetails.className = 'fkgrid-chat-json';
+    const traceSummary = document.createElement('summary');
+    traceSummary.textContent =
+      `View execution trace (${Array.isArray(trace.events) ? trace.events.length : 0} stages)`;
+    const tracePre = document.createElement('pre');
+    tracePre.textContent = JSON.stringify(trace, null, 2);
+    traceDetails.append(traceSummary, tracePre);
+    bubble.appendChild(traceDetails);
     const details = document.createElement('details');
-    details.id = 'fkgrid-chat-json';
+    details.className = 'fkgrid-chat-json';
     const summary = document.createElement('summary');
     summary.textContent = 'View API response JSON';
     const pre = document.createElement('pre');
@@ -425,7 +447,10 @@ def _swagger_chat_html(openapi_url: str) -> HTMLResponse:
     const body = await response.json();
     sessionId = body.session_id;
     turnNumber = 0;
-    setStatus(`Ready · ${body.model?.model_alias || 'configured model'}`, 'ready');
+    setStatus(
+      `Ready · ${body.model?.model_alias || 'configured model'} · ${sessionId}`,
+      'ready',
+    );
   };
   const resetChat = async () => {
     newChat.disabled = true;
@@ -627,6 +652,28 @@ def create_app(runtime: ApiRuntime | None = None) -> FastAPI:
         _get_session_or_404(api_runtime, session_id)
         return _session_view(api_runtime, session_id)
 
+    @application.get(
+        "/v1/sessions/{session_id}/trace",
+        response_model=TraceHistoryResponse,
+        tags=["sessions"],
+        summary="Read the structured execution trace for a session",
+        description=(
+            "Returns the bounded per-turn trace, including stage timings, "
+            "validated structured model outputs, safe tool outputs, and the "
+            "recent-turn memory projection. Provider errors and raw prompts "
+            "are intentionally omitted."
+        ),
+    )
+    def get_trace(session_id: str) -> TraceHistoryResponse:
+        managed = _get_session_or_404(api_runtime, session_id)
+        with managed.lock:
+            traces = [trace.model_copy(deep=True) for trace in managed.trace_history]
+        return TraceHistoryResponse(
+            session_id=session_id,
+            trace_count=len(traces),
+            traces=traces,
+        )
+
     @application.post(
         "/v1/sessions/{session_id}/turns",
         response_model=TurnResult,
@@ -677,7 +724,10 @@ def create_app(runtime: ApiRuntime | None = None) -> FastAPI:
                 )
             except ValidationError as exc:
                 raise HTTPException(status_code=422, detail=exc.errors()) from exc
-            return _turn_response(managed.orchestrator.handle(request))
+            result = managed.orchestrator.handle(request)
+            managed.trace_history.append(result.trace.model_copy(deep=True))
+            del managed.trace_history[:-100]
+            return _turn_response(result)
 
     return application
 

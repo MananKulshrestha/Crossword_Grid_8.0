@@ -76,6 +76,7 @@ from .ports import (
     TraceSinkPort,
 )
 from .validation import (
+    canonical_json,
     canonical_hash,
     merge_query_state,
     normalize_action,
@@ -87,6 +88,7 @@ from .query_lexicon import (
     apply_explicit_cart_terms,
     apply_explicit_catalog_terms,
     deterministic_catalog_intent,
+    deterministic_cart_intent,
     is_greeting_or_help_message,
 )
 
@@ -219,6 +221,12 @@ class TurnOrchestrator:
                         "token_count": enhanced.token_count,
                         "context_hash": enhanced.envelope.context_hash,
                         "memory_used": bool(enhanced.envelope.persistent_memory_candidates),
+                        "recent_turn_count": len(enhanced.envelope.recent_turn_context),
+                        "recent_turn_context": [
+                            turn.model_dump(mode="json")
+                            for turn in enhanced.envelope.recent_turn_context
+                        ],
+                        "active_result_count": len(enhanced.envelope.active_result_bindings),
                         "warnings": enhanced.warnings,
                     },
                 )
@@ -426,7 +434,16 @@ class TurnOrchestrator:
             input_hash=model_response.input_hash,
             output_hash=model_response.output_hash,
             validation_codes=[issue.code for issue in model_response.validation_issues],
-            safe_metadata={"model_alias": model_response.model_alias, "provider": model_response.provider_name},
+            safe_metadata=self._model_trace_metadata(
+                model_response,
+                ModelCallType.RESOLVE_INTENT_AND_DELTA,
+                {
+                    "current_message": projection.current_message_verbatim,
+                    "recent_turn_count": len(projection.recent_turn_context),
+                    "active_result_count": len(projection.active_result_bindings),
+                    "cart_item_count": projection.cart_summary.item_count,
+                },
+            ),
         )
         intent, issues = self._parse_and_validate_model_intent(model_response, projection)
         if intent is not None:
@@ -459,7 +476,19 @@ class TurnOrchestrator:
             input_hash=repair_response.input_hash,
             output_hash=repair_response.output_hash,
             validation_codes=[issue.code for issue in repair_response.validation_issues],
-            safe_metadata={"repair": True},
+            safe_metadata={
+                **self._model_trace_metadata(
+                    repair_response,
+                    ModelCallType.RESOLVE_INTENT_AND_DELTA,
+                    {
+                        "current_message": projection.current_message_verbatim,
+                        "recent_turn_count": len(projection.recent_turn_context),
+                        "active_result_count": len(projection.active_result_bindings),
+                        "cart_item_count": projection.cart_summary.item_count,
+                    },
+                ),
+                "repair": True,
+            },
         )
         intent, repair_issues = self._parse_and_validate_model_intent(repair_response, projection)
         if intent is not None:
@@ -474,6 +503,27 @@ class TurnOrchestrator:
                 "deterministic_exact_grammar",
                 "OK",
                 fallback=FallbackState.DETERMINISTIC_EXACT_GRAMMAR,
+            )
+            return fallback, []
+        fallback = deterministic_cart_intent(
+            projection.current_message_verbatim,
+            projection.active_result_bindings,
+        )
+        if fallback is not None:
+            self._event(
+                events,
+                trace_id,
+                request.client_turn_id,
+                "INTENT_FALLBACK",
+                "deterministic_cart_grammar",
+                "OK",
+                fallback=FallbackState.DETERMINISTIC_EXACT_GRAMMAR,
+                safe_metadata={
+                    "target_result_entry_ids": [
+                        operation["result_entry_id"]
+                        for operation in fallback.action_parameters["operations"]
+                    ]
+                },
             )
             return fallback, []
         fallback = deterministic_catalog_intent(
@@ -607,7 +657,11 @@ class TurnOrchestrator:
                 "TOOL_EXECUTED",
                 "search_catalog",
                 result.status.value,
-                safe_metadata={"entries": len(result.entries), "hard_filter_hash": result.hard_filter_hash},
+                safe_metadata={
+                    "tool_output": result.model_dump(mode="json"),
+                    "entries": len(result.entries),
+                    "hard_filter_hash": result.hard_filter_hash,
+                },
             )
             # Retrieval adapters should pin this ID. Keep a safe compatibility
             # fallback for an older adapter and mark that degradation in trace.
@@ -630,7 +684,10 @@ class TurnOrchestrator:
                 "RETRIEVAL_ASSESSED",
                 "assess_retrieval_confidence",
                 confidence.decision,
-                safe_metadata={"reasons": confidence.reasons},
+                safe_metadata={
+                    "tool_output": confidence.model_dump(mode="json"),
+                    "reasons": confidence.reasons,
+                },
             )
             if confidence.decision == "RECOVER":
                 result = self.recovery.recover(
@@ -646,6 +703,7 @@ class TurnOrchestrator:
                     "RECOVERY_EXECUTED",
                     "bounded_recovery",
                     result.status.value,
+                    safe_metadata={"tool_output": result.model_dump(mode="json")},
                 )
             terminal = TerminalState.ANSWERED_WITH_GROUNDED_RESULTS if result.entries else TerminalState.NO_ELIGIBLE_MATCH
             summary = (
@@ -683,7 +741,10 @@ class TurnOrchestrator:
                 "TOOL_EXECUTED",
                 "resolve_reference",
                 resolution.status,
-                safe_metadata={"resolved_count": len(resolution.references)},
+                safe_metadata={
+                    "tool_output": resolution.model_dump(mode="json"),
+                    "resolved_count": len(resolution.references),
+                },
             )
             if resolution.status != "RESOLVED":
                 response = self._clarification_response(
@@ -702,19 +763,51 @@ class TurnOrchestrator:
                 if not eligibility.eligible:
                     return self._action_failed(action, compatibility, trace_id, delta_summary, "POLICY_BLOCKED"), False
                 details = self.catalog.get_details(bindings[0], compatibility, self.config.local_tool_budget_ms)
-                self._event(events, trace_id, request.client_turn_id, "TOOL_EXECUTED", "get_product_details", details.status.value)
+                self._event(
+                    events,
+                    trace_id,
+                    request.client_turn_id,
+                    "TOOL_EXECUTED",
+                    "get_product_details",
+                    details.status.value,
+                    safe_metadata={"tool_output": details.model_dump(mode="json")},
+                )
                 return self._details_response(action, details, compatibility, trace_id, delta_summary), False
             if action is Action.COMPARE:
                 comparison = self.catalog.compare(bindings[:4], compatibility, self.config.local_tool_budget_ms)
-                self._event(events, trace_id, request.client_turn_id, "TOOL_EXECUTED", "compare_products", comparison.status.value)
+                self._event(
+                    events,
+                    trace_id,
+                    request.client_turn_id,
+                    "TOOL_EXECUTED",
+                    "compare_products",
+                    comparison.status.value,
+                    safe_metadata={"tool_output": comparison.model_dump(mode="json")},
+                )
                 return self._comparison_response(action, comparison, compatibility, trace_id, delta_summary), False
             availability = self.catalog.check_availability(bindings[0], compatibility, self.config.local_tool_budget_ms)
-            self._event(events, trace_id, request.client_turn_id, "TOOL_EXECUTED", "check_availability", availability.status.value)
+            self._event(
+                events,
+                trace_id,
+                request.client_turn_id,
+                "TOOL_EXECUTED",
+                "check_availability",
+                availability.status.value,
+                safe_metadata={"tool_output": availability.model_dump(mode="json")},
+            )
             return self._availability_response(action, availability, compatibility, trace_id, delta_summary), False
 
         if action is Action.SHOW_CART:
             cart = self.cart.show_cart(request.session_id, snapshot.cart_version, self.config.local_tool_budget_ms)
-            self._event(events, trace_id, request.client_turn_id, "TOOL_EXECUTED", "show_cart", "OK")
+            self._event(
+                events,
+                trace_id,
+                request.client_turn_id,
+                "TOOL_EXECUTED",
+                "show_cart",
+                "OK",
+                safe_metadata={"tool_output": cart.model_dump(mode="json")},
+            )
             return (
                 ShopperResponse(
                     response_id=self.ids.new_id("response"),
@@ -747,6 +840,17 @@ class TurnOrchestrator:
                         "CART_UPDATE",
                         self.config.local_tool_budget_ms,
                     )
+                    self._event(
+                        events,
+                        trace_id,
+                        request.client_turn_id,
+                        "TOOL_EXECUTED",
+                        "check_cart_eligibility",
+                        eligibility.policy_status,
+                        safe_metadata={
+                            "tool_output": eligibility.model_dump(mode="json"),
+                        },
+                    )
                     if not eligibility.eligible:
                         return self._action_failed(
                             action,
@@ -763,7 +867,10 @@ class TurnOrchestrator:
                 "TOOL_EXECUTED",
                 "update_cart",
                 update.status,
-                safe_metadata={"operations": update.applied_operation_ids},
+                safe_metadata={
+                    "tool_output": update.model_dump(mode="json"),
+                    "operations": update.applied_operation_ids,
+                },
             )
             if update.status == "UPDATED":
                 return (
@@ -799,7 +906,15 @@ class TurnOrchestrator:
         if action is Action.RESEARCH_EXTERNAL:
             selected_ids = [reference.value for reference in intent.references if reference.kind == "OWNED_ID"]
             decision = self.research.detect_need(intent, request.message or "", selected_ids)
-            self._event(events, trace_id, request.client_turn_id, "RESEARCH_EXECUTED", "detect_research_need", decision.decision)
+            self._event(
+                events,
+                trace_id,
+                request.client_turn_id,
+                "RESEARCH_EXECUTED",
+                "detect_research_need",
+                decision.decision,
+                safe_metadata={"tool_output": decision.model_dump(mode="json")},
+            )
             if decision.decision != "REQUIRED":
                 return (
                     ShopperResponse(
@@ -814,7 +929,15 @@ class TurnOrchestrator:
                     False,
                 )
             search_result = self.research.search(decision, self.config.research_budget_ms)
-            self._event(events, trace_id, request.client_turn_id, "RESEARCH_EXECUTED", "online_search", search_result.status)
+            self._event(
+                events,
+                trace_id,
+                request.client_turn_id,
+                "RESEARCH_EXECUTED",
+                "online_search",
+                search_result.status,
+                safe_metadata={"tool_output": search_result.model_dump(mode="json")},
+            )
             if not search_result.sources:
                 research = ValidatedResearch(status="UNAVAILABLE", warnings=search_result.warnings + [search_result.status])
             else:
@@ -851,6 +974,14 @@ class TurnOrchestrator:
                     model_response.status.value,
                     latency_ms=model_response.latency_ms,
                     validation_codes=[issue.code for issue in model_response.validation_issues],
+                    safe_metadata=self._model_trace_metadata(
+                        model_response,
+                        ModelCallType.SYNTHESIZE_RESEARCH_ANSWER,
+                        {
+                            "source_count": len(search_result.sources),
+                            "selected_entity_count": len(selected_ids),
+                        },
+                    ),
                 )
             terminal = (
                 TerminalState.ANSWERED_WITH_EXTERNAL_RESEARCH
@@ -1267,11 +1398,19 @@ class TurnOrchestrator:
         delta_summary: StateDeltaSummary,
         reason: str,
     ) -> ShopperResponse:
+        summary = {
+            "COMMERCE_POLICY_BLOCKED": (
+                "That acknowledged prototype item is unavailable, so the cart was not changed."
+            ),
+            "CART_OPERATION_INVALID": (
+                "I understood the cart request, but could not build a valid cart operation."
+            ),
+        }.get(reason, "The requested action could not be verified, so no state was changed.")
         return ShopperResponse(
             response_id=self.ids.new_id("response"),
             action=action,
             terminal_state=TerminalState.ACTION_FAILED_WITH_REASON,
-            summary="The requested action could not be verified, so no state was changed.",
+            summary=summary,
             warnings=[reason],
             state_delta=delta_summary,
             compatibility_tuple=compatibility,
@@ -1328,6 +1467,62 @@ class TurnOrchestrator:
             recovery_prompt_version="2",
             suggestion_prompt_version="2",
         )
+
+    @staticmethod
+    def _safe_model_output(model_response: Any, call_type: ModelCallType) -> dict[str, Any] | None:
+        """Expose only schema-validated structured output in public traces."""
+
+        if model_response.status is not ModelStatus.OK or not isinstance(
+            model_response.output_payload, dict
+        ):
+            return None
+        try:
+            if call_type is ModelCallType.RESOLVE_INTENT_AND_DELTA:
+                value = IntentDeltaV1.model_validate_json(
+                    canonical_json(model_response.output_payload)
+                )
+            elif call_type is ModelCallType.GENERATE_CLARIFYING_QUESTION:
+                value = ClarificationDraft.model_validate_json(
+                    canonical_json(model_response.output_payload)
+                )
+            elif call_type is ModelCallType.SYNTHESIZE_RESEARCH_ANSWER:
+                value = ResearchSynthesisV1.model_validate_json(
+                    canonical_json(model_response.output_payload)
+                )
+            elif call_type is ModelCallType.GENERATE_FOLLOW_UP_SUGGESTIONS:
+                from .contracts import FollowUpSelection
+
+                value = FollowUpSelection.model_validate_json(
+                    canonical_json(model_response.output_payload)
+                )
+            elif call_type is ModelCallType.PLAN_CONSTRAINED_REPAIR:
+                from pydantic import TypeAdapter
+                from .contracts import RecoveryPlan
+
+                value = TypeAdapter(RecoveryPlan).validate_json(
+                    canonical_json(model_response.output_payload)
+                )
+            else:
+                return None
+        except Exception:
+            return None
+        return value.model_dump(mode="json")
+
+    @classmethod
+    def _model_trace_metadata(
+        cls,
+        model_response: Any,
+        call_type: ModelCallType,
+        input_summary: dict[str, Any],
+    ) -> dict[str, Any]:
+        return {
+            "model_alias": model_response.model_alias,
+            "provider": model_response.provider_name,
+            "prompt_id": model_response.prompt_id,
+            "prompt_version": model_response.prompt_version,
+            "input_summary": input_summary,
+            "structured_output": cls._safe_model_output(model_response, call_type),
+        }
 
     def _event(
         self,

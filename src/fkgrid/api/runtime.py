@@ -19,6 +19,7 @@ from fkgrid.agentic.contracts import (
     ModelRequest,
     ModelResponse,
     ModelStatus,
+    PublicTrace,
     QueryState,
     SearchEntry,
     TurnSnapshot,
@@ -139,6 +140,7 @@ class ManagedSession:
     orchestrator: TurnOrchestrator
     state: InMemorySessionState
     lock: threading.RLock
+    trace_history: list[PublicTrace]
 
 
 class ApiRuntime:
@@ -321,6 +323,7 @@ class ApiRuntime:
             orchestrator=orchestrator,
             state=session_state,
             lock=threading.RLock(),
+            trace_history=[],
         )
         with self._sessions_lock:
             if session_id in self._sessions:

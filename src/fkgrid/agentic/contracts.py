@@ -1092,6 +1092,12 @@ class PublicTrace(StrictModel):
     compatibility_tuple: CompatibilityTuple
 
 
+class TraceHistoryResponse(StrictModel):
+    session_id: str
+    trace_count: int = Field(ge=0, le=100)
+    traces: list[PublicTrace] = Field(default_factory=list, max_length=100)
+
+
 class TurnResult(StrictModel):
     status: Literal["COMPLETED", "IN_PROGRESS", "REJECTED"]
     http_status: Literal[200, 202, 404, 409, 422, 429, 500, 503, 504]
