@@ -29,10 +29,6 @@ from fkgrid.agentic.fakes import (
     DeterministicEnhancer,
     FakeClock,
     FakeMarkdownPipeline,
-    FakeRecoveryPort,
-    FakeReferenceResolver,
-    FakeResearchPort,
-    FakeSuggestionPort,
     FakeTraceSink,
     InMemorySessionState,
     SequentialIds,
@@ -63,6 +59,7 @@ from fkgrid.speech import (
     SpeechToTextPort,
     UnavailableSpeechToText,
 )
+from fkgrid.tools.integration import RuntimeTooling, build_runtime_tooling
 
 DEFAULT_GEMINI_ENDPOINT = (
     "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
@@ -206,6 +203,10 @@ class ApiRuntime:
             self.catalog_entries[0].binding.catalog_version
             if self.catalog_entries
             else "catalog-fixture-v1"
+        )
+        self.tooling: RuntimeTooling = build_runtime_tooling(
+            self.catalog_entries,
+            demo_compatibility(model_alias),
         )
         self._sessions: dict[str, ManagedSession] = {}
         self._sessions_lock = threading.RLock()
@@ -365,17 +366,17 @@ class ApiRuntime:
         clock = FakeClock()
         ids = SequentialIds()
         markdown = FakeMarkdownPipeline()
-        catalog = FixtureCatalogPort(self.catalog_entries)
+        legacy_catalog = FixtureCatalogPort(self.catalog_entries)
         orchestrator = TurnOrchestrator(
             state=session_state,
             enhancer=DeterministicEnhancer(clock, ids),
             gateway=self.gateway,
-            catalog=catalog,
-            recovery=FakeRecoveryPort(),
-            references=FakeReferenceResolver(),
-            cart=FixtureCartPort(cart, catalog),
-            research=FakeResearchPort(clock),
-            suggestions=FakeSuggestionPort(),
+            catalog=self.tooling.shopper_catalog,
+            recovery=self.tooling.recovery,
+            references=self.tooling.references,
+            cart=FixtureCartPort(cart, legacy_catalog),
+            research=self.tooling.research,
+            suggestions=self.tooling.suggestions,
             markdown=markdown,
             clock=clock,
             ids=ids,
