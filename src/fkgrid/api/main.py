@@ -43,6 +43,10 @@ class ModelRuntimeStatus(StrictModel):
     catalog_version: str
     configured: bool
     configuration_error: str | None = None
+    speech_configured: bool
+    speech_provider: str
+    speech_model_alias: str
+    speech_error: str | None = None
 
 
 class HealthResponse(StrictModel):
@@ -216,6 +220,10 @@ def _model_status(runtime: ApiRuntime) -> ModelRuntimeStatus:
         catalog_version=runtime.catalog_version,
         configured=runtime.model_configured,
         configuration_error=runtime.model_error,
+        speech_configured=runtime.speech_configured,
+        speech_provider=runtime.speech_provider,
+        speech_model_alias=runtime.speech_model_alias,
+        speech_error=runtime.speech_error,
     )
 
 
@@ -388,11 +396,42 @@ def _swagger_chat_html(openapi_url: str) -> HTMLResponse:
   let mediaRecorder = null;
   let mediaStream = null;
   let speechChunks = [];
+  let speechConfigured = true;
 
   const requestId = (prefix) => `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const setStatus = (text, state) => {
     status.textContent = text;
     status.dataset.state = state || 'starting';
+  };
+  const speechMessages = {
+    AUDIO_EMPTY: 'No audio was captured. Try recording again.',
+    AUDIO_TOO_LARGE: 'That recording is too large. Try a shorter clip.',
+    AUDIO_CONTENT_TYPE_UNSUPPORTED:
+      'This browser audio format is not supported. Try again or type your request.',
+    TRANSCRIPTION_EMPTY: 'No speech was recognized. Try speaking closer to the microphone.',
+    SPEECH_DISABLED: 'Voice input is disabled for this server. Please type your request.',
+    FKGRID_SPEECH_API_KEY_REQUIRED:
+      'Voice input is not configured for this server. Please type your request.',
+    SPEECH_PROVIDER_UNAVAILABLE:
+      'Voice transcription is temporarily unavailable. Please try again or type your request.',
+    SPEECH_PROVIDER_TIMEOUT:
+      'Voice transcription timed out. Please try again or type your request.',
+    SPEECH_PROVIDER_HTTP_ERROR:
+      'Voice transcription service rejected the audio. Please try again.',
+  };
+  const speechFailureMessage = (code, httpStatus) => speechMessages[code] || (
+    httpStatus === 503
+      ? 'Voice transcription is temporarily unavailable. Please try again or type your request.'
+      : `Speech request failed (${httpStatus})`
+  );
+  const setSpeechAvailability = (configured) => {
+    speechConfigured = Boolean(configured);
+    speechButton.disabled = !speechConfigured;
+    speechButton.dataset.configured = speechConfigured ? 'true' : 'false';
+    speechButton.title = speechConfigured
+      ? 'Record a voice request for review before sending'
+      : 'Voice input is unavailable; type your request instead';
+    speechButton.textContent = speechConfigured ? '🎙 Start voice' : 'Voice unavailable';
   };
   const addBubble = (kind, text) => {
     const bubble = document.createElement('div');
@@ -447,6 +486,7 @@ def _swagger_chat_html(openapi_url: str) -> HTMLResponse:
     const body = await response.json();
     sessionId = body.session_id;
     turnNumber = 0;
+    setSpeechAvailability(body.model?.speech_configured !== false);
     setStatus(`Ready · ${body.model?.model_alias || 'configured model'}`, 'ready');
   };
   const clearMedia = () => {
@@ -454,10 +494,10 @@ def _swagger_chat_html(openapi_url: str) -> HTMLResponse:
     mediaStream = null;
     mediaRecorder = null;
     speechChunks = [];
-    speechButton.disabled = false;
+    speechButton.disabled = !speechConfigured;
     speechButton.dataset.recording = 'false';
     speechButton.setAttribute('aria-pressed', 'false');
-    speechButton.textContent = '🎙 Start voice';
+    speechButton.textContent = speechConfigured ? '🎙 Start voice' : 'Voice unavailable';
   };
   const transcribeRecordedAudio = async (mimeType) => {
     const blob = new Blob(speechChunks, {type: mimeType || 'audio/webm'});
@@ -477,7 +517,7 @@ def _swagger_chat_html(openapi_url: str) -> HTMLResponse:
       });
       const body = await response.json();
       if (!response.ok) {
-        throw new Error(body.detail || `Speech request failed (${response.status})`);
+        throw new Error(speechFailureMessage(body.detail, response.status));
       }
       const transcript = (body.text || '').trim();
       if (!transcript) throw new Error('No speech was recognized');
@@ -486,9 +526,8 @@ def _swagger_chat_html(openapi_url: str) -> HTMLResponse:
       input.focus();
     } catch (error) {
       setStatus(error.message || 'Speech transcription failed', 'error');
-      addBubble('error', error.message || 'Speech transcription failed');
     } finally {
-      speechButton.disabled = false;
+      speechButton.disabled = !speechConfigured;
       send.disabled = false;
     }
   };
@@ -499,6 +538,10 @@ def _swagger_chat_html(openapi_url: str) -> HTMLResponse:
     mediaRecorder.stop();
   };
   const startVoice = async () => {
+    if (!speechConfigured) {
+      setStatus('Voice input is not configured for this server. Please type your request.', 'error');
+      return;
+    }
     if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
       setStatus('This browser does not support microphone recording', 'error');
       return;

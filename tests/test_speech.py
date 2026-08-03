@@ -26,6 +26,9 @@ class RecordingTransport:
 
 
 class FakeSpeechToText:
+    provider_name = "fake-speech"
+    model_alias = DEFAULT_SPEECH_MODEL_ALIAS
+
     def __init__(self) -> None:
         self.calls = 0
 
@@ -143,12 +146,51 @@ class SpeechApiTests(unittest.TestCase):
         self.assertEqual(empty.status_code, 422)
         self.assertEqual(self.speech.calls, 0)
 
+    def test_model_status_reports_speech_configuration_without_exposing_credentials(self) -> None:
+        model = self.client.get("/v1/model")
+        self.assertEqual(model.status_code, 200)
+        payload = model.json()
+        self.assertTrue(payload["speech_configured"])
+        self.assertEqual(payload["speech_provider"], "fake-speech")
+        self.assertEqual(payload["speech_model_alias"], DEFAULT_SPEECH_MODEL_ALIAS)
+        self.assertNotIn("api_key", payload)
+
+        session = self.client.post("/v1/sessions", json={"session_id": "speech-status"})
+        self.assertEqual(session.status_code, 201)
+        self.assertTrue(session.json()["model"]["speech_configured"])
+
+    def test_unconfigured_speech_is_explicitly_disabled_without_blocking_text_chat(self) -> None:
+        runtime = ApiRuntime(
+            gateway=FakeModelGateway(),
+            model_mode="fake",
+            model_alias=Gemma4ModelAdapter.default_model_alias,
+            protocol="test",
+        )
+        client = TestClient(create_app(runtime))
+
+        model = client.get("/v1/model")
+        self.assertEqual(model.status_code, 200)
+        payload = model.json()
+        self.assertFalse(payload["speech_configured"])
+        self.assertEqual(payload["speech_provider"], "unconfigured")
+        self.assertEqual(payload["speech_error"], "FKGRID_SPEECH_API_KEY_REQUIRED")
+
+        session = client.post("/v1/sessions", json={"session_id": "text-without-speech"})
+        self.assertEqual(session.status_code, 201)
+        self.assertFalse(session.json()["model"]["speech_configured"])
+
     def test_swagger_voice_button_is_opt_in_and_review_first(self) -> None:
         docs = self.client.get("/docs")
         self.assertEqual(docs.status_code, 200)
         self.assertIn("fkgrid-chat-speech", docs.text)
         self.assertIn("/v1/speech/transcriptions", docs.text)
         self.assertIn("review and press Send", docs.text)
+        self.assertIn("Voice transcription is temporarily unavailable", docs.text)
+        self.assertIn("speech_configured", docs.text)
+        self.assertNotIn(
+            "addBubble('error', error.message || 'Speech transcription failed')",
+            docs.text,
+        )
 
 
 if __name__ == "__main__":

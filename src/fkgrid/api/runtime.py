@@ -183,7 +183,16 @@ class ApiRuntime:
         )
         self.speech_deadline_ms = speech_deadline_ms
         self.speech_language = speech_language
-        self.speech_error = speech_error
+        self.speech_error = speech_error or getattr(self.speech_to_text, "reason_code", None)
+        self.speech_configured = (
+            speech_to_text is not None
+            and not isinstance(self.speech_to_text, UnavailableSpeechToText)
+            and self.speech_error is None
+        )
+        self.speech_provider = getattr(self.speech_to_text, "provider_name", "unconfigured")
+        self.speech_model_alias = getattr(
+            self.speech_to_text, "model_alias", DEFAULT_SPEECH_MODEL_ALIAS
+        )
         self.catalog_entries = list(
             catalog_entries
             if catalog_entries is not None
