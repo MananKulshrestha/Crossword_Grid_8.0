@@ -70,6 +70,7 @@ from .query_lexicon import (
     apply_explicit_catalog_terms,
     deterministic_cart_intent,
     deterministic_catalog_intent,
+    deterministic_reference_intent,
     is_greeting_or_help_message,
 )
 from .validation import (
@@ -94,6 +95,19 @@ class OrchestratorConfig:
     suggestion_budget_ms: int = 75
     turn_budget_ms: int = 3000
     enable_clarification_model: bool = False
+
+
+_RECENT_MEMORY_ELIGIBLE_STATES = frozenset(
+    {
+        TerminalState.ANSWERED_WITH_GROUNDED_RESULTS,
+        TerminalState.ANSWERED_WITH_PRODUCT_DETAILS,
+        TerminalState.ANSWERED_WITH_COMPARISON,
+        TerminalState.ANSWERED_WITH_AVAILABILITY,
+        TerminalState.CART_UPDATED,
+        TerminalState.CART_SHOWN,
+        TerminalState.ANSWERED_WITH_EXTERNAL_RESEARCH,
+    }
+)
 
 
 class TurnOrchestrator:
@@ -593,6 +607,22 @@ class TurnOrchestrator:
                         operation["result_entry_id"]
                         for operation in fallback.action_parameters["operations"]
                     ]
+                },
+            )
+            return fallback, []
+        fallback = deterministic_reference_intent(projection.current_message_verbatim)
+        if fallback is not None:
+            self._event(
+                events,
+                trace_id,
+                request.client_turn_id,
+                "INTENT_FALLBACK",
+                "deterministic_reference_grammar",
+                "OK",
+                fallback=FallbackState.DETERMINISTIC_EXACT_GRAMMAR,
+                safe_metadata={
+                    "reference_count": len(fallback.references),
+                    "references": [reference.model_dump(mode="json") for reference in fallback.references],
                 },
             )
             return fallback, []
@@ -1340,14 +1370,24 @@ class TurnOrchestrator:
                         )
                     }
                 )
-        recent_turns = [*snapshot.recent_turns, self._build_recent_turn_context(
-            request=request,
-            response=response,
-            proposed_state=commit_state,
-            state_version=snapshot.state_version + 1,
-            result_set_id=acknowledged_result_set_id,
-            acknowledged_entries=acknowledged_entries,
-        )][-4:]
+        recent_memory_recorded = response.terminal_state in _RECENT_MEMORY_ELIGIBLE_STATES
+        recent_turns = [
+            turn
+            for turn in snapshot.recent_turns
+            if turn.terminal_state in _RECENT_MEMORY_ELIGIBLE_STATES
+        ]
+        if recent_memory_recorded:
+            recent_turns = [
+                *recent_turns,
+                self._build_recent_turn_context(
+                    request=request,
+                    response=response,
+                    proposed_state=commit_state,
+                    state_version=snapshot.state_version + 1,
+                    result_set_id=acknowledged_result_set_id,
+                    acknowledged_entries=acknowledged_entries,
+                ),
+            ][-4:]
         commit = self.state.commit(
             CommitCommand(
                 reservation_id=reservation_id,
@@ -1406,6 +1446,13 @@ class TurnOrchestrator:
                 "committed": commit.committed,
                 "state_version": commit.state_version,
                 "cart_version": commit.cart_version,
+                "recent_memory_recorded": recent_memory_recorded,
+                "recent_memory_count": len(recent_turns),
+                "recent_memory_exclusion": (
+                    None
+                    if recent_memory_recorded
+                    else "TERMINAL_STATE_NOT_MEMORY_ELIGIBLE"
+                ),
             },
         )
         try:

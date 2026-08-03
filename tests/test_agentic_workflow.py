@@ -14,6 +14,9 @@ from fkgrid.agentic.contracts import (
     Fact,
     FactScope,
     MemoryCandidate,
+    ModelCallType,
+    ModelResponse,
+    ModelStatus,
     Money,
     ProductBinding,
     PurchaseContext,
@@ -322,6 +325,184 @@ class AgenticWorkflowTests(unittest.TestCase):
         )
         assert details.response is not None
         self.assertEqual(details.response.terminal_state, TerminalState.ANSWERED_WITH_PRODUCT_DETAILS)
+
+    def test_provider_word_ordinal_is_canonicalized_after_intent_repair(self) -> None:
+        snapshot, entries = fixture()
+        app, dependencies = orchestrator(snapshot, entries)
+        search = app.handle(
+            TurnRequest(
+                session_id="session_1",
+                client_turn_id="turn_word_ordinal_search",
+                idempotency_key="key_word_ordinal_search",
+                expected_state_version=0,
+                expected_cart_version=0,
+                message="Find a shirt",
+            )
+        )
+        assert search.response is not None
+
+        invalid_response = ModelResponse(
+            call_id="model_invalid_intent",
+            status=ModelStatus.INVALID_OUTPUT,
+            input_hash="invalid-input",
+            provider_name="fake",
+            model_alias="gemma-4-26b-a4b-it",
+            prompt_id="intent_v3",
+            prompt_version="3",
+            latency_ms=1,
+        )
+        repaired_payload = {
+            "schema_version": "IntentDeltaV1",
+            "primary_action": "PRODUCT_DETAILS",
+            "delta_operations": [],
+            "references": [{"kind": "ORDINAL", "value": "first"}],
+            "action_parameters": {},
+            "unknown_terms": [],
+            "candidate_interpretations": [],
+            "clarification_candidate": None,
+        }
+        repaired_response = ModelResponse(
+            call_id="model_repaired_intent",
+            status=ModelStatus.OK,
+            output_payload=repaired_payload,
+            input_hash="repaired-input",
+            output_hash="repaired-output",
+            provider_name="fake",
+            model_alias="gemma-4-26b-a4b-it",
+            prompt_id="intent_v3",
+            prompt_version="3",
+            latency_ms=1,
+        )
+        gateway = dependencies["gateway"]  # type: ignore[assignment]
+        gateway.queue_response(ModelCallType.RESOLVE_INTENT_AND_DELTA, invalid_response)  # type: ignore[attr-defined]
+        gateway.queue_response(ModelCallType.RESOLVE_INTENT_AND_DELTA, repaired_response)  # type: ignore[attr-defined]
+
+        details = app.handle(
+            TurnRequest(
+                session_id="session_1",
+                client_turn_id="turn_word_ordinal_details",
+                idempotency_key="key_word_ordinal_details",
+                expected_state_version=1,
+                expected_cart_version=0,
+                message="What is the first one?",
+            )
+        )
+
+        assert details.response is not None
+        self.assertEqual(details.response.terminal_state, TerminalState.ANSWERED_WITH_PRODUCT_DETAILS)
+        self.assertIsNotNone(details.response.details)
+        assert details.response.details is not None
+        self.assertEqual(details.response.details.binding.product_id, "product_1")
+        self.assertIn(
+            "INTENT_REPAIR",
+            [event.stage for event in details.trace.events],
+        )
+
+    def test_reference_follow_up_uses_deterministic_fallback_when_model_and_repair_fail(self) -> None:
+        snapshot, entries = fixture()
+        app, dependencies = orchestrator(snapshot, entries)
+        search = app.handle(
+            TurnRequest(
+                session_id="session_1",
+                client_turn_id="turn_reference_fallback_search",
+                idempotency_key="key_reference_fallback_search",
+                expected_state_version=0,
+                expected_cart_version=0,
+                message="Find a shirt",
+            )
+        )
+        assert search.response is not None
+        invalid_response = ModelResponse(
+            call_id="model_invalid_reference",
+            status=ModelStatus.INVALID_OUTPUT,
+            input_hash="invalid-input",
+            provider_name="fake",
+            model_alias="gemma-4-26b-a4b-it",
+            prompt_id="intent_v3",
+            prompt_version="3",
+            latency_ms=1,
+        )
+        gateway = dependencies["gateway"]  # type: ignore[assignment]
+        gateway.queue_response(ModelCallType.RESOLVE_INTENT_AND_DELTA, invalid_response)  # type: ignore[attr-defined]
+        gateway.queue_response(ModelCallType.RESOLVE_INTENT_AND_DELTA, invalid_response)  # type: ignore[attr-defined]
+
+        details = app.handle(
+            TurnRequest(
+                session_id="session_1",
+                client_turn_id="turn_reference_fallback_details",
+                idempotency_key="key_reference_fallback_details",
+                expected_state_version=1,
+                expected_cart_version=0,
+                message="What is the first one?",
+            )
+        )
+
+        assert details.response is not None
+        self.assertEqual(details.response.terminal_state, TerminalState.ANSWERED_WITH_PRODUCT_DETAILS)
+        self.assertEqual(
+            [event.logical_name for event in details.trace.events if event.stage == "INTENT_FALLBACK"],
+            ["deterministic_reference_grammar"],
+        )
+
+    def test_comparison_set_ordinals_expand_before_reference_resolution(self) -> None:
+        snapshot, entries = fixture()
+        app, dependencies = orchestrator(snapshot, entries)
+        search = app.handle(
+            TurnRequest(
+                session_id="session_1",
+                client_turn_id="turn_comparison_search",
+                idempotency_key="key_comparison_search",
+                expected_state_version=0,
+                expected_cart_version=0,
+                message="Find a shirt",
+            )
+        )
+        assert search.response is not None
+        payload = {
+            "schema_version": "IntentDeltaV1",
+            "primary_action": "COMPARE",
+            "delta_operations": [],
+            "references": [{"kind": "COMPARISON_SET", "value": "first,third"}],
+            "action_parameters": {},
+            "unknown_terms": [],
+            "candidate_interpretations": [],
+            "clarification_candidate": None,
+        }
+        dependencies["gateway"].queue_response(  # type: ignore[attr-defined]
+            ModelCallType.RESOLVE_INTENT_AND_DELTA,
+            ModelResponse(
+                call_id="model_comparison",
+                status=ModelStatus.OK,
+                output_payload=payload,
+                input_hash="comparison-input",
+                output_hash="comparison-output",
+                provider_name="fake",
+                model_alias="gemma-4-26b-a4b-it",
+                prompt_id="intent_v3",
+                prompt_version="3",
+                latency_ms=1,
+            ),
+        )
+
+        comparison = app.handle(
+            TurnRequest(
+                session_id="session_1",
+                client_turn_id="turn_comparison",
+                idempotency_key="key_comparison",
+                expected_state_version=1,
+                expected_cart_version=0,
+                message="Compare the first and third.",
+            )
+        )
+
+        assert comparison.response is not None
+        self.assertEqual(comparison.response.terminal_state, TerminalState.ANSWERED_WITH_COMPARISON)
+        self.assertIsNotNone(comparison.response.comparison)
+        assert comparison.response.comparison is not None
+        self.assertEqual(
+            [binding.product_id for binding in comparison.response.comparison.bindings],
+            ["product_1", "product_3"],
+        )
 
     def test_completed_replay_returns_the_stored_response_without_reloading_old_state(self) -> None:
         snapshot, entries = fixture()
@@ -847,6 +1028,41 @@ class AgenticWorkflowTests(unittest.TestCase):
         fields = [operation.field_id for operation in corrected.delta_operations if hasattr(operation, "field_id")]
         self.assertNotIn("colour", fields)
         self.assertIn("color", fields)
+
+    def test_explicit_cart_terms_enrich_incomplete_provider_operation(self) -> None:
+        from fkgrid.agentic.contracts import ActiveResultBinding, IntentDeltaV1, ReferenceDraft
+        from fkgrid.agentic.query_lexicon import apply_explicit_cart_terms
+
+        corrected = apply_explicit_cart_terms(
+            IntentDeltaV1(
+                primary_action=Action.UPDATE_CART,
+                references=[ReferenceDraft(kind="DEMONSTRATIVE", value="the first one")],
+                action_parameters={
+                    "operations": [{"type": "ADD_ITEM", "quantity": 3}]
+                },
+            ),
+            "Add 3 to the cart.",
+            [
+                ActiveResultBinding(
+                    result_entry_id="entry_1",
+                    display_position=3,
+                    binding=ProductBinding(
+                        product_id="product_1",
+                        sku_id="sku_1",
+                        offer_id="offer_1",
+                        catalog_version="catalog-v1",
+                    ),
+                )
+            ],
+        )
+        operation = corrected.action_parameters["operations"][0]
+        self.assertEqual(operation["result_entry_id"], "entry_1")
+        self.assertEqual(operation["operation_id"], "chat_add_ordinal_3")
+        self.assertEqual(operation["quantity"], 3)
+        self.assertIn(
+            {"kind": "ORDINAL", "value": "3"},
+            [reference.model_dump() for reference in corrected.references],
+        )
 
 
 if __name__ == "__main__":

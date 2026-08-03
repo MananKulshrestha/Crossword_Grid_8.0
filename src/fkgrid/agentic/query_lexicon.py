@@ -82,7 +82,8 @@ _COLOR_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
 )
 
 _SIZE_PATTERN = re.compile(
-    r"\bsize(?:\s+is)?\s*(xs|xl|s|m|l|7|8|9|10|30|32|34|36)\b",
+    r"\b(?:(?:size(?:\s+is)?\s*(?:uk\s*)?)|(?:uk\s*))"
+    r"(?P<value>xs|xl|s|m|l|7|8|9|10|30|32|34|36)\b",
     flags=re.IGNORECASE,
 )
 _NON_SEARCH_MARKERS = re.compile(
@@ -95,10 +96,12 @@ _CART_ADD_PATTERN = re.compile(
     flags=re.IGNORECASE,
 )
 _ORDINAL_PATTERN = re.compile(
-    r"\b(first|1st|one|second|2nd|two|third|3rd|three|fourth|4th|four)\b",
+    r"\b(first|1st|one|second|2nd|two|third|3rd|three|fourth|4th|four|"
+    r"fifth|5th|five|sixth|6th|six|seventh|7th|seven|eighth|8th|eight|"
+    r"ninth|9th|nine|tenth|10th|ten)\b",
     flags=re.IGNORECASE,
 )
-_NUMERIC_ORDINAL_PATTERN = re.compile(r"\b(1|2|3|4)\b", flags=re.IGNORECASE)
+_NUMERIC_ORDINAL_PATTERN = re.compile(r"\b(1|2|3|4|5|6|7|8|9|10)\b", flags=re.IGNORECASE)
 _EXPLICIT_QUANTITY_MARKER = re.compile(
     r"\b(?:unit|units|quantity|quantities|copies|of)\b", flags=re.IGNORECASE
 )
@@ -107,6 +110,12 @@ _ORDINAL_VALUES = {
     "2": "2",
     "3": "3",
     "4": "4",
+    "5": "5",
+    "6": "6",
+    "7": "7",
+    "8": "8",
+    "9": "9",
+    "10": "10",
     "first": "1",
     "1st": "1",
     "one": "1",
@@ -119,6 +128,24 @@ _ORDINAL_VALUES = {
     "fourth": "4",
     "4th": "4",
     "four": "4",
+    "fifth": "5",
+    "5th": "5",
+    "five": "5",
+    "sixth": "6",
+    "6th": "6",
+    "six": "6",
+    "seventh": "7",
+    "7th": "7",
+    "seven": "7",
+    "eighth": "8",
+    "8th": "8",
+    "eight": "8",
+    "ninth": "9",
+    "9th": "9",
+    "nine": "9",
+    "tenth": "10",
+    "10th": "10",
+    "ten": "10",
 }
 _QUANTITY_PATTERN = re.compile(
     r"\b(?P<quantity>\d+|one|two|three|four)\s+(?:units?|copies?)\b",
@@ -262,6 +289,11 @@ _DETERMINISTIC_CATALOG_ALLOWED_WORDS = frozenset(
         "with",
         "kicks",
         "rucksacks",
+        "uk",
+        "7",
+        "8",
+        "9",
+        "10",
         "you",
         "xs",
         "xl",
@@ -374,7 +406,7 @@ def _size_match(text: str) -> _TermMatch | None:
     match = _SIZE_PATTERN.search(text)
     if match is None:
         return None
-    return _TermMatch(f"size_{match.group(1).casefold()}", match.start(), match.end())
+    return _TermMatch(f"size_{match.group('value').casefold()}", match.start(), match.end())
 
 
 def apply_explicit_catalog_terms(
@@ -550,6 +582,57 @@ def deterministic_cart_intent(
     return resolved if isinstance(operations, list) and operations else None
 
 
+def deterministic_reference_intent(message: str) -> IntentDeltaV1 | None:
+    """Recover safe reference-based actions when the model cannot respond.
+
+    This fallback recognizes only explicit details, availability, and compare
+    language plus displayed-result ordinals.  It never selects a product by
+    title or invents an ID; the normal acknowledged-result resolver remains the
+    authority for every target and emits clarification for missing/stale refs.
+    """
+
+    text = message.casefold()
+    references = [
+        ReferenceDraft(kind="ORDINAL", value=_ORDINAL_VALUES[match.group(1).casefold()])
+        for match in _reference_ordinal_matches(text)
+    ]
+    if _COMPARE_REFERENCE_PATTERN.search(text):
+        return IntentDeltaV1(primary_action=Action.COMPARE, references=references[:4])
+    if _AVAILABILITY_REFERENCE_PATTERN.search(text):
+        return IntentDeltaV1(
+            primary_action=Action.CHECK_AVAILABILITY,
+            references=references[:1],
+        )
+    if _DETAILS_REFERENCE_PATTERN.search(text):
+        return IntentDeltaV1(
+            primary_action=Action.PRODUCT_DETAILS,
+            references=references[:1],
+        )
+    return None
+
+
+_REFERENCE_ORDINAL_PATTERN = re.compile(
+    r"\b(first|1st|one|second|2nd|two|third|3rd|three|fourth|4th|four|"
+    r"fifth|5th|five|sixth|6th|six|seventh|7th|seven|eighth|8th|eight|"
+    r"ninth|9th|nine|tenth|10th|ten|10|[1-9])\b",
+    flags=re.IGNORECASE,
+)
+_COMPARE_REFERENCE_PATTERN = re.compile(r"\bcompare\b", flags=re.IGNORECASE)
+_AVAILABILITY_REFERENCE_PATTERN = re.compile(
+    r"\b(?:available|availability|come\s+in)\b", flags=re.IGNORECASE
+)
+_DETAILS_REFERENCE_PATTERN = re.compile(
+    r"(?:\bwhat\s+(?:is|are)\b|\bwhat\s+about\b|\b(?:tell|give)\s+me\s+(?:more\s+)?"
+    r"(?:about|on)\b|\bshow\s+(?:me\s+)?(?:the\s+)?(?:details?|info(?:rmation)?)\b|"
+    r"\bmore\s+(?:about|on)\b)",
+    flags=re.IGNORECASE,
+)
+
+
+def _reference_ordinal_matches(text: str) -> list[re.Match[str]]:
+    return list(_REFERENCE_ORDINAL_PATTERN.finditer(text))
+
+
 def apply_explicit_cart_terms(
     intent: IntentDeltaV1,
     message: str,
@@ -578,27 +661,44 @@ def apply_explicit_cart_terms(
         ),
         None,
     )
-    action_parameters = dict(intent.action_parameters)
-    if isinstance(action_parameters.get("operations"), list) and action_parameters["operations"]:
-        return intent
     if entry is None:
         # Leave the intent untouched so the normal reference clarification is
         # returned rather than guessing against a stale or absent result set.
         return intent.model_copy(update={"primary_action": Action.UPDATE_CART})
+    action_parameters = dict(intent.action_parameters)
+    existing_operations = action_parameters.get("operations")
+    if isinstance(existing_operations, list) and existing_operations:
+        if all(
+            isinstance(operation, dict) and operation.get("result_entry_id")
+            for operation in existing_operations
+        ):
+            return intent
+        if len(existing_operations) != 1 or not isinstance(existing_operations[0], dict):
+            return intent
+        operation = dict(existing_operations[0])
+        if operation.get("type") != "ADD_ITEM":
+            return intent
+        if not isinstance(operation.get("operation_id"), str) or not operation["operation_id"]:
+            operation["operation_id"] = f"chat_add_ordinal_{ordinal}"
+        operation["result_entry_id"] = entry.result_entry_id
+        if not isinstance(operation.get("quantity"), int):
+            operation["quantity"] = _explicit_cart_quantity(text)
+        action_parameters["operations"] = [operation]
     references = list(intent.references)
     if not any(
         reference.kind == "ORDINAL" and reference.value == ordinal
         for reference in references
     ):
         references.append(ReferenceDraft(kind="ORDINAL", value=ordinal))
-    action_parameters["operations"] = [
-        {
-            "type": "ADD_ITEM",
-            "operation_id": f"chat_add_ordinal_{ordinal}",
-            "result_entry_id": entry.result_entry_id,
-            "quantity": _explicit_cart_quantity(text),
-        }
-    ]
+    if not existing_operations:
+        action_parameters["operations"] = [
+            {
+                "type": "ADD_ITEM",
+                "operation_id": f"chat_add_ordinal_{ordinal}",
+                "result_entry_id": entry.result_entry_id,
+                "quantity": _explicit_cart_quantity(text),
+            }
+        ]
     return intent.model_copy(
         update={
             "primary_action": Action.UPDATE_CART,

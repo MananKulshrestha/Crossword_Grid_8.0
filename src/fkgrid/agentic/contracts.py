@@ -7,10 +7,11 @@ they do not implement those systems.
 
 from __future__ import annotations
 
+import re
+import unicodedata
 from datetime import datetime
 from enum import Enum
 from typing import Annotated, Any, Generic, Literal, TypeVar, Union
-import unicodedata
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -443,6 +444,104 @@ class ReferenceDraft(StrictModel):
     value: str = Field(min_length=1, max_length=128)
 
 
+_ORDINAL_ALIASES = {
+    "first": "1",
+    "1st": "1",
+    "one": "1",
+    "second": "2",
+    "2nd": "2",
+    "two": "2",
+    "third": "3",
+    "3rd": "3",
+    "three": "3",
+    "fourth": "4",
+    "4th": "4",
+    "four": "4",
+    "fifth": "5",
+    "5th": "5",
+    "five": "5",
+    "sixth": "6",
+    "6th": "6",
+    "six": "6",
+    "seventh": "7",
+    "7th": "7",
+    "seven": "7",
+    "eighth": "8",
+    "8th": "8",
+    "eight": "8",
+    "ninth": "9",
+    "9th": "9",
+    "nine": "9",
+    "tenth": "10",
+    "10th": "10",
+    "ten": "10",
+}
+
+
+def _canonical_ordinal(value: str) -> str | None:
+    """Return a bounded display position for a lexical ordinal alias.
+
+    Providers and typed clients may naturally use words such as ``first`` or
+    ``the first one``.  The resolver contract uses the displayed numeric
+    position, so this converts only the finite ordinal vocabulary and leaves
+    arbitrary values untouched for safe rejection/clarification.
+    """
+
+    normalized = unicodedata.normalize("NFKC", value).casefold().strip()
+    normalized = " ".join(normalized.split())
+    if normalized.startswith("the "):
+        normalized = normalized[4:]
+    for suffix in (" one", " option", " result", " item"):
+        if normalized.endswith(suffix):
+            normalized = normalized[: -len(suffix)].rstrip()
+            break
+    if normalized in _ORDINAL_ALIASES:
+        return _ORDINAL_ALIASES[normalized]
+    if normalized.isdecimal():
+        position = int(normalized)
+        if 1 <= position <= 10:
+            return str(position)
+    return None
+
+
+def _canonicalize_references(references: list[ReferenceDraft]) -> list[ReferenceDraft]:
+    """Canonicalize provider/client reference spellings before routing.
+
+    ``COMPARISON_SET`` was part of the original provider-facing vocabulary and
+    is still accepted for compatibility.  Expand the safe ordinal form into
+    the individual references consumed by the deterministic resolver.
+    """
+
+    normalized: list[ReferenceDraft] = []
+    for reference in references:
+        if reference.kind == "ORDINAL":
+            ordinal = _canonical_ordinal(reference.value)
+            normalized.append(
+                reference.model_copy(update={"value": ordinal})
+                if ordinal is not None
+                else reference
+            )
+            continue
+        if reference.kind == "COMPARISON_SET":
+            parts = [
+                part.strip()
+                for part in re.split(r"\s*(?:,|\band\b)\s*", reference.value, flags=re.IGNORECASE)
+                if part.strip()
+            ]
+            ordinals = [_canonical_ordinal(part) for part in parts]
+            if len(parts) >= 2 and all(ordinal is not None for ordinal in ordinals):
+                expanded = [
+                    ReferenceDraft(kind="ORDINAL", value=ordinal)
+                    for ordinal in ordinals
+                    if ordinal is not None
+                ]
+                if len(normalized) + len(expanded) <= 5:
+                    normalized.extend(expanded)
+                    continue
+        normalized.append(reference)
+    return normalized
+
+
 class SetHardOperation(StrictModel):
     op: Literal["SET_HARD"] = "SET_HARD"
     field_id: str
@@ -518,6 +617,13 @@ class IntentDeltaV1(StrictModel):
     unknown_terms: list[str] = Field(default_factory=list, max_length=10)
     candidate_interpretations: list[str] = Field(default_factory=list, max_length=4)
     clarification_candidate: str | None = None
+
+    @model_validator(mode="after")
+    def canonicalize_reference_values(self) -> IntentDeltaV1:
+        normalized = _canonicalize_references(self.references)
+        if normalized != self.references:
+            object.__setattr__(self, "references", normalized)
+        return self
 
 
 class RecoveryRewritePlan(StrictModel):

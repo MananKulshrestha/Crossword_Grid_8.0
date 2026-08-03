@@ -239,6 +239,181 @@ class FastApiWorkflowTests(unittest.TestCase):
         self.assertEqual(metadata["validation_issues"][0]["path"], "output_payload.primary_action")
         self.assertNotIn("unsafe field", str(metadata))
 
+    def test_failed_interpretation_is_traced_but_excluded_from_recent_memory(self) -> None:
+        runtime = ApiRuntime(
+            gateway=UnavailableModelGateway(
+                Gemma4ModelAdapter.default_model_alias,
+                "MODEL_TIMEOUT",
+            ),
+            model_mode="live",
+            model_alias=Gemma4ModelAdapter.default_model_alias,
+            protocol="test",
+        )
+        client = TestClient(create_app(runtime))
+        client.post("/v1/sessions", json={"session_id": "failed-memory-session"})
+
+        failed = client.post(
+            "/v1/sessions/failed-memory-session/turns",
+            json={
+                "client_turn_id": "failed-memory-turn",
+                "idempotency_key": "failed-memory-key",
+                "message": "blorf qzx",
+            },
+        )
+        self.assertEqual(failed.json()["response"]["terminal_state"], "INTERPRETATION_UNAVAILABLE")
+        failed_commit = next(
+            event
+            for event in failed.json()["trace"]["events"]
+            if event["logical_name"] == "commit_turn"
+        )
+        self.assertFalse(failed_commit["safe_metadata"]["recent_memory_recorded"])
+        self.assertEqual(
+            failed_commit["safe_metadata"]["recent_memory_exclusion"],
+            "TERMINAL_STATE_NOT_MEMORY_ELIGIBLE",
+        )
+        self.assertEqual(
+            client.get("/v1/sessions/failed-memory-session").json()["recent_turns"],
+            [],
+        )
+        trace_history = client.get("/v1/sessions/failed-memory-session/trace").json()
+        self.assertEqual(trace_history["trace_count"], 1)
+
+        recovered = client.post(
+            "/v1/sessions/failed-memory-session/turns",
+            json={
+                "client_turn_id": "failed-memory-recovery-turn",
+                "idempotency_key": "failed-memory-recovery-key",
+                "message": "red tshirt size L",
+            },
+        )
+        self.assertEqual(
+            recovered.json()["response"]["terminal_state"],
+            "ANSWERED_WITH_GROUNDED_RESULTS",
+        )
+        enhancement = next(
+            event
+            for event in recovered.json()["trace"]["events"]
+            if event["logical_name"] == "enhance_chat_query"
+        )
+        self.assertEqual(enhancement["safe_metadata"]["recent_turn_count"], 0)
+        self.assertEqual(enhancement["safe_metadata"]["recent_turn_ids"], [])
+        session = client.get("/v1/sessions/failed-memory-session").json()
+        self.assertEqual(
+            [item["user_query"] for item in session["recent_turns"]],
+            ["red tshirt size L"],
+        )
+
+    def test_clarification_is_authoritative_but_not_added_to_recent_memory(self) -> None:
+        runtime = ApiRuntime(
+            gateway=FakeModelGateway(),
+            model_mode="fake",
+            model_alias=Gemma4ModelAdapter.default_model_alias,
+            protocol="test",
+        )
+        client = TestClient(create_app(runtime))
+        client.post("/v1/sessions", json={"session_id": "clarification-memory-session"})
+
+        clarification = client.post(
+            "/v1/sessions/clarification-memory-session/turns",
+            json={
+                "client_turn_id": "clarification-memory-turn",
+                "idempotency_key": "clarification-memory-key",
+                "message": "show product details",
+            },
+        )
+        self.assertEqual(
+            clarification.json()["response"]["terminal_state"],
+            "CLARIFICATION_REQUIRED",
+        )
+        session = client.get("/v1/sessions/clarification-memory-session").json()
+        self.assertEqual(session["recent_turns"], [])
+        self.assertIsNotNone(session["query_state"]["pending_clarification"])
+
+        ambiguous = client.post(
+            "/v1/sessions/clarification-memory-session/turns",
+            json={
+                "client_turn_id": "clarification-memory-ambiguous-turn",
+                "idempotency_key": "clarification-memory-ambiguous-key",
+                "message": "what about it",
+            },
+        )
+        self.assertEqual(
+            ambiguous.json()["response"]["terminal_state"],
+            "CLARIFICATION_REQUIRED",
+        )
+        self.assertEqual(
+            client.get("/v1/sessions/clarification-memory-session").json()["recent_turns"],
+            [],
+        )
+
+        explicit = client.post(
+            "/v1/sessions/clarification-memory-session/turns",
+            json={
+                "client_turn_id": "clarification-memory-explicit-turn",
+                "idempotency_key": "clarification-memory-explicit-key",
+                "message": "blue shoes",
+            },
+        )
+        self.assertEqual(
+            explicit.json()["response"]["terminal_state"],
+            "ANSWERED_WITH_GROUNDED_RESULTS",
+        )
+        final_session = client.get("/v1/sessions/clarification-memory-session").json()
+        self.assertIsNone(final_session["query_state"]["pending_clarification"])
+        self.assertEqual(
+            [item["user_query"] for item in final_session["recent_turns"]],
+            ["blue shoes"],
+        )
+
+    def test_no_match_filters_remain_state_but_do_not_consume_recent_memory(self) -> None:
+        runtime = ApiRuntime(
+            gateway=UnavailableModelGateway(
+                Gemma4ModelAdapter.default_model_alias,
+                "MODEL_TIMEOUT",
+            ),
+            model_mode="live",
+            model_alias=Gemma4ModelAdapter.default_model_alias,
+            protocol="test",
+        )
+        client = TestClient(create_app(runtime))
+        client.post("/v1/sessions", json={"session_id": "no-match-memory-session"})
+
+        no_match = client.post(
+            "/v1/sessions/no-match-memory-session/turns",
+            json={
+                "client_turn_id": "no-match-memory-turn",
+                "idempotency_key": "no-match-memory-key",
+                "message": "Blue shoes size UK 9",
+            },
+        )
+        self.assertEqual(no_match.json()["response"]["terminal_state"], "NO_ELIGIBLE_MATCH")
+        session = client.get("/v1/sessions/no-match-memory-session").json()
+        self.assertEqual(session["recent_turns"], [])
+        constraints = {
+            item["field_id"]: item["values"]
+            for item in session["query_state"]["hard_constraints"]
+        }
+        self.assertEqual(constraints["size"], ["size_9"])
+
+        recovered = client.post(
+            "/v1/sessions/no-match-memory-session/turns",
+            json={
+                "client_turn_id": "no-match-memory-recovery-turn",
+                "idempotency_key": "no-match-memory-recovery-key",
+                "message": "Blue shoes size UK 7",
+            },
+        )
+        self.assertEqual(
+            recovered.json()["response"]["terminal_state"],
+            "ANSWERED_WITH_GROUNDED_RESULTS",
+        )
+        enhancement = next(
+            event
+            for event in recovered.json()["trace"]["events"]
+            if event["logical_name"] == "enhance_chat_query"
+        )
+        self.assertEqual(enhancement["safe_metadata"]["recent_turn_ids"], [])
+
     def test_swagger_exposes_rich_fixture_catalog_and_facets(self) -> None:
         page = self.client.get("/v1/catalog", params={"limit": 20})
         self.assertEqual(page.status_code, 200)
@@ -552,6 +727,59 @@ class FastApiWorkflowTests(unittest.TestCase):
         self.assertEqual(len(response["search_entries"]), 5)
         self.assertIn("REQUESTED_COLOR_NOT_IN_DATASET", response["warnings"])
 
+    def test_catalog_fallback_supports_uk_shoe_size(self) -> None:
+        runtime = ApiRuntime(
+            gateway=UnavailableModelGateway(
+                Gemma4ModelAdapter.default_model_alias,
+                "MODEL_TIMEOUT",
+            ),
+            model_mode="live",
+            model_alias=Gemma4ModelAdapter.default_model_alias,
+            protocol="test",
+        )
+        client = TestClient(create_app(runtime))
+        client.post("/v1/sessions", json={"session_id": "uk-shoe-size-session"})
+
+        turn = client.post(
+            "/v1/sessions/uk-shoe-size-session/turns",
+            json={
+                "client_turn_id": "uk-shoe-size-turn",
+                "idempotency_key": "uk-shoe-size-key",
+                "message": "Blue shoes size UK 9",
+            },
+        )
+        self.assertEqual(turn.status_code, 200)
+        body = turn.json()
+        response = body["response"]
+        self.assertEqual(response["action"], "SEARCH")
+        self.assertEqual(response["terminal_state"], "NO_ELIGIBLE_MATCH")
+        self.assertIn("NO_ELIGIBLE_MATCH", response["warnings"])
+        state = client.get("/v1/sessions/uk-shoe-size-session").json()
+        hard_constraints = {
+            constraint["field_id"]: constraint["values"]
+            for constraint in state["query_state"]["hard_constraints"]
+        }
+        self.assertEqual(hard_constraints["taxonomy_node_id"], ["sneakers"])
+        self.assertEqual(hard_constraints["size"], ["size_9"])
+        self.assertEqual(
+            state["query_state"]["soft_preferences"][0]["values"],
+            ["blue"],
+        )
+        self.assertIn(
+            "deterministic_catalog_grammar",
+            [event["logical_name"] for event in body["trace"]["events"]],
+        )
+
+        supported = client.post(
+            "/v1/sessions/uk-shoe-size-session/turns",
+            json={
+                "client_turn_id": "uk-shoe-size-supported-turn",
+                "idempotency_key": "uk-shoe-size-supported-key",
+                "message": "Blue shoes size UK 7",
+            },
+        )
+        self.assertEqual(supported.json()["response"]["terminal_state"], "ANSWERED_WITH_GROUNDED_RESULTS")
+
     def test_catalog_fallback_does_not_drop_unsupported_constraints(self) -> None:
         runtime = ApiRuntime(
             gateway=UnavailableModelGateway(
@@ -626,6 +854,10 @@ class FastApiWorkflowTests(unittest.TestCase):
             if event["logical_name"] == "check_cart_eligibility"
         )
         self.assertEqual(eligibility_event["status"], "UNAVAILABLE")
+        self.assertEqual(
+            [item["user_query"] for item in client.get("/v1/sessions/cart-fallback-session").json()["recent_turns"]],
+            ["red tshirt size L"],
+        )
 
         available_cart = client.post(
             "/v1/sessions/cart-fallback-session/turns",
