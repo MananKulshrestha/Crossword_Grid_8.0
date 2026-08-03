@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from unittest.mock import patch
 
 from fkgrid.agentic.contracts import (
+    AddItemOperation,
     Action,
     ActiveResultBinding,
     CompatibilityTuple,
@@ -26,6 +27,7 @@ from fkgrid.agentic.contracts import (
     TruthStatus,
     TurnRequest,
     TurnSnapshot,
+    UpdateCartRequest,
     UiAction,
 )
 from fkgrid.agentic.fakes import (
@@ -160,7 +162,10 @@ def orchestrator(snapshot: TurnSnapshot, entries: list[SearchEntry]) -> tuple[Tu
         catalog=catalog,
         recovery=FakeRecoveryPort(),
         references=FakeReferenceResolver(),
-        cart=FakeCartPort(snapshot.cart),
+        cart=FakeCartPort(
+            snapshot.cart,
+            session_snapshot_provider=lambda: state.snapshot,
+        ),
         research=FakeResearchPort(clock),
         suggestions=FakeSuggestionPort(),
         markdown=markdown,
@@ -618,6 +623,93 @@ class AgenticWorkflowTests(unittest.TestCase):
         self.assertEqual(result.response.terminal_state, TerminalState.CART_UPDATED)
         self.assertEqual(len(dependencies["gateway"].calls), 0)  # type: ignore[attr-defined]
         self.assertEqual(len(result.response.cart.items), 1)
+
+    def test_cart_port_rejects_stale_state_version_without_mutating_cart(self) -> None:
+        snapshot, entries = fixture()
+        state = InMemorySessionState(snapshot)
+        cart = FakeCartPort(
+            snapshot.cart,
+            session_snapshot_provider=lambda: state.snapshot,
+        )
+        request = UpdateCartRequest(
+            session_id=snapshot.session_id,
+            expected_state_version=1,
+            expected_cart_version=0,
+            idempotency_key="state-conflict-key",
+            operations=[
+                AddItemOperation(
+                    operation_id="state-conflict-operation",
+                    result_entry_id=entries[0].result_entry_id,
+                    binding=entries[0].binding,
+                    selected_variant_hash="variant-hash",
+                    quantity=1,
+                )
+            ],
+        )
+
+        result = cart.update_cart(request, deadline_ms=100)
+
+        self.assertEqual(result.status, "CONFLICT")
+        self.assertEqual(result.warnings, ["STATE_VERSION_CONFLICT"])
+        self.assertEqual(state.snapshot.state_version, 0)
+        self.assertEqual(state.snapshot.cart.item_count, 0)
+
+        candidate = cart.update_cart(
+            request.model_copy(update={"expected_state_version": 0}),
+            deadline_ms=100,
+        )
+
+        self.assertEqual(candidate.status, "UPDATED")
+        self.assertEqual(candidate.cart.item_count, 1)
+        self.assertEqual(state.snapshot.cart.item_count, 0)
+        self.assertEqual(cart.show_cart(snapshot.session_id, 0, 100).item_count, 0)
+
+    def test_cart_update_uses_current_state_version_after_state_only_turn(self) -> None:
+        snapshot, entries = fixture()
+        app, dependencies = orchestrator(snapshot, entries)
+
+        first = app.handle(
+            TurnRequest(
+                session_id=snapshot.session_id,
+                client_turn_id="state-only-turn",
+                idempotency_key="state-only-key",
+                expected_state_version=0,
+                expected_cart_version=0,
+                message="hey",
+            )
+        )
+        self.assertEqual(first.status, "COMPLETED")
+
+        second = app.handle(
+            TurnRequest(
+                session_id=snapshot.session_id,
+                client_turn_id="cart-after-state-turn",
+                idempotency_key="cart-after-state-key",
+                expected_state_version=1,
+                expected_cart_version=0,
+                ui_action=UiAction(
+                    action=Action.UPDATE_CART,
+                    payload={
+                        "operations": [
+                            {
+                                "type": "ADD_ITEM",
+                                "operation_id": "cart-after-state-operation",
+                                "result_entry_id": entries[0].result_entry_id,
+                                "quantity": 1,
+                            }
+                        ]
+                    },
+                ),
+            )
+        )
+
+        self.assertEqual(second.status, "COMPLETED")
+        assert second.response is not None
+        self.assertEqual(second.response.terminal_state, TerminalState.CART_UPDATED)
+        state = dependencies["state"]  # type: ignore[assignment]
+        self.assertEqual(state.snapshot.state_version, 2)
+        self.assertEqual(state.snapshot.cart_version, 1)
+        self.assertEqual(state.snapshot.cart.item_count, 1)
 
     def test_prompt_registry_has_versioned_checksums_and_gemma_adapter_has_no_tools(self) -> None:
         prompts = PromptRegistry()

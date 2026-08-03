@@ -7,7 +7,7 @@ catalog truth for local testing only; it is not a live-commerce integration.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -34,6 +34,7 @@ from fkgrid.agentic.contracts import (
     SoftOperator,
     ToolStatus,
     TruthStatus,
+    TurnSnapshot,
     UpdateCartRequest,
     UpdateCartResult,
 )
@@ -884,8 +885,14 @@ class FixtureCatalogPort(FakeCatalogPort):
 class FixtureCartPort(FakeCartPort):
     """Use fixture prices when the model omits an optional expected price."""
 
-    def __init__(self, snapshot: Any, catalog: FixtureCatalogPort) -> None:
-        super().__init__(snapshot)
+    def __init__(
+        self,
+        snapshot: Any,
+        catalog: FixtureCatalogPort,
+        *,
+        session_snapshot_provider: Callable[[], TurnSnapshot] | None = None,
+    ) -> None:
+        super().__init__(snapshot, session_snapshot_provider=session_snapshot_provider)
         self.catalog = catalog
 
     def update_cart(self, request: UpdateCartRequest, deadline_ms: int) -> UpdateCartResult:

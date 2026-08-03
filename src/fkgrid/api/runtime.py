@@ -374,7 +374,11 @@ class ApiRuntime:
             catalog=self.tooling.shopper_catalog,
             recovery=self.tooling.recovery,
             references=self.tooling.references,
-            cart=FixtureCartPort(cart, legacy_catalog),
+            cart=FixtureCartPort(
+                cart,
+                legacy_catalog,
+                session_snapshot_provider=lambda: session_state.snapshot,
+            ),
             research=self.tooling.research,
             suggestions=self.tooling.suggestions,
             markdown=markdown,

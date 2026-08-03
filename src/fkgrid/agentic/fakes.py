@@ -6,6 +6,7 @@ import hashlib
 import base64
 import hmac
 import unicodedata
+from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any, Sequence
 
@@ -641,20 +642,39 @@ def empty_cart(session_id: str, compatibility: CompatibilityTuple) -> CartSnapsh
 
 
 class FakeCartPort(CartPort):
-    def __init__(self, snapshot: CartSnapshot) -> None:
+    """Prepare cart candidates and enforce both optimistic version preconditions."""
+
+    def __init__(
+        self,
+        snapshot: CartSnapshot,
+        *,
+        session_snapshot_provider: Callable[[], TurnSnapshot] | None = None,
+    ) -> None:
         self.snapshot = snapshot
+        self._session_snapshot_provider = session_snapshot_provider
         self.show_calls = 0
         self.update_calls = 0
 
     def show_cart(self, session_id: str, known_cart_version: int, deadline_ms: int) -> CartSnapshot:
         self.show_calls += 1
-        return self.snapshot.model_copy(deep=True)
+        return self._current_cart().model_copy(deep=True)
 
     def update_cart(self, request: UpdateCartRequest, deadline_ms: int) -> UpdateCartResult:
         self.update_calls += 1
-        if request.expected_cart_version != self.snapshot.cart_version:
-            return UpdateCartResult(status="CONFLICT", cart=self.snapshot)
-        items = {item.cart_item_id: item.model_copy(deep=True) for item in self.snapshot.items}
+        current_state_version, current_cart = self._current_state_and_cart()
+        if request.expected_state_version != current_state_version:
+            return UpdateCartResult(
+                status="CONFLICT",
+                cart=current_cart,
+                warnings=["STATE_VERSION_CONFLICT"],
+            )
+        if request.expected_cart_version != current_cart.cart_version:
+            return UpdateCartResult(
+                status="CONFLICT",
+                cart=current_cart,
+                warnings=["CART_VERSION_CONFLICT"],
+            )
+        items = {item.cart_item_id: item.model_copy(deep=True) for item in current_cart.items}
         applied: list[str] = []
         for operation in request.operations:
             if operation.type == "ADD_ITEM":
@@ -662,7 +682,7 @@ class FakeCartPort(CartPort):
                 if existing:
                     new_quantity = existing.quantity + operation.quantity
                     if new_quantity > 99:
-                        return UpdateCartResult(status="REJECTED", cart=self.snapshot, warnings=["QUANTITY_LIMIT"])
+                        return UpdateCartResult(status="REJECTED", cart=current_cart, warnings=["QUANTITY_LIMIT"])
                     existing.quantity = new_quantity
                     existing.line_subtotal = Money(amount_paise=existing.quantity * existing.unit_price.amount_paise)
                 else:
@@ -680,13 +700,13 @@ class FakeCartPort(CartPort):
                 applied.append(operation.operation_id)
             elif operation.type == "REMOVE_ITEM":
                 if operation.cart_item_id not in items:
-                    return UpdateCartResult(status="REJECTED", cart=self.snapshot, warnings=["CART_ITEM_NOT_FOUND"])
+                    return UpdateCartResult(status="REJECTED", cart=current_cart, warnings=["CART_ITEM_NOT_FOUND"])
                 del items[operation.cart_item_id]
                 applied.append(operation.operation_id)
             elif operation.type in {"SET_QUANTITY", "INCREMENT_ITEM", "DECREMENT_ITEM"}:
                 item_id = operation.cart_item_id
                 if item_id not in items:
-                    return UpdateCartResult(status="REJECTED", cart=self.snapshot, warnings=["CART_ITEM_NOT_FOUND"])
+                    return UpdateCartResult(status="REJECTED", cart=current_cart, warnings=["CART_ITEM_NOT_FOUND"])
                 item = items[item_id]
                 if operation.type == "SET_QUANTITY":
                     new_quantity = operation.quantity
@@ -695,28 +715,38 @@ class FakeCartPort(CartPort):
                 else:
                     new_quantity = item.quantity - operation.amount
                 if not 1 <= new_quantity <= 99:
-                    return UpdateCartResult(status="REJECTED", cart=self.snapshot, warnings=["QUANTITY_LIMIT"])
+                    return UpdateCartResult(status="REJECTED", cart=current_cart, warnings=["QUANTITY_LIMIT"])
                 item.quantity = new_quantity
                 item.line_subtotal = Money(amount_paise=item.quantity * item.unit_price.amount_paise)
                 applied.append(operation.operation_id)
             else:
                 if operation.confirmation_token != "fake-clear-confirmation":
-                    return UpdateCartResult(status="REJECTED", cart=self.snapshot, warnings=["CLEAR_CONFIRMATION_REQUIRED"])
+                    return UpdateCartResult(status="REJECTED", cart=current_cart, warnings=["CLEAR_CONFIRMATION_REQUIRED"])
                 items.clear()
                 applied.append(operation.operation_id)
         new_items = list(items.values())
-        cart = self.snapshot.model_copy(
+        cart = current_cart.model_copy(
             update={
                 "items": new_items,
                 "item_count": len(new_items),
                 "total_quantity": sum(item.quantity for item in new_items),
                 "subtotal": Money(amount_paise=sum(item.line_subtotal.amount_paise for item in new_items)),
-                "cart_version": self.snapshot.cart_version + 1,
+                "cart_version": current_cart.cart_version + 1,
             },
             deep=True,
         )
-        self.snapshot = cart
+        if self._session_snapshot_provider is None:
+            self.snapshot = cart
         return UpdateCartResult(status="UPDATED", applied_operation_ids=applied, cart=cart)
+
+    def _current_state_and_cart(self) -> tuple[int, CartSnapshot]:
+        if self._session_snapshot_provider is not None:
+            snapshot = self._session_snapshot_provider().model_copy(deep=True)
+            return snapshot.state_version, snapshot.cart
+        return self.snapshot.state_version, self.snapshot
+
+    def _current_cart(self) -> CartSnapshot:
+        return self._current_state_and_cart()[1]
 
 
 class FakeResearchPort(ResearchPort):
