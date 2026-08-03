@@ -62,7 +62,7 @@ def load_md_blocks():
 
 
 def build_documents(limit=None):
-    """Returns (documents, skipped_empty_description_count).
+    """Returns (documents, skipped_count_tuple).
 
     documents is a list of (sku_id, document_text) tuples, ready for
     LightRAG.insert(). document_text is exactly `product_name +
@@ -71,17 +71,28 @@ def build_documents(limit=None):
 
     Products with an empty/placeholder description are excluded from
     documents but counted and returned explicitly (this mirrors
-    flipkart_to_lightrag.py's own empty_description_count reporting) --
-    the caller is responsible for reporting this count, not silently
-    proceeding as if every requested document was available."""
+    flipkart_to_lightrag.py's own empty_description_count reporting).
+    Products with a duplicate SKU ID (same ID appearing in multiple blocks)
+    are also excluded, keeping the first occurrence and counting the rest
+    as duplicates. The caller is responsible for reporting these counts,
+    not silently proceeding as if every requested document was available.
+
+    skipped_count_tuple is (empty_descriptions, duplicates) for the caller
+    to report separately."""
     documents = []
     skipped_empty_description = 0
+    skipped_duplicates = 0
+    seen_sku_ids = set()
     for sku_id, product_name, description in load_md_blocks():
         if not description or description == "(No description available)":
             skipped_empty_description += 1
             continue
+        if sku_id in seen_sku_ids:
+            skipped_duplicates += 1
+            continue
         text = f"{product_name}\n\n{description}" if product_name else description
         documents.append((sku_id, text))
+        seen_sku_ids.add(sku_id)
         if limit and len(documents) >= limit:
             break
-    return documents, skipped_empty_description
+    return documents, (skipped_empty_description, skipped_duplicates)

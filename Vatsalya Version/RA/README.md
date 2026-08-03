@@ -32,12 +32,13 @@ product's `product_name + description`). For each document:
    even though the graph itself only covers a subset (see below).
 3. **Entity/relationship extraction — subset only** — for SKUs in
    `graph_sampling_output/full_extraction_skus.txt`, the chunk is sent to
-   the LLM (`LLM_MODEL`) with a structured extraction prompt (see
-   `prompts/entity_type/ecommerce_catalog.yml`) asking it to pull out
-   entities (e.g. `Alisha` — BRAND, `Cycling Shorts` — CATEGORY) and
-   relationships between them. For every other SKU, this step is skipped
-   entirely via LightRAG's native `skip_kg` process option — no LLM call,
-   no graph presence, but still fully embedded from step 2.
+   the LLM (`LLM_MODEL`) with a structured extraction prompt (`config.py`'s
+   `ENTITY_TYPES_GUIDANCE`) asking it to pull out entities (e.g. `Alisha` —
+   Brand, `Cotton` — Material) and relationships between them, constrained
+   to a fixed relationship vocabulary (`HAS_BRAND`, `HAS_MATERIAL`, ...).
+   For every other SKU, this step is skipped entirely via LightRAG's
+   native `skip_kg` process option — no LLM call, no graph presence, but
+   still fully embedded from step 2.
 4. **Merging** — the same entity name showing up across many products
    (e.g. a brand appearing on multiple SKUs) gets merged into a single
    graph node with combined evidence, instead of duplicate nodes per
@@ -64,12 +65,13 @@ reasoning in `lightrag-implementation.md`, section 5.
 of this project passed `addon_params={"entity_types": [...]}` to LightRAG —
 a key `lightrag-hku` (confirmed on the installed 1.5.5 release) never reads
 at all. Every extraction would have silently used LightRAG's generic
-default ontology (Person, Organization, Location, Event...) instead of
-`PRODUCT`/`BRAND`/`CATEGORY`/`MATERIAL`/`OCCASION`/`STYLE`. Fixed by using
-the mechanism LightRAG actually resolves: `addon_params={"entity_type_prompt_file":
-"ecommerce_catalog.yml"}`, pointing at `prompts/entity_type/ecommerce_catalog.yml`
-(guidance text + two real, worked examples from this catalog, not
-placeholder-only ones). Details and a before/after example in
+default ontology (Person, Organization, Location, Event...) instead of a
+product-catalog one. Fixed by using the mechanism LightRAG actually
+resolves: `addon_params={"entity_types_guidance": ENTITY_TYPES_GUIDANCE}`
+in `ingest.py`'s `build_rag()`, with the guidance text defined inline in
+`config.py` (`Product`/`Brand`/`Category`/`Material`/`Color`/`Feature`/
+`Technology`/`CompatibleItem`/`Audience`/`Certification`/`Warranty`, plus
+a fixed 5-field relationship format and keyword vocabulary). Details in
 `lightrag-implementation.md`, section 6.
 
 ## 0. Provision Qdrant and MySQL
@@ -123,40 +125,112 @@ pip install -r requirements.txt
 
 ## 2. Start Ollama and pull models
 
-Server is expected at `http://localhost:11345` (set in `config.py` /
-`OLLAMA_HOST` env var — adjust if your cluster uses a different port).
-**`OLLAMA_NUM_PARALLEL` must be set on the server** or Ollama will queue
+Embedding runs **locally** by default (`EMBED_BACKEND="local"` in
+`config.py`) via `sentence-transformers`/`torch` on this machine (Apple
+Silicon MPS if available, else CPU) — see "Embedding backend" below. No
+Ollama server or model pull is needed for embedding in this mode.
+
+Extraction (the expensive part) **round-robins across every server
+listed in `servers.txt`** via `multi_ollama.py` — see "Multi-server
+extraction" below for why and how to add more than one.
+**`OLLAMA_NUM_PARALLEL` must be set on each server** or Ollama will queue
 requests one at a time regardless of how many concurrent calls LightRAG
 sends:
 
 ```bash
-OLLAMA_NUM_PARALLEL=4 OLLAMA_HOST=0.0.0.0:11345 ollama serve &
+OLLAMA_NUM_PARALLEL=4 OLLAMA_HOST=0.0.0.0:11435 ollama serve &
 
-ollama pull gemma4:27b        # LLM_MODEL in config.py — or qwen3.6, see below
+ollama pull gemma4:e4b        # LLM_MODEL in config.py — or qwen3.6, gemma4:27b, see below
+```
+
+Confirm the exact tag name with `ollama list` once pulled — adjust
+`LLM_MODEL` in `config.py` (or via the `LIGHTRAG_LLM_MODEL` env var) if it
+differs.
+
+If you'd rather keep embedding on the Ollama cluster instead (e.g. no
+local GPU/MPS available), set `EMBED_BACKEND=ollama` and pull the
+embedding model too:
+
+```bash
+export LIGHTRAG_EMBED_BACKEND=ollama
+OLLAMA_NUM_PARALLEL=4 OLLAMA_HOST=0.0.0.0:11345 ollama serve &
 ollama pull nomic-embed-text  # EMBED_MODEL in config.py
 ```
 
-Confirm the exact tag names with `ollama list` once pulled — adjust
-`LLM_MODEL` / `EMBED_MODEL` in `config.py` (or via `LIGHTRAG_LLM_MODEL` /
-`LIGHTRAG_EMBED_MODEL` env vars) if they differ.
+### Embedding backend (`EMBED_BACKEND`)
+
+Set via `config.py`'s `EMBED_BACKEND` (or `LIGHTRAG_EMBED_BACKEND` env
+var), one config switch for the whole pipeline (`ingest.py` and
+`query.py` both read it through `build_rag()`):
+
+- **`local`** (default) — runs `nomic-ai/nomic-embed-text-v1.5` (the same
+  weights Ollama's `nomic-embed-text` is built from, same 768-dim output)
+  via `sentence-transformers` in-process, see `local_embed.py`. Needs
+  `sentence-transformers` + `einops` (`requirements.txt`) installed, no
+  Ollama embedding server. Frees the Ollama cluster's GPUs entirely for
+  extraction — no more embedding-vs-extraction contention over VRAM.
+- **`ollama`** — calls `OLLAMA_HOST` for embeddings the same way
+  extraction calls `servers.txt`, requires `nomic-embed-text` pulled there.
+
+`EMBEDDING_MAX_ASYNC` only meaningfully applies to `EMBED_BACKEND=ollama`
+— local encode() calls are serialized internally regardless (see
+`local_embed.py`'s module docstring for why concurrent local calls don't
+parallelize and can actually be slower).
+
+### Multi-server extraction (`servers.txt`)
+
+Entity/relation extraction (`ingest.py`'s LLM calls) is the part actually
+worth spreading across more than one GPU/server — embedding, with the
+default `EMBED_BACKEND="local"`, doesn't touch this cluster at all (see
+"Embedding backend" above). `servers.txt` lists one Ollama server URL per
+line (`#` comments and blank lines ignored); `ingest.py` reads it via
+`multi_ollama.load_servers()` and dispatches every extraction call
+round-robin across whatever's listed, via `MultiOllamaLoadBalancer`.
+Ships with a multi-server default, so nothing extra is required to get
+started — add more lines to parallelize further:
+
+```
+http://127.0.0.1:11435
+http://127.0.0.1:11436  # second `ollama serve`, different GPU/port
+```
+
+Each URL should be its own `ollama serve` process — ideally pinned to a
+distinct GPU (or GPU pair) via `CUDA_VISIBLE_DEVICES` so they don't
+contend for the same VRAM, each started with its own `OLLAMA_NUM_PARALLEL`.
+No code changes needed to add a server: `ingest.py` re-reads `servers.txt`
+on every run via `build_rag()`. `run.sh` checks every server listed here is
+reachable (and has `LLM_MODEL` pulled) before ingesting.
+
+**Hard-fails, no silent fallback**: if `servers.txt` is missing or has no
+URLs, `ingest.py` raises immediately rather than silently falling back to
+a single server — matching this folder's existing no-soft-fallback
+discipline (`IMPLEMENTATION.md` #5).
+
+If raising `LLM_MAX_ASYNC` (below) to actually push more concurrent
+extraction requests through multiple servers, remember it's a *total*
+across all servers, distributed round-robin — not per-server.
 
 ### Which model to use
 
-- **`gemma4:27b`** (default here) — no "thinking" step, so every call
-  goes straight to output. Simpler and faster per-call for a
-  structured-extraction task like this, where you don't need visible
-  reasoning, just clean entity/relationship output.
+- **`gemma4:e4b`** (default here) — fits on a single GPU/card (unlike
+  `gemma4:27b`, which tensor-splits across two), so it supports higher
+  concurrency per server when extraction is spread across `servers.txt`.
+  No "thinking" step, so every call goes straight to output — simpler and
+  faster per-call for a structured-extraction task like this, where you
+  don't need visible reasoning, just clean entity/relationship output.
+- **`gemma4:27b`** — same no-thinking behavior as `e4b`, more capable but
+  needs more VRAM (tensor-splits across 2 GPUs on an 11GB-class card).
 - **`qwen3.6`** — stronger general reasoning/instruction-following, but
   it's a thinking model by default; `DISABLE_THINKING = True` in
   `config.py` forwards `think: false` to Ollama so it skips
   chain-of-thought and answers directly (otherwise extraction over
   thousands of chunks would be considerably slower).
 
-Given a 48GB-VRAM budget, either fits comfortably at `num_ctx=16384`
-alongside `nomic-embed-text`. If graph quality looks weak on a first small
-run (few entities/relations extracted), try switching to `qwen3.6` — it
-tends to follow structured-extraction instructions more reliably than
-Gemma at similar size.
+All three fit comfortably at `num_ctx=8192`+ per server. If graph quality
+looks weak on a first small run (few entities/relations extracted), try
+switching to `qwen3.6` or `gemma4:27b` — both tend to follow
+structured-extraction instructions more reliably than `gemma4:e4b` at its
+smaller size, at the cost of concurrency/VRAM headroom.
 
 To switch models:
 
@@ -166,18 +240,21 @@ export LIGHTRAG_LLM_MODEL=qwen3.6
 
 ### Context length
 
-Set via `NUM_CTX` in `config.py` (default **16384**, override with
-`LIGHTRAG_NUM_CTX`). Why 16384 and not less:
+Set via `NUM_CTX` in `config.py` (default **8192**, override with
+`LIGHTRAG_NUM_CTX`). Why 8192:
 
-- LightRAG's entity-extraction system prompt is itself ~2–3k tokens.
+- LightRAG's entity-extraction system prompt (`ENTITY_TYPES_GUIDANCE`) is
+  itself ~2–3k tokens.
 - Chunk text adds up to `chunk_token_size` (1200 tokens by default).
 - The model's own output (entities + relationships + gleaning passes)
   needs room too.
 
-8192 is the bare minimum that won't risk silently truncating the prompt;
-16384 leaves headroom for gleaning passes and longer product descriptions
-without needing to tune further. With 48GB VRAM this is affordable for
-both `gemma4:27b` and `qwen3.6`.
+8192 is the bare minimum that won't silently truncate the prompt — the
+condensed `ENTITY_TYPES_GUIDANCE` (a fixed relationship-keyword vocabulary
++ strict 5-field format instead of one bullet + worked example per type)
+keeps the prompt itself small enough that 8192 has real headroom left for
+chunk text and gleaning passes, without needing 16384. Raise it via
+`LIGHTRAG_NUM_CTX` if you see truncation warnings in the logs.
 
 ### Concurrency (4 workers)
 
@@ -251,13 +328,16 @@ At the end you get an explicit summary read back from LightRAG's own
 `doc_status` store:
 
 ```
+Resumed 2 previously FAILED document(s) -- reset to PENDING for retry.
+
 === Ingestion summary ===
-Attempted:            19996
-Processed:            19994
-Failed:               2
-Skipped (no desc.):   2
-Qdrant:               http://localhost:6333
-Storage:              /path/to/RA/lightrag_storage
+Attempted this run:    19996
+Resumed from FAILED:   2
+Processed (total):     19994
+Failed (total):        2
+Skipped (no desc.):    2
+Qdrant:                http://localhost:6333
+Storage (checkpoint):  /path/to/RA/lightrag_storage
 
 Failed sku_ids:
   SBEEH3QGU7MFYJFY: TimeoutError(...)
@@ -266,9 +346,43 @@ Failed sku_ids:
 
 If anything failed, the script exits non-zero and lists exactly which
 `sku_id`s failed and why — it does **not** substitute a placeholder/empty
-entry for a failed document and continue as if nothing happened. Re-run
-`ingest.py` to retry; LightRAG's own doc-status tracking skips
-already-`PROCESSED` SKUs on the next pass.
+entry for a failed document and continue as if nothing happened.
+
+### Checkpoint / resume — hard interrupts don't lose work, failures don't get ignored
+
+`RA/lightrag_storage/` (the "Storage" line above) **is** the checkpoint —
+every document's progress is tracked there via LightRAG's own `doc_status`
+store (`PENDING → PROCESSING → PROCESSED` / `FAILED`), persisted to disk on
+every status transition, not just at the end. This means:
+
+- **Hard interrupt (Ctrl+C, `kill -9`, crash, power loss) mid-run**: whatever
+  was already `PROCESSED` stays processed. Whatever was killed mid-flight
+  (stuck in `PROCESSING`/`PARSING`/`ANALYZING`) is automatically detected and
+  reset to `PENDING` by LightRAG itself the next time you run `python
+  ingest.py` — you do not need to do anything special, just re-run the same
+  command.
+- **A document that failed** (the LLM call raised, a timeout, malformed
+  extraction output, etc.) is recorded as `FAILED` with its error message —
+  but LightRAG's default behavior is to leave a `FAILED` document `FAILED`
+  forever unless something explicitly asks for a retry. `ingest.py` closes
+  that gap itself: **every run** first resets every currently-`FAILED`
+  document back to `PENDING` (`resume_failed_documents()` in `ingest.py`,
+  using LightRAG's own public reset helpers), so a failed SKU is retried on
+  the very next invocation instead of being silently skipped forever. If it
+  fails again, it's reported as failed again — nothing is hidden.
+- **Already-`PROCESSED` documents are never redone.** Re-running `ingest.py`
+  after any of the above only pays for what's still `PENDING` or was reset
+  from `FAILED`/interrupted — not a full re-ingest.
+- This is why a hard interrupt is always safe to just re-run from: `python
+  ingest.py` again picks up exactly where it left off, with nothing double
+  counted and nothing quietly dropped.
+
+`graph_sampling.py` and `bm25_index.py` don't need this kind of resume —
+they're single, fast, in-memory passes with no LLM calls and no per-item
+failure mode (a run either completes or, on a hard interrupt, simply
+produces no new output file — the previous good one is untouched, since both
+scripts write via a temp file + atomic `os.replace()`, never in place). Just
+re-run them; there's nothing to "resume" mid-pass.
 
 ## 5. Query
 
@@ -283,6 +397,38 @@ search over chunks (every SKU, via Qdrant). Runs with
 (chunks/entities/relationships + source SKU references), not an
 LLM-generated prose answer — response generation belongs to the outer
 chat layer, not this retrieval step.
+
+## Checking how many samples each branch has actually ingested
+
+Each branch prints its own summary when you run it; there's no single
+combined status command (there's no shared "job" concept across the three
+independent scripts). Where to look:
+
+| Branch | How to check | What it tells you |
+|---|---|---|
+| SQL (`sql_filter.py`) | Reads `product_metadata` directly at query time — no separate ingest/index step, so there's no "samples ingested" count for it. | N/A |
+| BM25 (`bm25_index.py`) | `python bm25_index.py --build` | SKUs indexed vs. skipped (no usable description) |
+| Graph sampling (`graph_sampling.py`) | `python graph_sampling.py`, or read `graph_sampling_output/coverage_report.json` if already run | Total catalog size, SKUs chosen for full extraction, coverage stats |
+| LightRAG (`ingest.py`) | End-of-run summary (above), or re-run `python ingest.py` any time — the summary always reflects the true current state of `lightrag_storage/`, not just this run | Processed / Failed / Resumed / Skipped counts, total across all runs so far |
+
+As of the last run in this environment (no Ollama/Qdrant available in this
+session, so LightRAG itself has **not** been ingested yet — `lightrag_storage/`
+does not exist):
+
+- **SQL**: N/A (queried live, not ingested).
+- **BM25**: not yet built in this environment (`rank_bm25` isn't installed
+  in `.venv` here) — run `pip install -r requirements.txt && python
+  bm25_index.py --build` to get a real count; expect ~19,996–19,998 (every
+  SKU with a usable description, per `graph_sampling_output/coverage_report.json`'s
+  `skus_with_usable_description`).
+- **Graph sampling**: already run — `graph_sampling_output/coverage_report.json`
+  shows **2,673 of 20,000 SKUs (13.4%)** chosen for full graph extraction,
+  covering 86/86 categories, 1,448/1,448 qualifying brands, 97/99 materials.
+- **LightRAG**: **0 processed so far** — `ingest.py` has never been run
+  end-to-end in this environment (no `lightrag_storage/` present). Run it
+  once Ollama + Qdrant are reachable; the summary it prints is the
+  authoritative "how many samples ingested" number going forward, and stays
+  accurate across as many interrupted/resumed runs as it takes.
 
 ## Run everything with one command
 
@@ -312,6 +458,12 @@ pulls any missing models, then runs the requested step.
   ingestion never gets replaced with placeholder content, and `ingest.py`
   hard-fails with a clear message if `graph_sampling_output/full_extraction_skus.txt`
   doesn't exist yet, rather than silently treating every SKU as skip_kg.
+- Every branch's on-disk output (LightRAG's `doc_status` store,
+  `graph_sampling_output/*.txt`/`.json`, `bm25_storage/index.pkl`) is a real
+  checkpoint, not a soft cache: a hard interrupt never corrupts it (writes
+  are atomic or transition-by-transition), a re-run never silently skips a
+  `FAILED` document, and nothing is double-processed. See "Checkpoint /
+  resume" above.
 - SQL hard-filtering (`sql_filter.py`) and BM25 lexical search
   (`bm25_index.py`) are fully built, full-catalog, and tested against real
   data (`tests/test_sql_filter.py`, `tests/test_bm25.py`) — see

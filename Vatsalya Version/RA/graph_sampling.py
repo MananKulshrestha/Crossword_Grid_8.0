@@ -222,7 +222,8 @@ def enforce_category_floor(chosen, chosen_skus, families, category_targets, floo
 
 def run():
     records = load_structured_records()
-    descriptions = dict(build_documents(limit=None)[0])
+    documents, _skipped = build_documents(limit=None)
+    descriptions = dict(documents)
 
     category_targets, brand_targets, material_targets = build_target_registry(records)
     families = build_families(records, descriptions, category_targets, brand_targets, material_targets)
@@ -256,12 +257,25 @@ def run():
         "style_covered": covered_styles,
     }
 
+    # No mid-run checkpoint: the whole selection is a single in-memory pass
+    # over the full catalog (no LLM/network calls, no per-item state to
+    # resume), so a hard interrupt just means re-running `python
+    # graph_sampling.py` from scratch -- cheap at this catalog size. What DOES
+    # matter is that a crash mid-write never leaves ingest.py reading a
+    # truncated/partial subset file: write to a temp file and os.replace()
+    # (atomic on POSIX) so SUBSET_PATH is either the previous good version or
+    # the new complete one, never a half-written one.
     os.makedirs(OUTPUT_DIR, exist_ok=True)
-    with open(SUBSET_PATH, "w", encoding="utf-8") as f:
+    tmp_subset_path = SUBSET_PATH + ".tmp"
+    with open(tmp_subset_path, "w", encoding="utf-8") as f:
         for sku_id in sorted(chosen_skus):
             f.write(sku_id + "\n")
-    with open(REPORT_PATH, "w", encoding="utf-8") as f:
+    os.replace(tmp_subset_path, SUBSET_PATH)
+
+    tmp_report_path = REPORT_PATH + ".tmp"
+    with open(tmp_report_path, "w", encoding="utf-8") as f:
         json.dump(report, f, indent=2)
+    os.replace(tmp_report_path, REPORT_PATH)
 
     return chosen_skus, report
 

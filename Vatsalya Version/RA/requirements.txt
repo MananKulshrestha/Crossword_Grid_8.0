@@ -1,6 +1,9 @@
 lightrag-hku
 ollama
+sentence-transformers
+einops
 PyMySQL
 pytest
 rank_bm25
 qdrant-client
+tqdm

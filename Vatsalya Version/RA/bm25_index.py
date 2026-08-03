@@ -32,29 +32,46 @@ def tokenize(text: str) -> list[str]:
 
 
 def _build_index():
-    documents, _skipped = build_documents(limit=None)
+    documents, (skipped_empty_description, skipped_duplicates) = build_documents(limit=None)
     sku_ids = [sku_id for sku_id, _text in documents]
     tokenized_corpus = [tokenize(text) for _sku_id, text in documents]
     bm25 = BM25Okapi(tokenized_corpus)
-    return sku_ids, bm25
+    return sku_ids, bm25, (skipped_empty_description, skipped_duplicates)
 
 
-def _load_or_build_index():
+def _load_or_build_index(verbose: bool = False):
     """Rebuilds only when the corpus file is newer than the persisted
-    index (or no index exists yet) -- matches the doc's stated local-
-    persistence pattern ("the same pattern as Chroma's local
-    persistence")."""
+    index (or no index exists yet) -- this pickle IS the checkpoint: a
+    rebuild that's interrupted mid-write never lands (os.replace below is
+    atomic), so a re-run either resumes from the last good index (mtime
+    unchanged -> reuse) or does a fresh full rebuild (mtime changed / no
+    index) -- there is no partial/corrupt index state to "resume" from,
+    since BM25Okapi's build is a single in-memory pass with no per-item
+    failure mode to track (matches the doc's stated local-persistence
+    pattern, "the same pattern as Chroma's local persistence")."""
     corpus_mtime = os.path.getmtime(SOURCE_MD)
     if os.path.exists(INDEX_PATH):
         with open(INDEX_PATH, "rb") as f:
             stored_mtime, sku_ids, bm25 = pickle.load(f)
         if stored_mtime == corpus_mtime:
+            if verbose:
+                print(f"BM25 index up to date ({len(sku_ids)} SKUs indexed): {INDEX_PATH}")
             return sku_ids, bm25
 
-    sku_ids, bm25 = _build_index()
+    sku_ids, bm25, (skipped_empty_description, skipped_duplicates) = _build_index()
     os.makedirs(os.path.dirname(INDEX_PATH), exist_ok=True)
-    with open(INDEX_PATH, "wb") as f:
+    tmp_path = INDEX_PATH + ".tmp"
+    with open(tmp_path, "wb") as f:
         pickle.dump((corpus_mtime, sku_ids, bm25), f)
+    os.replace(tmp_path, INDEX_PATH)  # atomic -- a crash mid-write leaves the old index intact
+    if verbose:
+        print("=== BM25 index build summary ===")
+        print(f"SKUs indexed:          {len(sku_ids)}")
+        skip_msg = f"Skipped: {skipped_empty_description} no description"
+        if skipped_duplicates:
+            skip_msg += f", {skipped_duplicates} duplicates"
+        print(skip_msg)
+        print(f"Index written to:      {INDEX_PATH}")
     return sku_ids, bm25
 
 
@@ -82,7 +99,10 @@ if __name__ == "__main__":
     import sys
 
     if len(sys.argv) < 2:
-        print(f"Usage: python {sys.argv[0]} \"your query\"")
+        print(f"Usage: python {sys.argv[0]} \"your query\"  |  python {sys.argv[0]} --build")
         sys.exit(1)
+    if sys.argv[1] == "--build":
+        _load_or_build_index(verbose=True)
+        sys.exit(0)
     for sku_id, score in search(" ".join(sys.argv[1:])):
         print(f"{score:.4f}  {sku_id}")

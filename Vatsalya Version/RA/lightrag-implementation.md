@@ -300,6 +300,25 @@ regardless of budget.
 
 ## 6. Prompt design — a real bug, and how to fix it
 
+**Superseded note:** sections 6.1–6.5 below document the investigation
+that led to fixing the broken `addon_params={"entity_types": [...]}` key,
+and originally recommended packaging the fix as a `entity_type_prompt_file`
+YAML profile (§6.5) — that YAML-profile approach was implemented for a
+while (`prompts/entity_type/ecommerce_catalog.yml`, a six-type
+Product/Brand/Category/Material/Occasion/Style schema with two worked
+examples). The current `ingest.py`/`config.py` instead pass
+`addon_params={"entity_types_guidance": ENTITY_TYPES_GUIDANCE}` directly —
+an inline string in `config.py` (an eleven-type schema: Product, Brand,
+Category, Material, Color, Feature, Technology, CompatibleItem, Audience,
+Certification, Warranty, plus a fixed 5-field relationship format and
+keyword vocabulary) — no YAML file or `PROMPT_DIR` resolution involved.
+The core finding below (§6.1–6.4: `entity_types_guidance` is the real key,
+`entity_types` does nothing) is still accurate and is why this project
+uses `entity_types_guidance` at all; only the *packaging* (inline string
+vs. YAML file) and the exact type/keyword list changed. §6.5's specific
+recommendation to package it as a checked-in YAML file no longer reflects
+what's actually wired up.
+
 ### 6.1 The current config does not do what it says
 
 `RA/config.py` defines:
