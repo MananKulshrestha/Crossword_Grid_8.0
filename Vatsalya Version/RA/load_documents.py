@@ -15,6 +15,7 @@ in flipkart_to_lightrag.py produced -- no second source of truth for what
 "the text corpus" contains.
 """
 
+import hashlib
 import re
 
 from config import SOURCE_MD
@@ -62,7 +63,8 @@ def load_md_blocks():
 
 
 def build_documents(limit=None):
-    """Returns (documents, skipped_empty_description_count).
+    """Returns (documents, skipped_empty_description_count,
+    skipped_duplicate_sku_count, skipped_duplicate_content_count).
 
     documents is a list of (sku_id, document_text) tuples, ready for
     LightRAG.insert(). document_text is exactly `product_name +
@@ -73,15 +75,55 @@ def build_documents(limit=None):
     documents but counted and returned explicitly (this mirrors
     flipkart_to_lightrag.py's own empty_description_count reporting) --
     the caller is responsible for reporting this count, not silently
-    proceeding as if every requested document was available."""
+    proceeding as if every requested document was available.
+
+    sku_id is not guaranteed globally unique in the source data (2 known
+    collisions, e.g. "JEAEGE8Q8GXYFTGU") -- LightRAG requires unique doc
+    ids (f"sku-{sku_id}" in ingest.py), so the second+ occurrence of a
+    duplicate sku_id is excluded here and counted, same precedent as the
+    `INSERT IGNORE` used for the MySQL load (../README.md).
+
+    Separately, many rows in the source data share byte-identical
+    product_name+description text under different sku_ids (thousands of
+    them -- apparent duplicate/near-duplicate listings, a known issue in
+    scraped catalog data). LightRAG has its own content-hash dedup, but it
+    stores the duplicate under a synthetic "dup-<hash>" doc_id, status
+    FAILED, with an error_msg -- NOT under the original "sku-{sku_id}" id
+    ingest.py tracks. That means our own doc_status lookups never see a
+    terminal state for that sku_id (neither PROCESSED nor FAILED under the
+    id we're watching), so it would misreport as "unaccounted" every run,
+    forever, and LightRAG would re-detect and re-log the same duplicate on
+    every resume without ever resolving it (since "sku-{sku_id}" never
+    becomes a known doc_status key). Deduping by content hash here, before
+    LightRAG ever sees it, avoids all of that -- same skip-and-count
+    discipline as the sku_id case above, not LightRAG's opaque side
+    channel."""
     documents = []
+    seen_sku_ids = set()
+    seen_content_hashes = set()
     skipped_empty_description = 0
+    skipped_duplicate_sku = 0
+    skipped_duplicate_content = 0
     for sku_id, product_name, description in load_md_blocks():
         if not description or description == "(No description available)":
             skipped_empty_description += 1
             continue
+        if sku_id in seen_sku_ids:
+            skipped_duplicate_sku += 1
+            continue
         text = f"{product_name}\n\n{description}" if product_name else description
+        content_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        if content_hash in seen_content_hashes:
+            skipped_duplicate_content += 1
+            continue
+        seen_sku_ids.add(sku_id)
+        seen_content_hashes.add(content_hash)
         documents.append((sku_id, text))
         if limit and len(documents) >= limit:
             break
-    return documents, skipped_empty_description
+    return (
+        documents,
+        skipped_empty_description,
+        skipped_duplicate_sku,
+        skipped_duplicate_content,
+    )

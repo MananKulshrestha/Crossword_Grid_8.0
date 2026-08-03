@@ -17,7 +17,6 @@ import sys
 
 from lightrag import QueryParam
 
-from config import WORKING_DIR
 from ingest import build_rag
 
 

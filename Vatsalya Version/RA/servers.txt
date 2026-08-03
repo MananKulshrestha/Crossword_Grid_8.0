@@ -1,0 +1,8 @@
+# Ollama server URLs - one per line
+# Format: http://hostname:port
+# Add more servers from other nodes as needed
+
+http://localhost:11435
+http://localhost:11436
+http://localhost:11437
+http://localhost:11438
