@@ -56,7 +56,7 @@ class DemoSemanticFamily:
 _DEMO_SEMANTIC_FAMILIES = (
     DemoSemanticFamily(
         key="formalwear",
-        aliases=("formalwear", "formal wear", "formalware"),
+        aliases=("formalwear", "formal wear", "formalware", "formalwaer"),
         product_ids=("demo-formal-shirt-1", "demo-formal-blazer-1", "demo-formal-pants-1"),
         interpretation="formalwear / shirts / blazers / pants",
         query_branches=("shirts", "blazers", "pants"),
@@ -209,6 +209,8 @@ def _demo_expansions() -> list[ApprovedExpansion]:
         "evidence_band": EvidenceBand.APPROVED_HIGH,
         **versions,
     }
+    compound_common = {**common, "mapping_type": MappingType.COMPOUND}
+    spelling_common = {**common, "mapping_type": MappingType.SPELLING_VARIANT}
     formal_expansions = [
         ("demo-shirts", "shirts", 100),
         ("demo-blazers", "blazers", 100),
@@ -222,9 +224,9 @@ def _demo_expansions() -> list[ApprovedExpansion]:
             canonical_target_id=concept_id,
             canonical_label=term,
             priority=priority,
-            **{**common, "mapping_type": MappingType.COMPOUND},
+            **compound_common,
         )
-        for source in ("formalwear", "formal wear", "formalware")
+        for source in ("formalwear", "formal wear", "formalware", "formalwaer")
         for index, (concept_id, term, priority) in enumerate(formal_expansions, start=1)
     ]
     return [
@@ -239,6 +241,24 @@ def _demo_expansions() -> list[ApprovedExpansion]:
             **common,
         ),
         ApprovedExpansion(
+            mapping_id="demo-shoes-typo-shoees",
+            normalized_form="shoees",
+            original_form="shoees",
+            canonical_target_id="demo-footwear",
+            canonical_label="footwear",
+            priority=100,
+            **spelling_common,
+        ),
+        ApprovedExpansion(
+            mapping_id="demo-shoes-typo-shooes",
+            normalized_form="shooes",
+            original_form="shooes",
+            canonical_target_id="demo-footwear",
+            canonical_label="footwear",
+            priority=99,
+            **spelling_common,
+        ),
+        ApprovedExpansion(
             mapping_id="demo-trainers-to-sports-shoes",
             normalized_form="trainers",
             original_form="trainers",
@@ -246,6 +266,15 @@ def _demo_expansions() -> list[ApprovedExpansion]:
             canonical_label="sports shoes",
             priority=100,
             **common,
+        ),
+        ApprovedExpansion(
+            mapping_id="demo-trainers-typo-traiers",
+            normalized_form="traiers",
+            original_form="traiers",
+            canonical_target_id="demo-sports-shoes",
+            canonical_label="sports shoes",
+            priority=100,
+            **spelling_common,
         ),
         ApprovedExpansion(
             mapping_id="demo-sneakers-to-sports-shoes",

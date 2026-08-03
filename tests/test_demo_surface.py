@@ -85,6 +85,27 @@ class DemoSurfaceTests(unittest.TestCase):
         self.assertFalse(recovery["event"]["planner_called"])
         self.assertEqual(recovery["event"]["hard_filter_mutation_count"], 0)
 
+    def test_spelling_variants_show_suggestions_without_questions(self) -> None:
+        expected = {
+            "formalwaer": {"Shirts", "Blazers", "Pants"},
+            "shoees": {"Footwear"},
+            "traiers": {"Sports Shoes"},
+        }
+        for query, labels in expected.items():
+            with self.subTest(query=query):
+                response = self.client.post(
+                    "/v1/query-recovery/demo-turn",
+                    json={"query": query},
+                )
+                self.assertEqual(response.status_code, 200)
+                recovery = response.json()["result"]
+                self.assertEqual(recovery["outcome"], "RECOVERED_TIER1")
+                self.assertEqual(
+                    {suggestion["label"] for suggestion in recovery["suggestions"]},
+                    labels,
+                )
+                self.assertIsNone(recovery["clarification"])
+
     def test_changing_query_does_not_replay_the_previous_result(self) -> None:
         shoes = self.client.post(
             "/v1/query-recovery/demo-turn",
