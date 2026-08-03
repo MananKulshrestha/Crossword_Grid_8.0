@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#07111f" />
+    <title>Query Expansion Lab · FK GRiD</title>
+    <link rel="stylesheet" href="/demo/static/demo.css" />
+  </head>
+  <body>
+    <div class="page-glow glow-one" aria-hidden="true"></div>
+    <div class="page-glow glow-two" aria-hidden="true"></div>
+    <div class="app-shell">
+      <header class="topbar">
+        <a class="brand" href="/demo" aria-label="FK GRiD Query Expansion Lab home">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 32 32" role="img">
+              <path d="M5 7.5 16 3l11 4.5v17L16 29 5 24.5z" />
+              <path d="m5 7.5 11 5 11-5M16 12.5V29" />
+            </svg>
+          </span>
+          <span class="brand-copy">
+            <strong>FK GRiD</strong>
+            <small>CATALOG LANGUAGE LAB</small>
+          </span>
+        </a>
+        <div class="topbar-actions">
+          <a class="quiet-link" href="/docs">API docs <span aria-hidden="true">↗</span></a>
+          <div class="ready-badge" id="readyBadge" data-state="checking">
+            <span class="status-dot" aria-hidden="true"></span>
+            <span id="readyText">Checking Gemma</span>
+          </div>
+        </div>
+      </header>
+
+      <main>
+        <section class="hero" aria-labelledby="hero-title">
+          <div class="eyebrow"><span class="eyebrow-line"></span> TIER 2 · QUERY EXPANSION</div>
+          <h1 id="hero-title">Make shopper language<br /><span>catalog-ready.</span></h1>
+          <p class="hero-copy">
+            Try a phrase, watch Gemma propose a safe expansion, and see every deterministic
+            gate that protects the final mapping.
+          </p>
+          <div class="hero-stats" aria-label="Demo properties">
+            <div class="hero-stat"><strong>01</strong><span>live model pass</span></div>
+            <div class="hero-stat"><strong>06</strong><span>workflow gates</span></div>
+            <div class="hero-stat"><strong>0</strong><span>JSON to edit</span></div>
+          </div>
+        </section>
+
+        <section class="workspace-grid" aria-label="Query expansion workspace">
+          <aside class="control-panel surface">
+            <div class="panel-kicker">START HERE</div>
+            <h2>Give it a query</h2>
+            <p class="panel-copy">Use the kind of shorthand a shopper might type into search.</p>
+
+            <form id="queryForm" novalidate>
+              <label class="field-label" for="term">Shopper phrase <span>required</span></label>
+              <div class="input-wrap input-wrap-main">
+                <span class="input-icon" aria-hidden="true">⌕</span>
+                <input id="term" name="term" type="text" maxlength="256" autocomplete="off"
+                  placeholder="e.g. sneakers" value="sneakers" required />
+              </div>
+              <p class="field-error" id="termError" role="alert"></p>
+
+              <div class="field-row">
+                <div class="field-group">
+                  <label class="field-label" for="locale">Locale</label>
+                  <div class="select-wrap">
+                    <select id="locale" name="locale">
+                      <option value="en-IN">en-IN</option>
+                      <option value="en-US">en-US</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="field-group">
+                  <label class="field-label" for="category">Category</label>
+                  <div class="input-wrap">
+                    <input id="category" name="category" type="text" maxlength="128"
+                      value="footwear" autocomplete="off" />
+                  </div>
+                </div>
+              </div>
+
+              <div class="suggestion-label">TRY A STARTER</div>
+              <div class="starter-chips" aria-label="Starter queries">
+                <button type="button" class="starter-chip" data-term="sneakers">sneakers</button>
+                <button type="button" class="starter-chip" data-term="trainers">trainers</button>
+                <button type="button" class="starter-chip" data-term="waterproof shoes">waterproof shoes</button>
+              </div>
+
+              <button class="primary-button" id="runButton" type="submit">
+                <span class="button-leading" aria-hidden="true">↗</span>
+                <span id="runButtonText">Expand query</span>
+                <span class="button-key" aria-hidden="true">↵</span>
+              </button>
+              <p class="privacy-note"><span aria-hidden="true">✦</span> Demo evidence is synthetic and bounded to this run.</p>
+            </form>
+
+            <div class="recent-block" id="recentBlock" hidden>
+              <div class="recent-heading"><span>RECENT RUNS</span><button type="button" id="clearRecent">Clear</button></div>
+              <div id="recentRuns" class="recent-runs"></div>
+            </div>
+          </aside>
+
+          <section class="results-panel" aria-live="polite" aria-atomic="true">
+            <div class="results-heading">
+              <div>
+                <div class="panel-kicker">LIVE WORKFLOW</div>
+                <h2 id="resultHeading">Your expansion will appear here</h2>
+              </div>
+              <span class="run-state" id="runState">AWAITING INPUT</span>
+            </div>
+
+            <div class="empty-state" id="emptyState">
+              <div class="empty-orbit" aria-hidden="true"><span></span><span></span><span></span></div>
+              <h3>Ready to translate a phrase</h3>
+              <p>Enter a query on the left. The result will show the normalized form, proposed target, model status, and gate trail.</p>
+            </div>
+
+            <div class="loading-state" id="loadingState" hidden>
+              <div class="loading-ring" aria-hidden="true"></div>
+              <h3 id="loadingTitle">Reading your phrase…</h3>
+              <p id="loadingCopy">Preparing bounded evidence for the live proposer.</p>
+              <div class="loading-track"><span id="loadingBar"></span></div>
+              <div class="loading-steps"><span class="active" id="loadStepOne">PROPOSE</span><span id="loadStepTwo">CRITIQUE</span><span id="loadStepThree">VERIFY</span></div>
+            </div>
+
+            <div class="result-state" id="resultState" hidden>
+              <div class="translation-card surface-inner">
+                <div class="query-node">
+                  <span class="node-label">YOUR QUERY</span>
+                  <strong id="shownQuery">—</strong>
+                  <span class="node-sub" id="shownLocale">en-IN · footwear</span>
+                </div>
+                <div class="translation-arrow" aria-hidden="true">
+                  <span>EXPANDS TO</span>
+                  <div><i></i><b></b><i></i></div>
+                </div>
+                <div class="target-node" id="targetNode">
+                  <span class="node-label">CANONICAL TARGET</span>
+                  <strong id="shownTarget">—</strong>
+                  <span class="node-sub" id="shownAction">—</span>
+                </div>
+              </div>
+
+              <div class="insight-grid">
+                <article class="insight-card surface-inner">
+                  <div class="card-icon cyan" aria-hidden="true">≈</div>
+                  <div><span class="card-label">NORMALIZED QUERY</span><strong id="normalizedQuery">—</strong></div>
+                </article>
+                <article class="insight-card surface-inner">
+                  <div class="card-icon violet" aria-hidden="true">◈</div>
+                  <div><span class="card-label">MAPPING TYPE</span><strong id="mappingType">—</strong></div>
+                </article>
+                <article class="insight-card surface-inner">
+                  <div class="card-icon amber" aria-hidden="true">✦</div>
+                  <div><span class="card-label">EVIDENCE BAND</span><strong id="evidenceBand">—</strong></div>
+                </article>
+              </div>
+
+              <div class="workflow-card surface-inner">
+                <div class="workflow-heading">
+                  <div><span class="card-label">DECISION TRAIL</span><h3>What happened behind the result</h3></div>
+                  <span class="workflow-result" id="workflowResult">COMPLETE</span>
+                </div>
+                <div class="workflow-timeline" id="workflowTimeline"></div>
+              </div>
+
+              <div class="result-footer">
+                <span id="runMeta">Run metadata</span>
+                <button type="button" class="copy-button" id="copyButton"><span aria-hidden="true">▣</span> Copy summary</button>
+              </div>
+            </div>
+
+            <div class="error-state" id="errorState" hidden>
+              <div class="error-icon" aria-hidden="true">!</div>
+              <div><h3 id="errorTitle">The workflow needs attention</h3><p id="errorCopy"></p></div>
+              <button type="button" class="secondary-button" id="retryButton">Try again</button>
+            </div>
+          </section>
+        </section>
+
+        <section class="principles" aria-label="How the demo works">
+          <article class="principle"><span class="principle-number">01</span><div><h3>Gemma interprets</h3><p>The live proposer and independent critic work from bounded evidence.</p></div></article>
+          <article class="principle"><span class="principle-number">02</span><div><h3>Rules protect</h3><p>Validation, regression, shadow, review, and activation remain deterministic.</p></div></article>
+          <article class="principle"><span class="principle-number">03</span><div><h3>You can audit</h3><p>See the normalized query, exact target, action, evidence band, and gate trail.</p></div></article>
+        </section>
+      </main>
+
+      <footer class="footer"><span>FK GRiD · Catalog Language Tier 2</span><span>Live model <i class="footer-dot"></i> Deterministic gates</span></footer>
+    </div>
+    <script src="/demo/static/demo.js" defer></script>
+  </body>
+</html>

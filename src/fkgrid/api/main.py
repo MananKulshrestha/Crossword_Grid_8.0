@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
 from typing import Annotated
 from uuid import uuid4
 
 from fastapi import Body, Depends, FastAPI, HTTPException, Query, Request, status
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 
 from fkgrid.api.container import CatalogLanguageApiContainer, create_gemma_container
@@ -32,6 +35,8 @@ from fkgrid.workflows.catalog_language import (
     CATALOG_LANGUAGE_CAPABILITIES,
     CATALOG_LANGUAGE_FORBIDDEN_CAPABILITIES,
 )
+
+DEMO_UI_DIR = Path(__file__).resolve().parents[1] / "ui"
 
 
 def _parse_datetime(value: object) -> datetime:
@@ -402,6 +407,13 @@ def create_app(container: CatalogLanguageApiContainer | None = None) -> FastAPI:
         },
     )
     app.state.catalog_language = selected_container
+    app.mount("/demo/static", StaticFiles(directory=DEMO_UI_DIR), name="demo-static")
+
+    @app.get("/demo", include_in_schema=False)
+    def demo() -> FileResponse:
+        """Serve the human-friendly live demo without changing workflow behavior."""
+
+        return FileResponse(DEMO_UI_DIR / "demo.html", media_type="text/html")
 
     @app.get("/health", response_model=ApiStatus, tags=["system"])
     def health() -> ApiStatus:

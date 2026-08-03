@@ -129,6 +129,20 @@ query, validator, workflow budget, artifact format, or provider boundary.
   its active-version pointer forward between them. The in-memory pointer is not a
   concurrency or durability boundary; production UI needs a current-version refresh,
   idempotency, and database-backed activation CAS before concurrent operators use it.
+- The local Query Expansion Lab is intentionally a same-origin demo surface. If its
+  assets are hosted separately from the API, a trusted-origin CORS or reverse-proxy
+  policy is required; never solve that by exposing provider credentials to browser
+  JavaScript.
+- Demo recent runs live only in the page and the demo sends synthetic bounded
+  evidence. Adding persistence, user history, or production evidence must introduce
+  authorization, privacy retention, and idempotency controls rather than treating
+  this local interaction state as an audit record.
+- A model can safely abstain, as `trainers` did during live verification. The UI must
+  preserve that safe-stop state and must not turn a missing target into a guessed
+  label, fallback synonym, or successful-looking activation.
+- Static UI assets are mounted from the source package path. A wheel/container build
+  must verify that `demo.html`, `demo.css`, and `demo.js` are included; otherwise the
+  API can remain healthy while `/demo` fails at runtime.
 - The compact guided Swagger response is a presentation projection, not a second
   workflow result. If domain decision or trace names change, the projection can show
   `NOT_RUN` or omit an expansion unless its adapter mapping and contract tests are

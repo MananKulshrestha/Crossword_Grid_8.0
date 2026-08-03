@@ -45,6 +45,20 @@ def test_health_ready_and_openapi_are_available() -> None:
     assert "/api/v1/catalog-language/lookup" in paths
 
 
+def test_human_friendly_demo_ui_is_served_with_its_static_assets() -> None:
+    demo = client.get("/demo")
+    stylesheet = client.get("/demo/static/demo.css")
+    script = client.get("/demo/static/demo.js")
+
+    assert demo.status_code == 200
+    assert "Query Expansion Lab" in demo.text
+    assert "Expand query" in demo.text
+    assert stylesheet.status_code == 200
+    assert "workspace-grid" in stylesheet.text
+    assert script.status_code == 200
+    assert "guided-run" in script.text
+
+
 def test_capabilities_identify_tier_two_and_forbidden_runtime_actions() -> None:
     payload = client.get("/api/v1/catalog-language/capabilities").json()
 
