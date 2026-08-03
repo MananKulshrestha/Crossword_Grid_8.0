@@ -53,6 +53,7 @@ from fkgrid.api.catalog import (
     build_catalog_entries,
     fixture_facets,
 )
+from fkgrid.cart.adapter import DatabaseCartAdapter
 from fkgrid.speech import (
     DEFAULT_SPEECH_MODEL_ALIAS,
     DeepInfraWhisperAdapter,
@@ -167,8 +168,24 @@ class ApiRuntime:
         speech_deadline_ms: int = DEFAULT_SPEECH_DEADLINE_MS,
         speech_language: str = DEFAULT_SPEECH_LANGUAGE,
         speech_error: str | None = None,
+        cart_mode: str = "fixture",
     ) -> None:
         self.gateway = gateway
+        # "fixture": FixtureCartPort, the existing in-memory demo cart (default,
+        # zero setup). "database": DatabaseCartAdapter (Track 6), a real
+        # MySQL-backed cart -- requires flipkart-mysql running and reachable.
+        # Caveat: self.tooling.shopper_catalog below still returns synthetic
+        # fixture products under catalog_version="catalog-fixture-v1"; the real
+        # cart validates against catalog_version="flipkart_v1". Until Track 2's
+        # real retrieval subsystem is wired into shopper_catalog too, enabling
+        # "database" mode here means every ADD_ITEM from a live search result
+        # will be REJECTED OFFER_UNAVAILABLE, since the bindings never match --
+        # see tests/test_cart_orchestrator_integration.py for what does prove
+        # out correctly today (a session seeded with real catalog bindings
+        # directly, bypassing the fixture search path).
+        if cart_mode not in {"fixture", "database"}:
+            raise ValueError("FKGRID_CART_MODE_INVALID")
+        self.cart_mode = cart_mode
         self.model_mode = model_mode
         self.model_alias = model_alias
         self.protocol = protocol
@@ -237,6 +254,9 @@ class ApiRuntime:
             raise ValueError("FKGRID_TEST_CATALOG_CONFIG_INVALID") from exc
         if not MIN_CATALOG_SIZE <= catalog_size <= MAX_CATALOG_SIZE:
             raise ValueError("FKGRID_TEST_CATALOG_SIZE_OUT_OF_RANGE")
+        cart_mode = values.get("FKGRID_CART_MODE", "fixture").casefold()
+        if cart_mode not in {"fixture", "database"}:
+            raise ValueError("FKGRID_CART_MODE_INVALID")
         speech_mode = values.get("FKGRID_SPEECH_MODE", "live").casefold()
         if speech_mode not in {"live", "disabled"}:
             raise ValueError("FKGRID_SPEECH_MODE_INVALID")
@@ -293,6 +313,7 @@ class ApiRuntime:
                 speech_deadline_ms=speech_deadline_ms,
                 speech_language=speech_language,
                 speech_error=speech_error,
+                cart_mode=cart_mode,
             )
 
         provider_values = dict(values)
@@ -320,6 +341,7 @@ class ApiRuntime:
                 speech_deadline_ms=speech_deadline_ms,
                 speech_language=speech_language,
                 speech_error=speech_error,
+                cart_mode=cart_mode,
             )
         return cls(
             gateway=gateway,
@@ -333,6 +355,7 @@ class ApiRuntime:
             speech_deadline_ms=speech_deadline_ms,
             speech_language=speech_language,
             speech_error=speech_error,
+            cart_mode=cart_mode,
         )
 
     @property
@@ -367,6 +390,14 @@ class ApiRuntime:
         ids = SequentialIds()
         markdown = FakeMarkdownPipeline()
         legacy_catalog = FixtureCatalogPort(self.catalog_entries)
+        if self.cart_mode == "database":
+            cart_port = DatabaseCartAdapter(session_snapshot_provider=lambda: session_state.snapshot)
+        else:
+            cart_port = FixtureCartPort(
+                cart,
+                legacy_catalog,
+                session_snapshot_provider=lambda: session_state.snapshot,
+            )
         orchestrator = TurnOrchestrator(
             state=session_state,
             enhancer=DeterministicEnhancer(clock, ids),
@@ -374,11 +405,7 @@ class ApiRuntime:
             catalog=self.tooling.shopper_catalog,
             recovery=self.tooling.recovery,
             references=self.tooling.references,
-            cart=FixtureCartPort(
-                cart,
-                legacy_catalog,
-                session_snapshot_provider=lambda: session_state.snapshot,
-            ),
+            cart=cart_port,
             research=self.tooling.research,
             suggestions=self.tooling.suggestions,
             markdown=markdown,
