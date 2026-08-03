@@ -1,6 +1,7 @@
 # Python-generated files
 __pycache__/
 *.py[oc]
+*.pyc
 build/
 dist/
 wheels/
@@ -8,3 +9,10 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Generated storage
+lightrag_storage/
+bm25_storage/
+
+# Testing
+.pytest_cache/

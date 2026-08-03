@@ -57,6 +57,36 @@ just extracted slower). `config.py`'s `LLM_MODEL`/`LLM_MAX_ASYNC` comments
 record which pairings are safe — don't change one without checking the
 other's comment.
 
+## 0. Provision Qdrant
+
+Tier 3 target per `retrieval-architecture.md` is Qdrant-backed vector
+storage (the ingestion/query code below doesn't use it yet — that's
+Step 3 of `plan.md`, tracked separately). Same Docker pattern as the
+MySQL container in `../README.md`:
+
+```bash
+docker run -d \
+  --name flipkart-qdrant \
+  -p 6333:6333 \
+  -p 6334:6334 \
+  qdrant/qdrant
+```
+
+No persistent volume — data is lost if the container is removed, same
+caveat as the MySQL container.
+
+| Field | Value |
+|---|---|
+| Host | `127.0.0.1` (or `localhost`) |
+| REST port | `6333` |
+| gRPC port | `6334` |
+
+Verify it's up:
+
+```bash
+curl http://localhost:6333/collections
+```
+
 ## 1. Install dependencies
 
 ```bash
@@ -249,22 +279,26 @@ for confirmation before deleting `lightrag_storage/` (`-y` to skip).
 
 ## Notes
 
-- Products with no description, a duplicate `sku_id`, or byte-identical
-  `product_name`+description text under a different `sku_id` are all
-  counted and reported (not silently dropped) via `build_documents()`'s
-  skip counts — the last one (~2,462 in the current dataset, apparent
-  duplicate/near-duplicate listings in the source data) is deduped on our
-  side rather than left to LightRAG's own content-hash dedup, which
-  stores the duplicate under a different synthetic doc_id and would
-  otherwise make `ingest.py`'s summary misreport it as an unresolvable
-  failure every run. A malformed corpus block (missing `Product ID:` or
-  `## Description`) raises `CorpusParseError` immediately instead of
-  being skipped.
-- No soft fallbacks: `query.py` requires an explicit question argument
-  (usage error otherwise), and failed ingestion never gets replaced with
-  placeholder content.
-- This folder implements **only** the semantic/graph retrieval branch.
-  SQL hard-filtering and BM25 lexical search are not built here yet.
+- `load_documents.py` reads `product_name + description` straight out of
+  `flipkart_lightrag_corpus.md` — no structured fields folded in. See
+  `../IMPLEMENTATION.md` for why the RAG corpus stays free-text-only, and
+  `IMPLEMENTATION.md` (this folder) for what was built here specifically.
+- Products with no description are **counted and reported**, not silently
+  dropped — `build_documents()` returns the skip count explicitly and
+  `ingest.py` prints it in the summary (2 in the current dataset). A
+  malformed corpus block (missing `Product ID:` or `## Description`)
+  raises `CorpusParseError` immediately rather than being skipped — that's
+  treated as a real data-integrity bug, not an expected gap.
+- No soft fallbacks/defaults on data: `query.py` requires an explicit
+  question argument (errors with a usage message otherwise, no default
+  question substituted), and a failed ingestion never gets replaced with
+  placeholder content — see the ingestion summary behavior above.
+- SQL hard-filtering (`sql_filter.py`) and BM25 lexical search
+  (`bm25_index.py`) are also now built in this folder, each tested against
+  real data (`tests/test_sql_filter.py`, `tests/test_bm25.py`) — see
+  `IMPLEMENTATION.md` for details. Only the union/intersect/rerank merge
+  step that combines all three branches, and the `search_catalog(query_state)`
+  entrypoint itself, are still missing.
 - Embedding defaults to local (`local_embed.py`, `sentence-transformers`
   running `nomic-ai/nomic-embed-text-v1.5` on this Mac's CPU/MPS) — set
   `LIGHTRAG_EMBED_BACKEND=ollama` to use `EMBED_MODEL` on the remote

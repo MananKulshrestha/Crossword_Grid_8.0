@@ -1,9 +1,16 @@
 # Implementation Notes — `RA/` LightRAG Semantic/Graph Branch
 
-Implements **one of three** retrieval branches described in
-`retrieval-architecture.md` for the `search_catalog` tool's internals:
-the **semantic/graph branch**, via LightRAG. Does not implement the SQL
-hard-filter branch or the BM25 lexical branch.
+This folder now holds all **three** retrieval branches described in
+`retrieval-architecture.md` (see `~/Downloads/retrieval-architecture.md`,
+or wherever that doc lives in the project repo) for the `search_catalog`
+tool's internals. It started as just the **semantic/graph branch**, via
+LightRAG (see below for that part specifically) — the SQL hard-filter
+branch (`sql_filter.py`) and the BM25 lexical branch (`bm25_index.py`)
+were added afterward, as separate, independent components per
+`plan.md`. The rest of this document, written when only the LightRAG
+piece existed, still describes that piece's design decisions accurately;
+read `sql_filter.py` and `bm25_index.py` directly for the other two —
+their docstrings cover the same ground.
 
 Read `../IMPLEMENTATION.md` first — it explains the upstream pipeline
 (`flipkart_to_lightrag.py`) that produces the three source files this
@@ -15,17 +22,42 @@ folder consumes.
 - LightRAG ingestion (`ingest.py`) over `../flipkart_lightrag_corpus.md`
   → knowledge graph + vector index via local file storage.
 - A `mix`-mode query script (`query.py`) returning raw grounded context.
-- Ollama as the LLM/embedding backend (local, no API key/cost).
-- NanoVectorDB + NetworkX for vector/graph storage (not Qdrant). Swapping
-  to Qdrant later means changing `vector_storage="QdrantVectorDBStorage"`
-  in `ingest.py`'s `LightRAG(...)` call — nothing else depends on the
-  storage backend.
+- Ollama as the LLM/embedding backend (local, no API key, no external
+  cost) — deliberately **not** using Gemini or any hosted API, even
+  though the source architecture doc mentions Gemini 2.5 Flash as the
+  project's default model. This was an explicit choice for this testing
+  phase: stay fully local via the project's Ollama cluster.
+- NanoVectorDB + NetworkX (LightRAG's local-file defaults) for vector and
+  graph storage — **not** Qdrant. The architecture doc's Tier 3 target is
+  Qdrant-backed; this folder is closer to a Tier 1/2-equivalent semantic
+  branch used to validate the LightRAG mechanics cheaply before any
+  Qdrant/infra decision is made. Swapping to Qdrant later means only
+  changing `vector_storage="QdrantVectorDBStorage"` in `ingest.py`'s
+  `LightRAG(...)` call plus pointing it at a running Qdrant instance —
+  nothing else in this folder's design depends on the storage backend.
+- SQL hard-filter branch (`sql_filter.py`) — `eligible_skus(hard_constraints)`
+  against `product_metadata`, tested against the real Docker MySQL
+  container (`tests/test_sql_filter.py`).
+- BM25 lexical branch (`bm25_index.py`) — indexes every product with a
+  usable description (19998 SKUs, all of them, not just the LightRAG test
+  batch), persisted under `bm25_storage/`, tested against the real index
+  (`tests/test_bm25.py`) with real exact-token queries.
 
-**Not built:** SQL hard-filter branch, BM25 lexical branch, the
-union/intersect/rerank merge step, cross-encoder reranking, wiring into
-an actual `search_catalog(query_state)` function. This folder is a
-standalone ingestion/query harness, not yet plugged into a larger
-pipeline.
+**Not built:**
+- The union/intersect/rerank merge step that combines all three branches
+  (`retrieval-architecture.md`'s "Candidate fusion & rerank" section).
+- Cross-encoder reranking.
+- Any wiring into an actual `search_catalog(query_state)` function —
+  this folder is still a set of standalone components, not yet plugged
+  into a larger agent/tool pipeline.
+- The LightRAG branch specifically has never been executed end-to-end
+  (no `lightrag_storage/` exists yet) — it's blocked on the team's shared
+  Ollama server being reachable, unrelated to SQL/BM25's status.
+
+Whoever picks this up next: don't assume LightRAG alone constitutes
+`search_catalog`. SQL and BM25 are real, tested branches now — the merge
+step still needs to be built to combine all three, per
+`retrieval-architecture.md`.
 
 ## Design decisions and why
 

@@ -3,3 +3,6 @@ ollama
 tqdm
 sentence-transformers
 einops
+PyMySQL
+pytest
+rank_bm25

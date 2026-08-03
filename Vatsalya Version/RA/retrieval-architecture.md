@@ -53,7 +53,7 @@ builds on:
 
 | File | Role | Built by |
 |---|---|---|
-| `flipkart_catalog_structured.jsonl` | One structured JSON record per SKU (`sku_id`, `product_name`, `brand`, `category`, `category_is_fallback`, `subcategory_path`, `material`, `size`, `retail_price`, `discounted_price`, `rating`, `stock_status`, `stock_quantity`, `stock_is_synthetic`, `specifications`) | `build_structured_record` in `flipkart_to_lightrag.py` |
+| `flipkart_catalog_structured.jsonl` | One structured JSON record per SKU (`sku_id`, `product_name`, `brand`, `category`, `category_is_fallback`, `subcategory_path`, `material`, `size`, `retail_price`, `discounted_price`, `rating`, `stock_status`, `quantity`, `specifications`) | `build_structured_record` in `flipkart_to_lightrag.py` |
 | `flipkart_metadata.sql` | `CREATE TABLE product_metadata (...)` + one `INSERT` per SKU, loaded 1:1 from the JSONL's scalar fields | generated from the JSONL |
 | `flipkart_lightrag_corpus.md` | One `# Product / Product ID / ## Description` block per SKU — description text only | `build_lightrag_block` in `flipkart_to_lightrag.py` |
 
@@ -73,7 +73,6 @@ CREATE TABLE IF NOT EXISTS product_metadata (
     discounted_price      DECIMAL(10, 2),
     rating                DECIMAL(3, 2),
     stock_status          ENUM('in_stock', 'low_stock', 'out_of_stock'),
-    stock_quantity        INT,
     quantity              INT
 );
 ```
