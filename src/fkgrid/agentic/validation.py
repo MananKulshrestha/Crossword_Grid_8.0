@@ -201,6 +201,12 @@ def merge_query_state(
         active_suggestion_set_id = None
         removed.append("search_state")
 
+    # A new explicit search/refinement supersedes an unanswered clarification
+    # from an earlier turn.  This is especially important when a provider
+    # incorrectly classified a preference as a reference-based action.
+    if intent.primary_action in {Action.SEARCH, Action.REFINE}:
+        pending = None
+
     for operation in operations:
         if isinstance(operation, RemoveHardOperation):
             remove_hard(operation.field_id)

@@ -75,16 +75,19 @@ def demo_compatibility(model_alias: str) -> CompatibilityTuple:
         lexicon_version="lexicon-fixture-v1",
         rank_policy_version="rank-fixture-v1",
         gate_policy_version="gate-fixture-v1",
-        intent_prompt_version="1",
+        intent_prompt_version="3",
         intent_model_alias=model_alias,
         response_template_version="response-fixture-v1",
         commerce_policy_version="commerce-fixture-v1",
         research_policy_version="research-fixture-v1",
         suggestion_policy_version="suggestions-fixture-v1",
-        memory_schema_version="memory-fixture-v1",
+        memory_schema_version="memory-fixture-v2",
         query_enhancement_policy_version="enhancement-fixture-v1",
-        research_prompt_version="1",
+        clarification_prompt_version="2",
+        recovery_prompt_version="2",
+        research_prompt_version="2",
         research_model_alias=model_alias,
+        suggestion_prompt_version="2",
     )
 
 

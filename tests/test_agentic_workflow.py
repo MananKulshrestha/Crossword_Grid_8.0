@@ -65,7 +65,7 @@ def compatibility() -> CompatibilityTuple:
         lexicon_version="lexicon-demo-v1",
         rank_policy_version="rank-v1",
         gate_policy_version="gate-v1",
-        intent_prompt_version="1",
+        intent_prompt_version="3",
         intent_model_alias="gemma-4-26b-a4b-it",
         response_template_version="response-v1",
         commerce_policy_version="commerce-v1",
@@ -73,8 +73,11 @@ def compatibility() -> CompatibilityTuple:
         suggestion_policy_version="suggestions-v1",
         memory_schema_version="memory-v1",
         query_enhancement_policy_version="enhancement-v1",
-        research_prompt_version="1",
+        clarification_prompt_version="2",
+        recovery_prompt_version="2",
+        research_prompt_version="2",
         research_model_alias="gemma-4-26b-a4b-it",
+        suggestion_prompt_version="2",
     )
 
 
@@ -188,6 +191,82 @@ class AgenticWorkflowTests(unittest.TestCase):
         self.assertEqual(len(dependencies["gateway"].calls), 1)  # type: ignore[attr-defined]
         self.assertEqual(len(dependencies["markdown"].handoffs), 1)  # type: ignore[attr-defined]
         self.assertTrue(result.trace.events)
+
+    def test_recent_turn_memory_is_structured_passed_to_intent_and_trimmed(self) -> None:
+        snapshot, entries = fixture()
+        app, dependencies = orchestrator(snapshot, entries)
+        state = dependencies["state"]
+        gateway = dependencies["gateway"]
+        state_version = 0
+
+        for index in range(1, 6):
+            result = app.handle(
+                TurnRequest(
+                    session_id="session_1",
+                    client_turn_id=f"memory-turn-{index}",
+                    idempotency_key=f"memory-key-{index}",
+                    expected_state_version=state_version,
+                    expected_cart_version=0,
+                    message="Find a shirt size m",
+                )
+            )
+            self.assertEqual(result.status, "COMPLETED")
+            state_version += 1
+
+        snapshot_after = state.snapshot  # type: ignore[attr-defined]
+        self.assertEqual(len(snapshot_after.recent_turns), 4)
+        self.assertEqual(
+            [turn.turn_id for turn in snapshot_after.recent_turns],
+            ["memory-turn-2", "memory-turn-3", "memory-turn-4", "memory-turn-5"],
+        )
+        first_memory_turn = snapshot_after.recent_turns[0]
+        self.assertEqual(first_memory_turn.user_query, "Find a shirt size m")
+        self.assertEqual(first_memory_turn.action, Action.SEARCH)
+        self.assertEqual(first_memory_turn.terminal_state, TerminalState.ANSWERED_WITH_GROUNDED_RESULTS)
+        size_constraint = next(
+            constraint
+            for constraint in first_memory_turn.hard_constraints
+            if constraint.field_id == "size"
+        )
+        self.assertEqual(size_constraint.values, ["size_m"])
+        self.assertEqual(first_memory_turn.results[0].title, "Prototype shirt 1")
+
+        calls = gateway.calls  # type: ignore[attr-defined]
+        self.assertEqual(len(calls), 5)
+        second_payload = calls[1].input_payload
+        self.assertEqual(len(second_payload["recent_turn_context"]), 1)
+        self.assertEqual(
+            second_payload["recent_turn_context"][0]["user_query"],
+            "Find a shirt size m",
+        )
+        self.assertEqual(
+            second_payload["recent_turn_context"][0]["results"][0]["title"],
+            "Prototype shirt 1",
+        )
+
+    def test_greeting_is_help_and_bypasses_external_intent_model(self) -> None:
+        snapshot, entries = fixture()
+        app, dependencies = orchestrator(snapshot, entries)
+        result = app.handle(
+            TurnRequest(
+                session_id="session_1",
+                client_turn_id="turn_greeting",
+                idempotency_key="key_greeting",
+                expected_state_version=0,
+                expected_cart_version=0,
+                message="hey",
+            )
+        )
+        self.assertEqual(result.status, "COMPLETED")
+        assert result.response is not None
+        self.assertEqual(result.response.action, Action.HELP)
+        self.assertEqual(
+            result.response.terminal_state,
+            TerminalState.ANSWERED_WITH_GROUNDED_RESULTS,
+        )
+        self.assertIn("search", result.response.summary.casefold())
+        self.assertEqual(len(dependencies["gateway"].calls), 0)  # type: ignore[attr-defined]
+        self.assertIn("INTENT_FALLBACK", [event.stage for event in result.trace.events])
 
     def test_typed_show_cart_bypasses_enhancement_and_model(self) -> None:
         snapshot, entries = fixture()
@@ -365,6 +444,9 @@ class AgenticWorkflowTests(unittest.TestCase):
         prompts = PromptRegistry()
         spec = prompts.manifest_entry(__import__("fkgrid.agentic.contracts", fromlist=["ModelCallType"]).ModelCallType.RESOLVE_INTENT_AND_DELTA)
         self.assertEqual(len(spec["file_checksum"]), 64)
+        self.assertEqual(spec["prompt_id"], "intent_v3")
+        self.assertEqual(spec["prompt_version"], "3")
+        self.assertIn('"primary_action":"SEARCH"', prompts.text(__import__("fkgrid.agentic.contracts", fromlist=["ModelCallType"]).ModelCallType.RESOLVE_INTENT_AND_DELTA))
 
         class Transport:
             def __init__(self) -> None:
@@ -552,8 +634,8 @@ class AgenticWorkflowTests(unittest.TestCase):
             call_id="scripted",
             logical_call_type=ModelCallType.RESOLVE_INTENT_AND_DELTA,
             model_alias=compatibility().intent_model_alias,
-            prompt_id="intent_v1",
-            prompt_version="1",
+            prompt_id="intent_v3",
+            prompt_version="3",
             input_schema_version="IntentContextProjectionV1",
             output_schema_version="IntentDeltaV1",
             input_payload={},

@@ -119,6 +119,11 @@ class ApiTurnRequest(StrictModel):
                 {
                     "message": "Find a black cotton t-shirt in size m under 1500 rupees"
                 },
+                {"message": "hey"},
+                {"message": "show me some red T-shirts in size L"},
+                {"message": "add 2 to the cart"},
+                {"message": "add 2 units of the first result to my cart"},
+                {"message": "research the latest cotton-care guidance"},
                 {"ui_action": {"action": "SHOW_CART", "payload": {}}},
                 {
                     "ui_action": {
@@ -156,9 +161,14 @@ class ApiTurnRequest(StrictModel):
         max_length=2000,
         description="Free-text shopper request. This uses the configured Gemma 4 26B model.",
         examples=[
+            "hey",
             "Find a black cotton t-shirt in size m under 1500 rupees",
+            "show me some red T-shirts in size L",
             "Compare the first and second result",
             "Check availability for the first one",
+            "add 2 to the cart",
+            "add 2 units of the first result to my cart",
+            "research the latest cotton-care guidance",
         ],
     )
     ui_action: ApiUiAction | None = Field(

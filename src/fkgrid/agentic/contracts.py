@@ -297,11 +297,39 @@ class ActiveResultBinding(StrictModel):
     context_ref: str | None = None
 
 
+class RecentResultContext(StrictModel):
+    """Small, provider-safe rendering of one previously displayed result."""
+
+    result_entry_id: str
+    display_position: int = Field(ge=1, le=10)
+    binding: ProductBinding
+    title: str = Field(min_length=1, max_length=300)
+    matched_criteria: list[str] = Field(default_factory=list, max_length=8)
+    unknown_criteria: list[str] = Field(default_factory=list, max_length=8)
+
+
 class RecentTurnContext(StrictModel):
+    """One complete, bounded shopper/assistant turn pair.
+
+    This is deliberately a compact context record rather than a transcript. The
+    current message and current snapshot remain authoritative; these records
+    only help the enhancement and intent stages resolve natural follow-ups.
+    """
+
     turn_id: str
-    role: Literal["SHOPPER", "ASSISTANT"]
-    redacted_text: str = Field(max_length=500)
-    referenced_result_entry_ids: list[str] = Field(default_factory=list, max_length=4)
+    user_query: str = Field(min_length=1, max_length=2000)
+    assistant_summary: str = Field(max_length=1000)
+    action: Action
+    terminal_state: TerminalState
+    state_version: int = Field(ge=0)
+    hard_constraints: list[Constraint] = Field(default_factory=list, max_length=8)
+    soft_preferences: list[Preference] = Field(default_factory=list, max_length=8)
+    query_terms: list[str] = Field(default_factory=list, max_length=10)
+    result_set_id: str | None = Field(default=None, max_length=128)
+    results: list[RecentResultContext] = Field(default_factory=list, max_length=5)
+    referenced_result_entry_ids: list[str] = Field(default_factory=list, max_length=10)
+    warnings: list[str] = Field(default_factory=list, max_length=12)
+    clarification_reason_code: str | None = Field(default=None, max_length=128)
 
 
 class MemoryCandidate(StrictModel):
@@ -382,7 +410,7 @@ class EnhancedQueryEnvelope(StrictModel):
     normalized_current_message: str = Field(min_length=1, max_length=2000)
     action_context: Literal["FREE_TEXT_CHAT"] = "FREE_TEXT_CHAT"
     current_state: QueryState
-    recent_turn_context: list[RecentTurnContext] = Field(default_factory=list, max_length=6)
+    recent_turn_context: list[RecentTurnContext] = Field(default_factory=list, max_length=4)
     persistent_memory_candidates: list[MemoryCandidate] = Field(default_factory=list, max_length=50)
     verified_purchase_context: list[PurchaseContext] = Field(default_factory=list, max_length=10)
     active_result_bindings: list[ActiveResultBinding] = Field(default_factory=list, max_length=10)
@@ -402,7 +430,7 @@ class IntentContextProjectionV1(StrictModel):
     current_message_verbatim: str = Field(min_length=1, max_length=2000)
     normalized_current_message: str = Field(min_length=1, max_length=2000)
     current_state: QueryState
-    recent_turn_context: list[RecentTurnContext] = Field(default_factory=list, max_length=6)
+    recent_turn_context: list[RecentTurnContext] = Field(default_factory=list, max_length=4)
     persistent_memory_candidates: list[ProjectedMemoryCandidate] = Field(default_factory=list, max_length=50)
     verified_purchase_context: list[ProjectedPurchaseContext] = Field(default_factory=list, max_length=10)
     active_result_bindings: list[ActiveResultBinding] = Field(default_factory=list, max_length=10)
@@ -1005,7 +1033,7 @@ class TurnSnapshot(StrictModel):
     cart: CartSnapshot
     acknowledged_result_set_id: str | None = None
     acknowledged_entries: list[ActiveResultBinding] = Field(default_factory=list, max_length=10)
-    recent_turns: list[RecentTurnContext] = Field(default_factory=list, max_length=6)
+    recent_turns: list[RecentTurnContext] = Field(default_factory=list, max_length=4)
     memory_profile_id: str | None = None
     memory_version: int | None = Field(default=None, ge=0)
     compatibility_tuple: CompatibilityTuple
@@ -1029,6 +1057,7 @@ class CommitCommand(StrictModel):
     cart_changed: bool = False
     acknowledged_result_set_id: str | None = None
     acknowledged_entries: list[ActiveResultBinding] = Field(default_factory=list, max_length=10)
+    recent_turns: list[RecentTurnContext] = Field(default_factory=list, max_length=4)
 
 
 class CommitResult(StrictModel):

@@ -55,6 +55,8 @@ from .contracts import (
     ProductDetails,
     Comparison,
     Availability,
+    RecentResultContext,
+    RecentTurnContext,
 )
 from .gateway import PromptRegistry, StructuredModelGateway
 from .capabilities import SHOPPER_CAPABILITIES
@@ -81,7 +83,12 @@ from .validation import (
     validate_clarifying_question,
     validate_intent_semantics,
 )
-from .query_lexicon import apply_explicit_catalog_terms
+from .query_lexicon import (
+    apply_explicit_cart_terms,
+    apply_explicit_catalog_terms,
+    deterministic_catalog_intent,
+    is_greeting_or_help_message,
+)
 
 
 @dataclass(frozen=True)
@@ -386,6 +393,18 @@ class TurnOrchestrator:
         events: list[TraceEvent],
         request: TurnRequest,
     ) -> tuple[IntentDeltaV1 | None, list[str]]:
+        fallback = self._deterministic_exact_grammar(request.message or "")
+        if fallback is not None:
+            self._event(
+                events,
+                trace_id,
+                request.client_turn_id,
+                "INTENT_FALLBACK",
+                "deterministic_exact_grammar",
+                "OK",
+                fallback=FallbackState.DETERMINISTIC_EXACT_GRAMMAR,
+            )
+            return fallback, []
         payload = projection.model_dump(mode="json", exclude_none=False)
         model_request = self.prompts.build_request(
             ModelCallType.RESOLVE_INTENT_AND_DELTA,
@@ -457,6 +476,25 @@ class TurnOrchestrator:
                 fallback=FallbackState.DETERMINISTIC_EXACT_GRAMMAR,
             )
             return fallback, []
+        fallback = deterministic_catalog_intent(
+            projection.current_message_verbatim,
+            refine_existing_query=bool(
+                projection.current_state.hard_constraints
+                or projection.current_state.soft_preferences
+                or projection.current_state.query_terms
+            ),
+        )
+        if fallback is not None:
+            self._event(
+                events,
+                trace_id,
+                request.client_turn_id,
+                "INTENT_FALLBACK",
+                "deterministic_catalog_grammar",
+                "OK",
+                fallback=FallbackState.DETERMINISTIC_EXACT_GRAMMAR,
+            )
+            return fallback, []
         return None, (issues + repair_issues)[:20]
 
     def _parse_and_validate_model_intent(self, model_response: Any, projection: Any) -> tuple[IntentDeltaV1 | None, list[str]]:
@@ -469,6 +507,11 @@ class TurnOrchestrator:
         # reviewed deterministic lexicon restores only explicit current-turn
         # category/color semantics before the normal semantic validator runs.
         intent = apply_explicit_catalog_terms(intent, projection.current_message_verbatim)
+        intent = apply_explicit_cart_terms(
+            intent,
+            projection.current_message_verbatim,
+            projection.active_result_bindings,
+        )
         allowed = {
             entry.result_entry_id for entry in projection.active_result_bindings
         } | set(projection.cart_summary.item_ids)
@@ -479,7 +522,7 @@ class TurnOrchestrator:
         lower = message.casefold().strip()
         if lower in {"show cart", "show my cart", "cart"}:
             return IntentDeltaV1(primary_action=Action.SHOW_CART)
-        if lower in {"help", "what can you do"}:
+        if lower in {"help", "what can you do"} or is_greeting_or_help_message(message):
             return IntentDeltaV1(primary_action=Action.HELP)
         return None
 
@@ -509,6 +552,10 @@ class TurnOrchestrator:
         proposed_state: QueryState,
     ) -> tuple[str, str, list[ClarificationOption]] | None:
         if snapshot.pending_clarification and action not in {Action.HELP, Action.RESET_SEARCH}:
+            if action in {Action.SEARCH, Action.REFINE} and intent.delta_operations:
+                # A fresh explicit catalog request owns the current turn and
+                # should not be trapped by a stale reference clarification.
+                return None
             return (
                 snapshot.pending_clarification.reason_code,
                 "clarification_choice",
@@ -983,6 +1030,14 @@ class TurnOrchestrator:
                         )
                     }
                 )
+        recent_turns = [*snapshot.recent_turns, self._build_recent_turn_context(
+            request=request,
+            response=response,
+            proposed_state=commit_state,
+            state_version=snapshot.state_version + 1,
+            result_set_id=acknowledged_result_set_id,
+            acknowledged_entries=acknowledged_entries,
+        )][-4:]
         commit = self.state.commit(
             CommitCommand(
                 reservation_id=reservation_id,
@@ -994,6 +1049,7 @@ class TurnOrchestrator:
                 cart_changed=cart_changed,
                 acknowledged_result_set_id=acknowledged_result_set_id,
                 acknowledged_entries=acknowledged_entries,
+                recent_turns=recent_turns,
             )
         )
         if not commit.committed:
@@ -1082,6 +1138,53 @@ class TurnOrchestrator:
             committed_response.compatibility_tuple,
         )
         return TurnResult(status="COMPLETED", http_status=200, response=committed_response, trace=trace)
+
+    @staticmethod
+    def _build_recent_turn_context(
+        *,
+        request: TurnRequest,
+        response: ShopperResponse,
+        proposed_state: QueryState,
+        state_version: int,
+        result_set_id: str | None,
+        acknowledged_entries: Sequence[ActiveResultBinding],
+    ) -> RecentTurnContext:
+        """Build the small memory record passed to the next turn's model call."""
+
+        user_query = request.message
+        if user_query is None and request.ui_action is not None:
+            user_query = f"[typed action: {request.ui_action.action.value}]"
+        assert user_query is not None
+        results = [
+            RecentResultContext(
+                result_entry_id=entry.result_entry_id,
+                display_position=entry.display_position,
+                binding=entry.binding,
+                title=entry.title,
+                matched_criteria=entry.matched_criteria,
+                unknown_criteria=entry.unknown_criteria,
+            )
+            for entry in response.search_entries[:5]
+        ]
+        referenced_ids = [entry.result_entry_id for entry in response.search_entries]
+        if not referenced_ids:
+            referenced_ids = [entry.result_entry_id for entry in acknowledged_entries]
+        return RecentTurnContext(
+            turn_id=request.client_turn_id,
+            user_query=user_query,
+            assistant_summary=response.summary,
+            action=response.action,
+            terminal_state=response.terminal_state,
+            state_version=state_version,
+            hard_constraints=list(proposed_state.hard_constraints[-8:]),
+            soft_preferences=list(proposed_state.soft_preferences[-8:]),
+            query_terms=list(proposed_state.query_terms[-10:]),
+            result_set_id=response.result_set_id or result_set_id,
+            results=results,
+            referenced_result_entry_ids=referenced_ids[:10],
+            warnings=list(response.warnings),
+            clarification_reason_code=response.clarification_reason_code,
+        )
 
     def _clarification_response(
         self,
@@ -1213,7 +1316,7 @@ class TurnOrchestrator:
             lexicon_version="unavailable",
             rank_policy_version="unavailable",
             gate_policy_version="unavailable",
-            intent_prompt_version="1",
+            intent_prompt_version="3",
             intent_model_alias=alias,
             response_template_version="1",
             commerce_policy_version="1",
@@ -1221,6 +1324,9 @@ class TurnOrchestrator:
             suggestion_policy_version="1",
             memory_schema_version="1",
             query_enhancement_policy_version="1",
+            clarification_prompt_version="2",
+            recovery_prompt_version="2",
+            suggestion_prompt_version="2",
         )
 
     def _event(
