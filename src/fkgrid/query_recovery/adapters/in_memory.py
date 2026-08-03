@@ -57,19 +57,14 @@ class InMemoryApprovedExpansions:
         limit: int,
     ) -> list[ApprovedExpansion]:
         self.calls += 1
-        values: list[ApprovedExpansion] = []
-        for term in normalized_terms:
-            normalized_term = normalize_term(term)
-            for item in self.values:
-                if (
-                    normalize_term(item.normalized_form) == normalized_term
-                    and item.lexicon_version == compatibility.lexicon_version
-                    and item not in values
-                ):
-                    values.append(item)
-                    if len(values) >= limit:
-                        return values
-        return values
+        allowed = set(normalized_terms)
+        values = [
+            item
+            for item in self.values
+            if normalize_term(item.normalized_form) in allowed
+            and item.lexicon_version == compatibility.lexicon_version
+        ]
+        return values[:limit]
 
 
 class InMemoryRecoveryConstraints:

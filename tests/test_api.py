@@ -47,11 +47,9 @@ class ApiTests(unittest.TestCase):
         response = self.client.post("/v1/query-recovery/turn", json=payload)
         self.assertEqual(response.status_code, 200)
         body = response.json()
-        self.assertEqual(body["outcome"], "RECOVERED_TIER1")
-        self.assertFalse(body["event"]["planner_called"])
-        self.assertEqual(body["event"]["retrieval_run_count"], 2)
-        self.assertEqual([item["label"] for item in body["suggestions"]], ["Shirts", "Blazers", "Pants"])
-        self.assertIsNone(body["clarification"])
+        self.assertEqual(body["outcome"], "CLARIFICATION_REQUIRED")
+        self.assertTrue(body["event"]["planner_called"])
+        self.assertEqual(body["event"]["retrieval_run_count"], 1)
 
     def test_extra_fields_are_rejected_at_api_boundary(self) -> None:
         payload = self.client.get("/v1/query-recovery/example").json()

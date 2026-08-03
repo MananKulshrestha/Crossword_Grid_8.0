@@ -272,10 +272,10 @@ class RecoveryWorkflowTests(unittest.TestCase):
             constraints=[first, second],
             planner_output=planner_output,
         )
-        self.assertEqual(response.outcome, RecoveryOutcome.RECOVERY_SUGGESTIONS)
-        self.assertIsNone(response.clarification)
+        self.assertEqual(response.outcome, RecoveryOutcome.CLARIFICATION_REQUIRED)
+        self.assertIsNotNone(response.clarification)
         self.assertEqual(
-            {suggestion.concept_ids[0] for suggestion in response.suggestions},
+            {option.option_id for option in response.clarification.options},
             {"category-a", "category-b"},
         )
         self.assertEqual(retrieval.calls, [])

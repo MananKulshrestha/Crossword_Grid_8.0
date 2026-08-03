@@ -19,9 +19,6 @@ class DemoSurfaceTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("Run query recovery", response.text)
         self.assertIn('id="query"', response.text)
-        self.assertIn("Did you mean?", response.text)
-        self.assertNotIn("What the agent needs from you", response.text)
-        self.assertNotIn('id="question"', response.text)
         self.assertEqual(response.text.count('type="checkbox"'), 3)
         self.assertNotIn("RecoveryRequest", response.text)
 
@@ -39,14 +36,8 @@ class DemoSurfaceTests(unittest.TestCase):
         body = response.json()
         self.assertEqual(body["query"], "formal wear for an office event")
         self.assertEqual(body["filters"], ["In stock only", "Cotton"])
-        self.assertEqual(body["result"]["outcome"], "RECOVERED_TIER1")
-        self.assertFalse(body["result"]["event"]["planner_called"])
-        self.assertEqual(body["result"]["plan"]["added_query_terms"], ["shirts", "blazers", "pants"])
-        self.assertEqual(body["result"]["selected_run"]["query_branches"], ["shirts", "blazers", "pants"])
-        self.assertEqual(
-            [suggestion["label"] for suggestion in body["result"]["suggestions"]],
-            ["Shirts", "Blazers", "Pants"],
-        )
+        self.assertEqual(body["result"]["outcome"], "CLARIFICATION_REQUIRED")
+        self.assertTrue(body["result"]["event"]["planner_called"])
         self.assertEqual(body["result"]["event"]["hard_filter_mutation_count"], 0)
 
     def test_shoes_uses_current_query_and_recovers_semantically(self) -> None:
@@ -85,27 +76,6 @@ class DemoSurfaceTests(unittest.TestCase):
         self.assertFalse(recovery["event"]["planner_called"])
         self.assertEqual(recovery["event"]["hard_filter_mutation_count"], 0)
 
-    def test_spelling_variants_show_suggestions_without_questions(self) -> None:
-        expected = {
-            "formalwaer": {"Shirts", "Blazers", "Pants"},
-            "shoees": {"Footwear"},
-            "traiers": {"Sports Shoes"},
-        }
-        for query, labels in expected.items():
-            with self.subTest(query=query):
-                response = self.client.post(
-                    "/v1/query-recovery/demo-turn",
-                    json={"query": query},
-                )
-                self.assertEqual(response.status_code, 200)
-                recovery = response.json()["result"]
-                self.assertEqual(recovery["outcome"], "RECOVERED_TIER1")
-                self.assertEqual(
-                    {suggestion["label"] for suggestion in recovery["suggestions"]},
-                    labels,
-                )
-                self.assertIsNone(recovery["clarification"])
-
     def test_changing_query_does_not_replay_the_previous_result(self) -> None:
         shoes = self.client.post(
             "/v1/query-recovery/demo-turn",
@@ -113,16 +83,15 @@ class DemoSurfaceTests(unittest.TestCase):
         ).json()["result"]
         formal = self.client.post(
             "/v1/query-recovery/demo-turn",
-            json={"query": "formalware"},
+            json={"query": "formal wear"},
         ).json()["result"]
         self.assertEqual(shoes["outcome"], "RECOVERED_TIER1")
-        self.assertEqual(formal["outcome"], "RECOVERED_TIER1")
+        self.assertEqual(formal["outcome"], "CLARIFICATION_REQUIRED")
         self.assertNotEqual(shoes["event"]["original_terms"], formal["event"]["original_terms"])
         self.assertEqual(
-            {suggestion["label"] for suggestion in formal["suggestions"]},
-            {"Shirts", "Blazers", "Pants"},
+            {option["label"] for option in formal["clarification"]["options"]},
+            {"Shirts", "Blazers"},
         )
-        self.assertIsNone(formal["clarification"])
 
     def test_unknown_query_does_not_get_a_spurious_category_question(self) -> None:
         response = self.client.post(
@@ -133,7 +102,6 @@ class DemoSurfaceTests(unittest.TestCase):
         recovery = response.json()["result"]
         self.assertEqual(recovery["outcome"], "NO_SAFE_RECOVERY")
         self.assertIsNone(recovery["clarification"])
-        self.assertEqual(recovery["suggestions"], [])
 
     def test_builder_places_visible_filters_in_hard_constraints(self) -> None:
         payload = DemoRecoveryInput(

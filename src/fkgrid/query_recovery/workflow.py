@@ -13,7 +13,6 @@ from .domain import (
     EvidenceBand,
     ExpansionAction,
     GateDecision,
-    MappingType,
     PlannerAction,
     RecoveryClarificationPlan,
     RecoveryConstraint,
@@ -23,7 +22,6 @@ from .domain import (
     RecoveryPlan,
     RecoveryRequest,
     RecoveryResponse,
-    RecoverySuggestion,
     RetrievalRun,
     ToolReceipt,
 )
@@ -91,18 +89,19 @@ class QueryRecoveryWorkflow:
             )
 
         if request.gate.decision is not GateDecision.RECOVERY_ELIGIBLE:
-            outcome = RecoveryOutcome.RECOVERY_SKIPPED_UNSAFE_GATE
-            terminal = "NO_ELIGIBLE_MATCH"
-            gate_warnings = ["RECOVERY_GATE_NOT_AUTHORIZED"]
-            if request.gate.decision is GateDecision.CLARIFICATION_REQUIRED:
-                gate_warnings.append("CLARIFICATION_SUPPRESSED_AS_NON_CHAT_RECOVERY")
+            outcome = (
+                RecoveryOutcome.CLARIFICATION_REQUIRED
+                if request.gate.decision is GateDecision.CLARIFICATION_REQUIRED
+                else RecoveryOutcome.RECOVERY_SKIPPED_UNSAFE_GATE
+            )
+            terminal = "CLARIFICATION_REQUIRED" if outcome is RecoveryOutcome.CLARIFICATION_REQUIRED else "NO_ELIGIBLE_MATCH"
             return self._finish(
                 request,
                 started_ms=started_ms,
                 outcome=outcome,
                 terminal_state=terminal,
                 selected_run=request.baseline_run,
-                warnings=gate_warnings,
+                warnings=["RECOVERY_GATE_NOT_AUTHORIZED"],
                 validation_codes=["GATE_NOT_RECOVERY_ELIGIBLE"],
             )
 
@@ -576,19 +575,9 @@ class QueryRecoveryWorkflow:
                 for item in candidates
                 if item.taxonomy_scope_id == best.taxonomy_scope_id and item.priority == best.priority
             ]
-            if len(same_priority) > 1:
-                is_bounded_compound = (
-                    all(item.mapping_type is MappingType.COMPOUND for item in same_priority)
-                    and len({item.canonical_target_id for item in same_priority}) == len(same_priority)
-                )
-                if not is_bounded_compound:
-                    continue
-                remaining = request.policy.max_direct_mappings - len(selected)
-                selected.extend(same_priority[:remaining])
-            elif len(same_priority) == 1:
-                selected.append(best)
-            else:
+            if len(same_priority) != 1:
                 continue
+            selected.append(best)
             if len(selected) >= request.policy.max_direct_mappings:
                 break
         return selected
@@ -789,14 +778,6 @@ class QueryRecoveryWorkflow:
         comparator_decisions: list[ComparatorDecision] | None = None,
         cache_hit: bool = False,
     ) -> RecoveryResponse:
-        suggestions = self._suggestions_from_plan(plan)
-        if clarification is not None:
-            suggestions = self._suggestions_from_clarification(clarification)
-            clarification = None
-            if outcome is RecoveryOutcome.CLARIFICATION_REQUIRED:
-                outcome = RecoveryOutcome.RECOVERY_SUGGESTIONS
-                terminal_state = "RECOVERY_SUGGESTIONS_AVAILABLE"
-            warnings = [*warnings, "CLARIFICATION_SUPPRESSED_AS_SUGGESTIONS"]
         used_ms = max(0, self.clock.monotonic_ms() - started_ms)
         before_hash = hard_filter_hash(request.query_state)
         after_hash = selected_run.hard_filter_hash if selected_run is not None else before_hash
@@ -828,7 +809,6 @@ class QueryRecoveryWorkflow:
                 planner_called=planner_called,
                 planner_validation_codes=final_codes,
                 clarification=clarification,
-                suggestions=suggestions,
                 cache_hit=cache_hit,
             ),
             retrieval_run_count=1 + int(direct_run is not None) + int(generative_run is not None),
@@ -855,7 +835,6 @@ class QueryRecoveryWorkflow:
             plan=plan,
             comparator=comparator,
             clarification=clarification,
-            suggestions=suggestions,
             interpretation_label=plan.interpretation_label if plan else None,
             warnings=list(dict.fromkeys([*warnings, *final_codes]))[:16],
             event=event,
@@ -870,7 +849,6 @@ class QueryRecoveryWorkflow:
         planner_called: bool,
         planner_validation_codes: list[str],
         clarification: Any,
-        suggestions: list[RecoverySuggestion],
         cache_hit: bool,
     ) -> list[ToolReceipt]:
         calls = [ToolReceipt(tool_name="retrieve_candidates:baseline", status="OK")]
@@ -895,38 +873,5 @@ class QueryRecoveryWorkflow:
             calls.append(ToolReceipt(tool_name="recovery_plan_cache", status="OK"))
         if clarification is not None:
             calls.append(ToolReceipt(tool_name="build_clarification", status="OK"))
-        if suggestions:
-            calls.append(ToolReceipt(tool_name="build_suggestions", status="OK"))
         calls.append(ToolReceipt(tool_name="record_recovery_event", status="OK"))
         return calls[:12]
-
-    @staticmethod
-    def _suggestions_from_plan(plan: RecoveryPlan | None) -> list[RecoverySuggestion]:
-        if plan is None:
-            return []
-        source = "APPROVED_LEXICON" if plan.source == "DIRECT" else "ALLOWED_CONCEPT"
-        return [
-            RecoverySuggestion(
-                suggestion_id=f"recovery-{index + 1}-{concept_id}",
-                label=term.title(),
-                query_terms=[term],
-                concept_ids=[concept_id],
-                source=source,
-            )
-            for index, (concept_id, term) in enumerate(
-                zip(plan.added_concept_ids, plan.added_query_terms, strict=True)
-            )
-        ][:3]
-
-    @staticmethod
-    def _suggestions_from_clarification(clarification) -> list[RecoverySuggestion]:
-        return [
-            RecoverySuggestion(
-                suggestion_id=f"recovery-option-{option.option_id}",
-                label=option.label,
-                query_terms=[option.label.lower()],
-                concept_ids=[option.concept_id],
-                source="ALLOWED_CONCEPT",
-            )
-            for option in clarification.options
-        ][:3]
