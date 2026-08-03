@@ -23,6 +23,9 @@ def assess_retrieval_confidence(
     unknown_terms: list[str],
     policy_version: str,
     calibrated: bool = False,
+    minimum_result_count: int = 2,
+    minimum_popular_result_count: int = 1,
+    low_popularity_enabled: bool = True,
 ) -> RecoveryGate:
     """Build structural recovery signals without asking a model to judge quality."""
 
@@ -32,6 +35,18 @@ def assess_retrieval_confidence(
     if run.eligible_count == 0:
         reasons.append(RecoveryTriggerReason.NO_ELIGIBLE_RESULTS)
         details[RecoveryTriggerReason.NO_ELIGIBLE_RESULTS.value] = "no eligible catalog result"
+    if run.eligible_count < minimum_result_count:
+        reasons.append(RecoveryTriggerReason.LOW_RESULT_COUNT)
+        details[RecoveryTriggerReason.LOW_RESULT_COUNT.value] = (
+            f"fewer than {minimum_result_count} eligible catalog results"
+        )
+    if (
+        low_popularity_enabled
+        and run.popular_result_count is not None
+        and run.popular_result_count < minimum_popular_result_count
+    ):
+        reasons.append(RecoveryTriggerReason.LOW_POPULARITY)
+        details[RecoveryTriggerReason.LOW_POPULARITY.value] = "no eligible result meets the popularity floor"
     if normalized_unknown:
         reasons.append(RecoveryTriggerReason.UNKNOWN_IMPORTANT_TERM)
         details[RecoveryTriggerReason.UNKNOWN_IMPORTANT_TERM.value] = "unrecognized query term"
@@ -51,6 +66,12 @@ def assess_retrieval_confidence(
     # inventory absence, not authorization for a generative rewrite.
     recoverable = bool(
         normalized_unknown
+        or run.eligible_count < minimum_result_count
+        or (
+            low_popularity_enabled
+            and run.popular_result_count is not None
+            and run.popular_result_count < minimum_popular_result_count
+        )
         or run.category_scope_consistent is False
         or (calibrated and run.required_criteria_coverage is not None and run.required_criteria_coverage < 0.50)
     )
@@ -65,6 +86,8 @@ def assess_retrieval_confidence(
 
     signals = BaselineSignals(
         eligible_count=run.eligible_count,
+        popular_result_count=run.popular_result_count,
+        top_popularity_score=run.top_popularity_score,
         top_score=run.top_score,
         top_score_margin=run.top_score_margin,
         required_criteria_coverage=run.required_criteria_coverage,
@@ -98,6 +121,12 @@ def compare_retrieval_runs(
     hash_equal = baseline.hard_filter_hash == candidate.hard_filter_hash
     versions_equal = compatibility_equal(baseline.compatibility, candidate.compatibility)
     eligible_delta = candidate.eligible_count - baseline.eligible_count
+    popular_delta = (
+        candidate.popular_result_count - baseline.popular_result_count
+        if candidate.popular_result_count is not None
+        and baseline.popular_result_count is not None
+        else None
+    )
     score_delta = (
         candidate.top_score - baseline.top_score
         if candidate.top_score is not None and baseline.top_score is not None
@@ -110,6 +139,10 @@ def compare_retrieval_runs(
         else None
     )
     diversity_delta = len(set(candidate.result_product_ids)) - len(set(baseline.result_product_ids))
+    baseline_ids = list(baseline.result_product_ids)
+    candidate_ids = list(candidate.result_product_ids)
+    baseline_results_preserved = set(baseline_ids).issubset(set(candidate_ids))
+    baseline_results_first = not baseline_ids or candidate_ids[: len(baseline_ids)] == baseline_ids
     reasons: list[str] = []
 
     if not hash_equal:
@@ -118,6 +151,10 @@ def compare_retrieval_runs(
         reasons.append("COMPATIBILITY_TUPLE_CHANGED")
     if not candidate.is_scope_safe:
         reasons.append("RECOVERED_RUN_SCOPE_UNSAFE")
+    if not baseline_results_preserved:
+        reasons.append("BASELINE_RESULTS_NOT_PRESERVED")
+    elif not baseline_results_first:
+        reasons.append("BASELINE_RESULTS_NOT_FIRST")
     if candidate.eligible_count == 0:
         reasons.append("RECOVERED_RUN_HAS_NO_ELIGIBLE_RESULTS")
     if score_delta is not None and score_delta < -policy.max_top_score_drop:
@@ -131,9 +168,12 @@ def compare_retrieval_runs(
             rule_id="recovery-policy-v1-safety-first",
             reasons=reasons,
             eligible_count_delta=eligible_delta,
+            popular_result_count_delta=popular_delta,
             top_score_delta=score_delta,
             coverage_delta=coverage_delta,
             diversity_delta=diversity_delta,
+            baseline_results_preserved=baseline_results_preserved,
+            baseline_results_first=baseline_results_first,
             hard_filter_hash_equal=hash_equal,
             compatibility_equal=versions_equal,
         )
@@ -144,9 +184,12 @@ def compare_retrieval_runs(
             rule_id="recovery-policy-v1-zero-to-eligible",
             reasons=["BASELINE_ZERO_ELIGIBLE", "RECOVERED_ELIGIBLE"],
             eligible_count_delta=eligible_delta,
+            popular_result_count_delta=popular_delta,
             top_score_delta=score_delta,
             coverage_delta=coverage_delta,
             diversity_delta=diversity_delta,
+            baseline_results_preserved=baseline_results_preserved,
+            baseline_results_first=baseline_results_first,
             hard_filter_hash_equal=hash_equal,
             compatibility_equal=versions_equal,
         )
@@ -154,6 +197,7 @@ def compare_retrieval_runs(
     materially_better = bool(
         (score_delta is not None and score_delta >= policy.min_improvement_margin)
         or (coverage_delta is not None and coverage_delta >= policy.min_improvement_margin)
+        or (popular_delta is not None and popular_delta >= policy.min_popularity_gain)
     )
     close_but_more_diverse = bool(
         score_delta is not None
@@ -167,14 +211,19 @@ def compare_retrieval_runs(
                 "ELIGIBILITY_AND_SCOPE_PRESERVED",
             ]
         )
+        if popular_delta is not None and popular_delta >= policy.min_popularity_gain:
+            reasons.append("POPULARITY_SIGNAL_IMPROVED")
         return ComparatorResult(
             decision=ComparatorDecision.ACCEPTED,
             rule_id="recovery-policy-v1-material-improvement",
             reasons=reasons,
             eligible_count_delta=eligible_delta,
+            popular_result_count_delta=popular_delta,
             top_score_delta=score_delta,
             coverage_delta=coverage_delta,
             diversity_delta=diversity_delta,
+            baseline_results_preserved=baseline_results_preserved,
+            baseline_results_first=baseline_results_first,
             hard_filter_hash_equal=hash_equal,
             compatibility_equal=versions_equal,
         )
@@ -191,9 +240,12 @@ def compare_retrieval_runs(
             rule_id="recovery-policy-v1-close-incompatible-interpretations",
             reasons=["CLOSE_INCOMPATIBLE_INTERPRETATIONS"],
             eligible_count_delta=eligible_delta,
+            popular_result_count_delta=popular_delta,
             top_score_delta=score_delta,
             coverage_delta=coverage_delta,
             diversity_delta=diversity_delta,
+            baseline_results_preserved=baseline_results_preserved,
+            baseline_results_first=baseline_results_first,
             hard_filter_hash_equal=hash_equal,
             compatibility_equal=versions_equal,
         )
@@ -203,9 +255,12 @@ def compare_retrieval_runs(
         rule_id="recovery-policy-v1-no-material-improvement",
         reasons=["NO_MATERIAL_IMPROVEMENT"],
         eligible_count_delta=eligible_delta,
+        popular_result_count_delta=popular_delta,
         top_score_delta=score_delta,
         coverage_delta=coverage_delta,
         diversity_delta=diversity_delta,
+        baseline_results_preserved=baseline_results_preserved,
+        baseline_results_first=baseline_results_first,
         hard_filter_hash_equal=hash_equal,
         compatibility_equal=versions_equal,
     )

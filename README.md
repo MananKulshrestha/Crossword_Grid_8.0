@@ -2,7 +2,7 @@
 
 This branch implements the confidence-gated Query Recovery Agent through Tier 2:
 
-`baseline retrieval -> deterministic gate -> Tier 1 approved-lexicon recovery -> deterministic comparison -> one constrained Tier 2 planner call -> optional one rerun -> grounded recovery/clarification/no-safe terminal`
+`baseline retrieval -> deterministic quality gate -> additive approved-concept recovery -> deterministic comparison -> optional constrained Tier 2 planner -> one rerun -> grounded recovery/clarification/no-safe terminal`
 
 The package is deliberately independent of the unfinished catalog, retrieval, session, and database implementations. It provides strict Pydantic contracts, ports, deterministic tools, a bounded workflow, in-memory fakes, a parameterized SQLite adapter, and a migration fragment. A later DB owner can back the ports with SQLAlchemy/PostgreSQL without changing the recovery workflow.
 
@@ -15,9 +15,9 @@ The package is deliberately independent of the unfinished catalog, retrieval, se
 - Planner output is untrusted JSON. IDs must be a subset of the context allowlist, and clarification options must come from active supplied concepts.
 - Retrieval comparison is deterministic and uses safety/coverage/quality rules before eligible count.
 - Every path records a recovery event, including confident-query skips and provider failures.
-- A `NO_SAFE_RECOVERY` planner decision remains an honest no-match; only an explicit
-  planner clarification or a provider/validation fallback with multiple compatible
-  options produces a blocking “Did you mean …?” packet.
+- Recovery activates for qualified weak baselines, including too few eligible
+  results or an explicitly supplied low-popularity signal. It preserves direct
+  baseline matches and places approved recovered matches after them.
 - This branch does not implement query-experience expansion, chat suggestions,
   memory/history enhancement, or broad synonym generation. Query Recovery only
   uses approved mappings and allowlisted concepts supplied by its ports.
@@ -56,7 +56,7 @@ Open [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs). `GET /v1/query-re
 
 For an actathon-friendly experience, open `/demo` on the same host. It provides one query box and three intentionally small mock filters (`In stock only`, `Cotton`, and `Under ₹2,000`). Submitting the form calls `POST /v1/query-recovery/demo-turn`, which translates those values into the canonical request and runs the same recovery workflow without requiring anyone to edit the full schema by hand.
 
-The Swagger demo includes approved semantic examples so changing the query changes the recovery result: `shoes` recovers to the footwear family and `trainers` recovers through the sports-shoes family (`trainers / sports shoes / athletic shoes`) without asking a chat-style clarification. The Tier 2-only spelling example `shooes` is rewritten once to the allowlisted `footwear` concept. `formal wear` remains a deliberate blocking clarification (`Did you mean Shirts or Blazers?`) because Shirts and Blazers are genuinely different allowed categories. An unsupported `moon boots` query remains `NO_SAFE_RECOVERY`. These are deterministic demo lexicon/retrieval seams; production catalog, lexicon, retrieval, session, memory, cart, and purchase-context adapters plug into the existing ports.
+The Swagger demo includes approved semantic examples so changing the query changes the recovery result: `shoes` recovers to the footwear family and `trainers` recovers through the sports-shoes family (`trainers / sports shoes / athletic shoes`). `formal wear` now keeps its direct match first and adds approved formal-wear descendants—Shirts, Blazers, Trousers, and Ties—in deterministic order. The spelling example `shooes` is rewritten once to the allowlisted `footwear` concept. An unsupported `moon boots` query remains `NO_SAFE_RECOVERY`. These are deterministic demo lexicon/retrieval seams; production catalog, lexicon, retrieval, session, memory, cart, and purchase-context adapters plug into the existing ports.
 
 ## Local contract checks
 

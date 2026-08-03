@@ -84,7 +84,22 @@ class RecoveryTools:
         self.clock = clock
 
     def lookup_approved_expansions(self, request: RecoveryRequest) -> list[ApprovedExpansion]:
-        terms = sorted({normalize_term(term) for term in request.unresolved_terms if term.strip()})
+        terms: list[str] = []
+        seen_terms: set[str] = set()
+        for raw_term in request.unresolved_terms:
+            unresolved = normalize_term(raw_term)
+            if not unresolved:
+                continue
+            tokens = unresolved.split()
+            for index in range(len(tokens)):
+                for width in range(min(3, len(tokens) - index), 1, -1):
+                    candidate = " ".join(tokens[index : index + width])
+                    if candidate not in seen_terms:
+                        seen_terms.add(candidate)
+                        terms.append(candidate)
+            if unresolved not in seen_terms:
+                seen_terms.add(unresolved)
+                terms.append(unresolved)
         return self.expansions.lookup(
             normalized_terms=terms[: request.policy.max_lookup_terms],
             query_state=request.query_state,

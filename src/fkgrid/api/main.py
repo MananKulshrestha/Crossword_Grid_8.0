@@ -47,8 +47,8 @@ class CapabilitiesResponse(StrictModel):
 _RUN_TURN_BODY = Body(
     ...,
     openapi_examples={
-        "demo_clarification": {
-            "summary": "Ambiguous category with two allowed concepts",
+        "demo_formal_wear_recovery": {
+            "summary": "Direct formal-wear match followed by approved descendants",
             "description": "Copy the response from GET /v1/query-recovery/example.",
             "value": build_example_request().model_dump(mode="json"),
         }

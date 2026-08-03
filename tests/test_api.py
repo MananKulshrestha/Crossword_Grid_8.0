@@ -25,8 +25,11 @@ class ApiTests(unittest.TestCase):
         self.assertIn("RecoveryRequest", document["components"]["schemas"])
         self.assertIn("RecoveryResponse", document["components"]["schemas"])
         examples = document["paths"]["/v1/query-recovery/turn"]["post"]["requestBody"]["content"]["application/json"]["examples"]
-        self.assertIn("demo_clarification", examples)
-        self.assertEqual(examples["demo_clarification"]["value"]["gate"]["decision"], "RECOVERY_ELIGIBLE")
+        self.assertIn("demo_formal_wear_recovery", examples)
+        self.assertEqual(
+            examples["demo_formal_wear_recovery"]["value"]["gate"]["decision"],
+            "RECOVERY_ELIGIBLE",
+        )
 
     def test_health_readiness_capabilities_and_example(self) -> None:
         health = self.client.get("/healthz")
@@ -47,9 +50,10 @@ class ApiTests(unittest.TestCase):
         response = self.client.post("/v1/query-recovery/turn", json=payload)
         self.assertEqual(response.status_code, 200)
         body = response.json()
-        self.assertEqual(body["outcome"], "CLARIFICATION_REQUIRED")
-        self.assertTrue(body["event"]["planner_called"])
-        self.assertEqual(body["event"]["retrieval_run_count"], 1)
+        self.assertEqual(body["outcome"], "RECOVERED_TIER1")
+        self.assertFalse(body["event"]["planner_called"])
+        self.assertEqual(body["event"]["retrieval_run_count"], 2)
+        self.assertEqual(body["selected_run"]["result_product_ids"][0], "demo-formal-direct-1")
 
     def test_extra_fields_are_rejected_at_api_boundary(self) -> None:
         payload = self.client.get("/v1/query-recovery/example").json()

@@ -141,6 +141,10 @@ class ContractAndSqlTests(unittest.TestCase):
             planner_token_count=12,
             planner_latency_ms=7,
             allowed_concept_count=2,
+            baseline_eligible_count=1,
+            baseline_popular_result_count=0,
+            selected_eligible_count=5,
+            selected_popular_result_count=3,
             compatibility=self.compatibility,
             warnings=["safe-warning"],
             created_at=FixedClock().now_utc(),
@@ -155,6 +159,13 @@ class ContractAndSqlTests(unittest.TestCase):
         self.assertEqual(row[2], 2)
         self.assertEqual(row[3:6], (12, 7, 2))
         self.assertEqual(json.loads(row[6])["catalog_version"], "catalog-1")
+        counts = connection.execute(
+            "SELECT baseline_eligible_count, baseline_popular_result_count, "
+            "selected_eligible_count, selected_popular_result_count "
+            "FROM recovery_events WHERE event_id = ?",
+            ("event-1",),
+        ).fetchone()
+        self.assertEqual(tuple(counts), (1, 0, 5, 3))
         with self.assertRaises(sqlite3.IntegrityError):
             repository.record(event)
 

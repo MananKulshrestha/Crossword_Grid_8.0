@@ -93,6 +93,8 @@ INSERT INTO recovery_events (
     event_id, session_id, turn_id, trace_id, outcome, terminal_state,
     trigger_reasons_json, original_terms_json, hard_filter_hash_before, hard_filter_hash_after,
     baseline_run_id, direct_run_id, generative_run_id, mapping_ids_json,
+    baseline_eligible_count, baseline_popular_result_count, selected_eligible_count,
+    selected_popular_result_count,
     planner_action, planner_called, planner_validation_codes_json,
     comparator_decisions_json, tool_calls_json, retrieval_run_count, hard_filter_mutation_count,
     added_latency_ms, budget_ms, budget_used_ms, model_prompt_version,
@@ -101,7 +103,8 @@ INSERT INTO recovery_events (
 ) VALUES (
     ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
     ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+    ?, ?, ?, ?, ?, ?, ?, ?
 )
 """
 
@@ -229,6 +232,10 @@ class SqliteRecoveryRepository:
                 event.direct_run_id,
                 event.generative_run_id,
                 _json_list(event.mapping_ids),
+                event.baseline_eligible_count,
+                event.baseline_popular_result_count,
+                event.selected_eligible_count,
+                event.selected_popular_result_count,
                 event.planner_action.value if event.planner_action else None,
                 int(event.planner_called),
                 _json_list(event.planner_validation_codes),

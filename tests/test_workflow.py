@@ -13,6 +13,7 @@ from fkgrid.query_recovery.adapters.in_memory import (
 )
 from fkgrid.query_recovery.adapters.cache import InMemoryRecoveryPlanCache
 from fkgrid.query_recovery.confidence import assess_retrieval_confidence
+from fkgrid.query_recovery.confidence import compare_retrieval_runs
 from fkgrid.query_recovery.domain import (
     ApprovedExpansion,
     CompatibilityTuple,
@@ -25,6 +26,7 @@ from fkgrid.query_recovery.domain import (
     RecoveryOutcome,
     RecoveryPolicy,
     RecoveryRewritePlan,
+    ComparatorDecision,
     QueryState,
     RetrievalRun,
 )
@@ -401,6 +403,41 @@ class RecoveryWorkflowTests(unittest.TestCase):
         self.assertEqual(response.outcome, RecoveryOutcome.BASELINE_PRESERVED)
         self.assertEqual(planner.calls, 0)
         self.assertEqual(retrieval.calls, [])
+
+    def test_low_popularity_is_a_recovery_trigger_even_with_two_results(self) -> None:
+        baseline = self.run_summary(run_id="baseline", eligible=2, score=0.8, products=["p1", "p2"])
+        baseline = baseline.model_copy(update={"popular_result_count": 0})
+        gate = assess_retrieval_confidence(
+            run=baseline,
+            query_state=self.state,
+            unknown_terms=[],
+            policy_version=self.policy.policy_version,
+        )
+        self.assertEqual(gate.decision.value, "RECOVERY_ELIGIBLE")
+        self.assertIn("LOW_POPULARITY", [reason.value for reason in gate.reasons])
+
+    def test_recovery_comparator_rejects_dropping_direct_baseline_results(self) -> None:
+        baseline = self.run_summary(
+            run_id="baseline",
+            eligible=1,
+            score=0.9,
+            products=["direct-product"],
+        )
+        candidate_state = self.state.model_copy(update={"query_terms": ["formal shirt", "shirts"]})
+        candidate = self.run_summary(
+            run_id="candidate",
+            eligible=4,
+            score=0.9,
+            products=["recovered-shirt", "recovered-blazer"],
+            state=candidate_state,
+        )
+        comparison = compare_retrieval_runs(
+            baseline=baseline,
+            candidate=candidate,
+            policy=self.policy,
+        )
+        self.assertEqual(comparison.decision, ComparatorDecision.REJECTED)
+        self.assertIn("BASELINE_RESULTS_NOT_PRESERVED", comparison.reasons)
 
     def test_planner_scope_leakage_is_rejected(self) -> None:
         baseline = self.run_summary(run_id="baseline", eligible=0, score=None, coverage=None)

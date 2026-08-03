@@ -22,6 +22,8 @@ class StrictModel(BaseModel):
 
 class RecoveryTriggerReason(str, Enum):
     NO_ELIGIBLE_RESULTS = "NO_ELIGIBLE_RESULTS"
+    LOW_RESULT_COUNT = "LOW_RESULT_COUNT"
+    LOW_POPULARITY = "LOW_POPULARITY"
     UNKNOWN_IMPORTANT_TERM = "UNKNOWN_IMPORTANT_TERM"
     AMBIGUOUS_CATEGORY_OR_ATTRIBUTE = "AMBIGUOUS_CATEGORY_OR_ATTRIBUTE"
     LOW_COVERAGE = "LOW_COVERAGE"
@@ -152,6 +154,8 @@ class CompatibilityTuple(StrictModel):
 
 class BaselineSignals(StrictModel):
     eligible_count: int = Field(ge=0)
+    popular_result_count: int | None = Field(default=None, ge=0)
+    top_popularity_score: float | None = Field(default=None, ge=0.0, le=1.0)
     top_score: float | None = Field(default=None, ge=-1.0, le=1.0)
     top_score_margin: float | None = Field(default=None, ge=0.0, le=2.0)
     required_criteria_coverage: float | None = Field(default=None, ge=0.0, le=1.0)
@@ -172,6 +176,8 @@ class RetrievalRun(StrictModel):
     hard_filter_hash: str = Field(min_length=64, max_length=64)
     compatibility: CompatibilityTuple
     eligible_count: int = Field(ge=0)
+    popular_result_count: int | None = Field(default=None, ge=0)
+    top_popularity_score: float | None = Field(default=None, ge=0.0, le=1.0)
     top_score: float | None = Field(default=None, ge=-1.0, le=1.0)
     top_score_margin: float | None = Field(default=None, ge=0.0, le=2.0)
     required_criteria_coverage: float | None = Field(default=None, ge=0.0, le=1.0)
@@ -311,9 +317,12 @@ class ComparatorResult(StrictModel):
     rule_id: str = Field(min_length=1, max_length=128)
     reasons: list[str] = Field(default_factory=list, max_length=12)
     eligible_count_delta: int
+    popular_result_count_delta: int | None = None
     top_score_delta: float | None = None
     coverage_delta: float | None = None
     diversity_delta: int = 0
+    baseline_results_preserved: bool = True
+    baseline_results_first: bool = True
     hard_filter_hash_equal: bool
     compatibility_equal: bool
 
@@ -340,6 +349,10 @@ class RecoveryPolicy(StrictModel):
     max_direct_mappings: int = Field(default=3, ge=1, le=3)
     max_added_concepts: int = Field(default=3, ge=1, le=3)
     max_lookup_terms: int = Field(default=3, ge=1, le=10)
+    minimum_result_count: int = Field(default=2, ge=1, le=5)
+    minimum_popular_result_count: int = Field(default=1, ge=0, le=5)
+    low_popularity_enabled: bool = True
+    min_popularity_gain: int = Field(default=1, ge=1, le=5)
     max_retrieval_runs: Literal[3] = 3
     recovery_deadline_ms: int = Field(default=1800, ge=1, le=10000)
     tier2_min_remaining_ms: int = Field(default=450, ge=50, le=5000)
@@ -382,6 +395,10 @@ class RecoveryEvent(StrictModel):
     baseline_run_id: str = Field(min_length=1, max_length=128)
     direct_run_id: str | None = Field(default=None, max_length=128)
     generative_run_id: str | None = Field(default=None, max_length=128)
+    baseline_eligible_count: int = Field(default=0, ge=0)
+    baseline_popular_result_count: int | None = Field(default=None, ge=0)
+    selected_eligible_count: int | None = Field(default=None, ge=0)
+    selected_popular_result_count: int | None = Field(default=None, ge=0)
     mapping_ids: list[str] = Field(default_factory=list, max_length=5)
     planner_action: PlannerAction | None = None
     planner_called: bool = False

@@ -19,6 +19,8 @@ class DemoSurfaceTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("Run query recovery", response.text)
         self.assertIn('id="query"', response.text)
+        self.assertIn('id="products"', response.text)
+        self.assertIn("Recovered products", response.text)
         self.assertEqual(response.text.count('type="checkbox"'), 3)
         self.assertNotIn("RecoveryRequest", response.text)
 
@@ -36,8 +38,8 @@ class DemoSurfaceTests(unittest.TestCase):
         body = response.json()
         self.assertEqual(body["query"], "formal wear for an office event")
         self.assertEqual(body["filters"], ["In stock only", "Cotton"])
-        self.assertEqual(body["result"]["outcome"], "CLARIFICATION_REQUIRED")
-        self.assertTrue(body["result"]["event"]["planner_called"])
+        self.assertEqual(body["result"]["outcome"], "RECOVERED_TIER1")
+        self.assertFalse(body["result"]["event"]["planner_called"])
         self.assertEqual(body["result"]["event"]["hard_filter_mutation_count"], 0)
 
     def test_shoes_uses_current_query_and_recovers_semantically(self) -> None:
@@ -86,13 +88,21 @@ class DemoSurfaceTests(unittest.TestCase):
             json={"query": "formal wear"},
         ).json()["result"]
         self.assertEqual(shoes["outcome"], "RECOVERED_TIER1")
-        self.assertEqual(formal["outcome"], "CLARIFICATION_REQUIRED")
+        self.assertEqual(formal["outcome"], "RECOVERED_TIER1")
         self.assertNotEqual(shoes["event"]["original_terms"], formal["event"]["original_terms"])
-        self.assertEqual(formal["clarification"]["question"], "Did you mean Shirts or Blazers?")
+        self.assertEqual(formal["selected_run"]["result_product_ids"][0], "demo-formal-direct-1")
         self.assertEqual(
-            {option["label"] for option in formal["clarification"]["options"]},
-            {"Shirts", "Blazers"},
+            formal["selected_run"]["result_product_ids"][1:],
+            [
+                "demo-formal-shirt-1",
+                "demo-formal-blazer-1",
+                "demo-formal-trouser-1",
+                "demo-formal-tie-1",
+            ],
         )
+        self.assertEqual(formal["baseline_run"]["result_product_ids"], ["demo-formal-direct-1"])
+        self.assertEqual(formal["event"]["baseline_eligible_count"], 1)
+        self.assertEqual(formal["event"]["selected_eligible_count"], 5)
 
     def test_unknown_query_does_not_get_a_spurious_category_question(self) -> None:
         response = self.client.post(
@@ -116,6 +126,21 @@ class DemoSurfaceTests(unittest.TestCase):
         self.assertEqual(recovery["event"]["retrieval_run_count"], 2)
         self.assertEqual(recovery["plan"]["added_query_terms"], ["footwear"])
         self.assertEqual(recovery["event"]["hard_filter_mutation_count"], 0)
+
+    def test_formal_wear_recovery_is_quality_gated_not_clarification_gated(self) -> None:
+        response = self.client.post(
+            "/v1/query-recovery/demo-turn",
+            json={"query": "formal wear"},
+        )
+        self.assertEqual(response.status_code, 200)
+        recovery = response.json()["result"]
+        self.assertEqual(
+            set(recovery["event"]["trigger_reasons"]),
+            {"LOW_RESULT_COUNT", "LOW_POPULARITY"},
+        )
+        self.assertEqual(recovery["baseline_run"]["eligible_count"], 1)
+        self.assertEqual(recovery["selected_run"]["eligible_count"], 5)
+        self.assertIsNone(recovery["clarification"])
 
     def test_builder_places_visible_filters_in_hard_constraints(self) -> None:
         payload = DemoRecoveryInput(

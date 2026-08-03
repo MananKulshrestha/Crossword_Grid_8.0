@@ -48,24 +48,59 @@ class DemoSemanticFamily:
 
     key: str
     aliases: tuple[str, ...]
-    product_id: str
+    product_ids: tuple[str, ...]
     interpretation: str
+    popular: bool = True
 
 
 _DEMO_SEMANTIC_FAMILIES = (
     DemoSemanticFamily(
+        key="formal-direct",
+        aliases=("formal", "wear", "formal wear"),
+        product_ids=("demo-formal-direct-1",),
+        interpretation="formal wear direct match",
+        popular=False,
+    ),
+    DemoSemanticFamily(
+        key="shirts",
+        aliases=("shirt", "shirts"),
+        product_ids=("demo-formal-shirt-1",),
+        interpretation="formal shirts",
+    ),
+    DemoSemanticFamily(
+        key="blazers",
+        aliases=("blazer", "blazers"),
+        product_ids=("demo-formal-blazer-1",),
+        interpretation="formal blazers",
+    ),
+    DemoSemanticFamily(
+        key="trousers",
+        aliases=("trouser", "trousers", "pants"),
+        product_ids=("demo-formal-trouser-1",),
+        interpretation="formal trousers",
+    ),
+    DemoSemanticFamily(
+        key="ties",
+        aliases=("tie", "ties"),
+        product_ids=("demo-formal-tie-1",),
+        interpretation="formal ties",
+        popular=False,
+    ),
+    DemoSemanticFamily(
         key="sports-shoes",
         aliases=("trainers", "sports shoes", "athletic shoes", "running shoes"),
-        product_id="demo-sports-shoe-1",
+        product_ids=("demo-sports-shoe-1",),
         interpretation="trainers / sports shoes / athletic shoes",
     ),
     DemoSemanticFamily(
         key="footwear",
         aliases=("shoes", "footwear", "sneakers"),
-        product_id="demo-footwear-1",
+        product_ids=("demo-footwear-1",),
         interpretation="shoes / footwear",
     ),
 )
+
+_FORMAL_WEAR_DESCENDANT_KEYS = ("shirts", "blazers", "trousers", "ties")
 
 
 class DemoPlanner:
@@ -74,25 +109,6 @@ class DemoPlanner:
     def plan(self, *, context, timeout_ms: int):
         del timeout_ms
         unresolved = {normalize_term(term) for term in context.unresolved_terms}
-        if unresolved.intersection({"formal", "wear", "formal wear"}):
-            from ..query_recovery.domain import RecoveryClarificationPlan
-
-            option_ids = [
-                concept.concept_id
-                for concept in context.allowed_concepts
-                if concept.concept_id in {"demo-shirts", "demo-blazers"}
-            ]
-            return (
-                RecoveryClarificationPlan(
-                    option_ids=option_ids,
-                    target_field="category",
-                    reason="Formal wear can refer to more than one approved category.",
-                    preserved_hard_filter_hash=context.hard_filter_hash,
-                ),
-                [],
-                0,
-                0,
-            )
         typo_rewrites = {
             "shooes": "demo-footwear",
             "shoos": "demo-footwear",
@@ -141,26 +157,38 @@ class DemoRetrieval:
     def search(self, *, query_state, query_terms, compatibility, run_kind, remaining_ms):
         del remaining_ms
         self.calls.append(run_kind)
-        normalized_terms = {normalize_term(term) for term in query_terms}
-        family = next(
-            (
-                candidate
-                for candidate in _DEMO_SEMANTIC_FAMILIES
-                if normalized_terms.intersection(candidate.aliases)
-            ),
-            None,
-        )
+        normalized_terms = [normalize_term(term) for term in query_terms]
+        matched: list[DemoSemanticFamily] = []
+        seen_keys: set[str] = set()
+        for term in normalized_terms:
+            for candidate in _DEMO_SEMANTIC_FAMILIES:
+                if candidate.key in seen_keys or term not in candidate.aliases:
+                    continue
+                seen_keys.add(candidate.key)
+                matched.append(candidate)
+        if "formal wear" in normalized_terms:
+            for key in _FORMAL_WEAR_DESCENDANT_KEYS:
+                candidate = next(item for item in _DEMO_SEMANTIC_FAMILIES if item.key == key)
+                if candidate.key not in seen_keys:
+                    seen_keys.add(candidate.key)
+                    matched.append(candidate)
+        product_ids = [product_id for family in matched for product_id in family.product_ids]
+        popular_count = sum(1 for family in matched if family.popular)
+        interpretation = ", ".join(family.interpretation for family in matched) or None
+        run_key = "+".join(family.key for family in matched) or "no-match"
         return RetrievalRun(
-            run_id=f"demo-{run_kind.lower()}-{family.key if family else 'no-match'}",
+            run_id=f"demo-{run_kind.lower()}-{run_key}",
             query_state_hash=query_state_hash(query_state),
             hard_filter_hash=hard_filter_hash(query_state),
             compatibility=compatibility,
-            eligible_count=1 if family else 0,
-            top_score=0.86 if family else None,
-            top_score_margin=0.22 if family else None,
-            required_criteria_coverage=1.0 if family else None,
-            result_product_ids=[family.product_id] if family else [],
-            interpretation_family=family.interpretation if family else None,
+            eligible_count=len(product_ids),
+            popular_result_count=popular_count if matched else None,
+            top_popularity_score=0.86 if popular_count else None,
+            top_score=0.95 if matched and matched[0].key == "formal-direct" else (0.86 if matched else None),
+            top_score_margin=0.22 if matched else None,
+            required_criteria_coverage=1.0 if matched else None,
+            result_product_ids=product_ids[:5],
+            interpretation_family=interpretation,
         )
 
 
@@ -185,10 +213,31 @@ def _demo_constraints() -> list[RecoveryConstraint]:
     }
     return [
         RecoveryConstraint(
+            concept_id="demo-formal-wear",
+            concept_type=ConceptType.TAXONOMY,
+            label="Formal wear",
+            canonical_term="formal wear",
+            **versions,
+        ),
+        RecoveryConstraint(
             concept_id="demo-shirts",
             concept_type=ConceptType.TAXONOMY,
             label="Shirts",
             canonical_term="shirts",
+            **versions,
+        ),
+        RecoveryConstraint(
+            concept_id="demo-trousers",
+            concept_type=ConceptType.TAXONOMY,
+            label="Trousers",
+            canonical_term="trousers",
+            **versions,
+        ),
+        RecoveryConstraint(
+            concept_id="demo-ties",
+            concept_type=ConceptType.TAXONOMY,
+            label="Ties",
+            canonical_term="ties",
             **versions,
         ),
         RecoveryConstraint(
@@ -237,6 +286,19 @@ def _demo_expansions() -> list[ApprovedExpansion]:
         **versions,
     }
     return [
+        ApprovedExpansion(
+            mapping_id="demo-formal-wear-to-taxonomy",
+            normalized_form="formal wear",
+            original_form="formal wear",
+            canonical_target_id="demo-formal-wear",
+            canonical_label="formal wear",
+            priority=200,
+            **{
+                **common,
+                "mapping_type": MappingType.COMPOUND,
+                "expansion_action": ExpansionAction.CANONICAL_SYNONYM,
+            },
+        ),
         ApprovedExpansion(
             mapping_id="demo-shoes-to-footwear",
             normalized_form="shoes",

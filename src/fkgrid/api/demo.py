@@ -76,19 +76,30 @@ def build_demo_recovery_request(payload: DemoRecoveryInput) -> RecoveryRequest:
         recovery_model_alias=DEEPINFRA_GEMMA_4_26B_A4B_IT,
         **_DEMO_VERSIONS,
     )
+    policy = RecoveryPolicy(policy_version=compatibility.recovery_policy_version)
+    is_formal_wear = normalized_query == "formal wear" or normalized_query.startswith("formal wear ")
     baseline = RetrievalRun(
         run_id=f"baseline-{turn_id}",
         query_state_hash=query_state_hash(state),
         hard_filter_hash=hard_filter_hash(state),
         compatibility=compatibility,
-        eligible_count=0,
-        required_criteria_coverage=None,
+        eligible_count=1 if is_formal_wear else 0,
+        popular_result_count=0 if is_formal_wear else None,
+        top_popularity_score=None,
+        top_score=0.95 if is_formal_wear else None,
+        top_score_margin=0.12 if is_formal_wear else None,
+        required_criteria_coverage=1.0 if is_formal_wear else None,
+        result_product_ids=["demo-formal-direct-1"] if is_formal_wear else [],
+        interpretation_family="formal wear direct match" if is_formal_wear else None,
     )
     gate = assess_retrieval_confidence(
         run=baseline,
         query_state=state,
-        unknown_terms=query_terms[:10],
+        unknown_terms=[] if is_formal_wear else query_terms[:10],
         policy_version=compatibility.gate_policy_version,
+        minimum_result_count=policy.minimum_result_count,
+        minimum_popular_result_count=policy.minimum_popular_result_count,
+        low_popularity_enabled=policy.low_popularity_enabled,
     )
     return RecoveryRequest(
         session_id="actathon-demo-session",
@@ -97,9 +108,9 @@ def build_demo_recovery_request(payload: DemoRecoveryInput) -> RecoveryRequest:
         query_state=state,
         baseline_run=baseline,
         gate=gate,
-        unresolved_terms=query_terms[:10],
+        unresolved_terms=[normalized_query] if is_formal_wear else query_terms[:10],
         compatibility=compatibility,
-        policy=RecoveryPolicy(policy_version=compatibility.recovery_policy_version),
+        policy=policy,
     )
 
 

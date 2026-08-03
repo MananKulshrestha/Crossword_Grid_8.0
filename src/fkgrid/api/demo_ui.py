@@ -43,6 +43,9 @@ DEMO_PAGE = r'''<!doctype html>
     .option { border:1px solid #35435f; border-radius:12px; padding:10px 12px; color:#e5ebf7; }
     .chips { display:flex; flex-wrap:wrap; gap:7px; margin-top:10px; }
     .chip { border:1px solid #35435f; border-radius:999px; padding:5px 9px; color:#d7e1f3; font-size:.82rem; }
+    .product-list { display:grid; gap:8px; margin-top:14px; }
+    .product-row { display:grid; grid-template-columns:36px 1fr auto; align-items:center; gap:10px; border:1px solid #2f3b55; border-radius:12px; padding:10px 12px; background:#111a2b; }
+    .product-rank { color:var(--accent); font-weight:850; }
     details { margin-top:22px; color:var(--muted); }
     summary { cursor:pointer; color:#dbe3f2; font-weight:700; }
     pre { overflow:auto; max-height:300px; border-radius:12px; background:#0a101d; padding:13px; font-size:.74rem; white-space:pre-wrap; word-break:break-word; }
@@ -78,6 +81,8 @@ DEMO_PAGE = r'''<!doctype html>
           <h2 id="headline"></h2>
           <div id="summary" class="small"></div>
           <div id="semantic" class="small"></div>
+          <h3>Recovered products</h3>
+          <div id="products" class="product-list" aria-live="polite"></div>
           <div id="filters" class="chips"></div>
           <div id="clarification" hidden>
             <h3>What the agent needs from you</h3>
@@ -100,6 +105,7 @@ DEMO_PAGE = r'''<!doctype html>
     const result = document.getElementById('result');
     const clarification = document.getElementById('clarification');
     const options = document.getElementById('options');
+    const products = document.getElementById('products');
 
     function text(node, value) { node.textContent = value || ''; }
 
@@ -129,6 +135,22 @@ DEMO_PAGE = r'''<!doctype html>
         text(document.getElementById('headline'), recovery.interpretation_label || recovery.terminal_state.replaceAll('_', ' '));
         text(document.getElementById('summary'), `${data.query} · ${recovery.event.retrieval_run_count} retrieval run(s) · ${recovery.event.added_latency_ms} ms`);
         text(document.getElementById('semantic'), recovery.selected_run?.interpretation_family ? `Semantic family: ${recovery.selected_run.interpretation_family}` : '');
+        products.replaceChildren();
+        const baselineIds = new Set(recovery.baseline_run?.result_product_ids || []);
+        (recovery.selected_run?.result_product_ids || []).forEach((productId, index) => {
+          const row = document.createElement('div');
+          row.className = 'product-row';
+          const rank = document.createElement('span');
+          rank.className = 'product-rank';
+          rank.textContent = `#${index + 1}`;
+          const id = document.createElement('span');
+          id.textContent = productId;
+          const source = document.createElement('span');
+          source.className = 'small';
+          source.textContent = baselineIds.has(productId) ? 'Direct match' : 'Recovered meaning';
+          row.append(rank, id, source);
+          products.appendChild(row);
+        });
         const filterHost = document.getElementById('filters');
         filterHost.replaceChildren();
         data.filters.forEach((label) => { const chip = document.createElement('span'); chip.className = 'chip'; chip.textContent = label; filterHost.appendChild(chip); });
