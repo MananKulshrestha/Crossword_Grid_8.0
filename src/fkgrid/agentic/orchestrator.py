@@ -75,6 +75,7 @@ from .ports import (
 )
 from .validation import (
     canonical_hash,
+    canonical_json,
     merge_query_state,
     normalize_action,
     parse_intent_payload,
