@@ -62,6 +62,7 @@ from .catalog import DeterministicCatalog
 from .compat import (
     CatalogSearchPortAdapter,
     ChatModelTypes,
+    QueryRecoveryPortAdapter,
     RecoveryPortAdapter,
     ReferenceResolverPortAdapter,
     ResearchPortAdapter,
@@ -76,7 +77,15 @@ from .workflow_adapters import (
     QualityPortAdapter,
 )
 
-_CORE_FIELDS = {"title", "category", "category_id", "brand", "price", "availability"}
+_CORE_FIELDS = {
+    "title",
+    "category",
+    "category_id",
+    "brand",
+    "price",
+    "prototype price",
+    "availability",
+}
 
 
 def _value_of(value: Any) -> Any:
@@ -95,12 +104,12 @@ def _text_value(value: Any) -> str:
 
 
 def _record_from_chat_entry(entry: ChatSearchEntry) -> CatalogRecord:
-    facts = {fact.label: fact for fact in entry.facts}
+    facts = {fact.label.casefold(): fact for fact in entry.facts}
     category_value = facts.get("category")
     category_id = _text_value(category_value.typed_value) if category_value else "unknown"
     brand_value = facts.get("brand")
     brand = _text_value(brand_value.typed_value) if brand_value else None
-    price_value = facts.get("price")
+    price_value = facts.get("price") or facts.get("prototype price")
     price = _value_of(price_value.typed_value) if price_value else None
     if not isinstance(price, (int, float)):
         price = None
@@ -117,7 +126,7 @@ def _record_from_chat_entry(entry: ChatSearchEntry) -> CatalogRecord:
     attributes: dict[str, str] = {}
     evidence_refs: dict[str, EvidenceRef] = {}
     for fact in entry.facts:
-        if fact.label not in _CORE_FIELDS and fact.typed_value is not None:
+        if fact.label.casefold() not in _CORE_FIELDS and fact.typed_value is not None:
             attributes[fact.label] = _text_value(fact.typed_value)
         for evidence in fact.evidence_refs:
             evidence_refs.setdefault(
@@ -169,6 +178,7 @@ class RuntimeTooling:
     shopper_catalog: CatalogSearchPortAdapter
     references: ReferenceResolverPortAdapter
     recovery: RecoveryPortAdapter
+    query_recovery: QueryRecoveryPortAdapter
     research: ResearchPortAdapter
     suggestions: SuggestionPortAdapter
     catalog_language: CatalogLanguagePortAdapter
@@ -214,6 +224,7 @@ def build_runtime_tooling(
     shopper_catalog = CatalogSearchPortAdapter(catalog, models)
     references = ReferenceResolverPortAdapter(catalog, models)
     recovery = RecoveryPortAdapter(catalog, chat_models=models)
+    query_recovery = QueryRecoveryPortAdapter(catalog)
     research = ResearchPortAdapter(
         fixtures=research_fixtures,
         enabled=research_enabled,
@@ -230,6 +241,7 @@ def build_runtime_tooling(
         shopper_catalog=shopper_catalog,
         references=references,
         recovery=recovery,
+        query_recovery=query_recovery,
         research=research,
         suggestions=suggestions,
         catalog_language=CatalogLanguagePortAdapter(records),

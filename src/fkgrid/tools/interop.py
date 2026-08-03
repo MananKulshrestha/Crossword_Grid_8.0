@@ -34,7 +34,7 @@ from .contracts import (
     SuggestionSelection,
     SuggestionSet,
 )
-from .determinism import canonical_hash, stable_id
+from .determinism import canonical_hash, canonical_json, stable_id
 
 
 def payload_of(value: object) -> dict[str, Any]:
@@ -43,6 +43,21 @@ def payload_of(value: object) -> dict[str, Any]:
     if hasattr(value, "model_dump"):
         return value.model_dump(mode="json")
     raise TypeError("expected a mapping or Pydantic model")
+
+
+def hard_filter_hash_from_worktree(value: object) -> str:
+    """Create the chat contract's hash without importing the chat package."""
+
+    data = payload_of(value)
+    if "query_state" in data:
+        data = payload_of(data["query_state"])
+    if "hard_constraints" not in data:
+        return canonical_hash(data.get("hard_filters", {}), length=64)
+    clauses = sorted(
+        [payload_of(item) for item in data.get("hard_constraints", [])],
+        key=canonical_json,
+    )
+    return canonical_hash({"schema": "hard-filter-v1", "clauses": clauses}, length=64)
 
 
 def _coerce_annotation(value: Any, annotation: Any) -> Any:
@@ -176,26 +191,64 @@ def query_state_from_worktree(
     for constraint in data.get("hard_constraints", []):
         item = payload_of(constraint)
         field_id = str(item.get("field_id", ""))
-        if field_id:
-            values = item.get("values", [])
-            operator = str(item.get("operator", "EQ"))
-            normalized_values = [_plain_query_value(value) for value in values]
-            if field_id in {"category", "taxonomy_node_id", "taxonomy_scope_id"}:
+        operator_value = item.get("operator", "EQ")
+        operator = operator_value.value if isinstance(operator_value, Enum) else str(operator_value)
+        values = item.get("values", [])
+        if not field_id or not isinstance(values, list):
+            hard_filters.setdefault("unsupported_constraints", []).append(
+                {"field_id": field_id, "operator": operator}
+            )
+            continue
+        normalized_values = [_plain_query_value(value) for value in values]
+        if field_id in {"category", "taxonomy_node_id", "taxonomy_scope_id"}:
+            if operator == "ALL_OF" and len(normalized_values) > 1:
+                hard_filters.setdefault("unsupported_constraints", []).append(
+                    {"field_id": field_id, "operator": operator}
+                )
+            else:
                 hard_filters["category_id"] = (
                     normalized_values[0] if len(normalized_values) == 1 else list(normalized_values)
                 )
-            elif field_id in {"price", "min_price", "max_price"}:
-                price_values = [float(value) for value in normalized_values]
-                if field_id == "min_price" or operator in {"GTE", "GT"}:
-                    hard_filters["min_price"] = price_values[0]
-                elif field_id == "max_price" or operator in {"LTE", "LT"}:
-                    hard_filters["max_price"] = price_values[0]
-                elif price_values:
-                    hard_filters["min_price"] = price_values[0]
-                    hard_filters["max_price"] = price_values[0]
-            elif field_id in {"brand", "availability"}:
+        elif field_id in {"price", "min_price", "max_price"}:
+            price_values = [float(value) for value in normalized_values]
+            if operator == "RANGE" and len(price_values) >= 2:
+                lower, upper = sorted(price_values[:2])
+                hard_filters["min_price"] = lower
+                hard_filters["max_price"] = upper
+            elif operator == "GT" or field_id == "min_price" and operator == "GT":
+                hard_filters["min_price_exclusive"] = price_values[0]
+            elif operator == "GTE" or field_id == "min_price":
+                hard_filters["min_price"] = price_values[0]
+            elif operator == "LT" or field_id == "max_price" and operator == "LT":
+                hard_filters["max_price_exclusive"] = price_values[0]
+            elif operator == "LTE" or field_id == "max_price":
+                hard_filters["max_price"] = price_values[0]
+            elif operator == "IN":
+                hard_filters["price_values"] = price_values
+            elif price_values:
+                hard_filters["min_price"] = price_values[0]
+                hard_filters["max_price"] = price_values[0]
+        elif field_id in {"brand", "availability"}:
+            if operator not in {"EQ", "IN"}:
+                hard_filters.setdefault("unsupported_constraints", []).append(
+                    {"field_id": field_id, "operator": operator}
+                )
+            else:
                 hard_filters[field_id] = (
                     normalized_values[0] if len(normalized_values) == 1 else list(normalized_values)
+                )
+        else:
+            if operator == "ALL_OF":
+                attribute_all_of = dict(hard_filters.get("attribute_all_of", {}))
+                attribute_all_of[field_id] = list(normalized_values)
+                hard_filters["attribute_all_of"] = attribute_all_of
+            elif operator == "RANGE" and len(normalized_values) >= 2:
+                attribute_ranges = dict(hard_filters.get("attribute_ranges", {}))
+                attribute_ranges[field_id] = sorted(float(value) for value in normalized_values[:2])
+                hard_filters["attribute_ranges"] = attribute_ranges
+            elif operator not in {"EQ", "IN"}:
+                hard_filters.setdefault("unsupported_constraints", []).append(
+                    {"field_id": field_id, "operator": operator}
                 )
             else:
                 attributes = dict(hard_filters.get("attributes", {}))
@@ -207,13 +260,18 @@ def query_state_from_worktree(
     for preference in data.get("soft_preferences", []):
         item = payload_of(preference)
         soft_terms.extend(str(value) for value in item.get("values", []))
+    category_id = data.get("category_id", data.get("taxonomy_scope_id"))
+    if category_id is None:
+        category_filter = hard_filters.get("category_id")
+        if isinstance(category_filter, str):
+            category_id = category_filter
     return QueryState(
         text=str(data.get("text", " ".join(query_terms))),
         normalized_terms=query_terms,
         hard_filters=hard_filters,
         soft_terms=soft_terms,
         excluded_terms=[str(item) for item in data.get("excluded_terms", [])],
-        category_id=data.get("category_id", data.get("taxonomy_scope_id")),
+        category_id=category_id,
         locale=str(data.get("locale", "en-IN")),
         result_set_id=data.get("result_set_id", data.get("latest_result_set_id")),
     )
@@ -455,6 +513,13 @@ def commerce_eligibility_to_chat(result: CommerceEligibility) -> dict[str, Any]:
 
 
 def product_details_to_chat(result: ProductDetails) -> dict[str, Any]:
+    def fact_evidence(field_id: str) -> list[dict[str, Any]]:
+        source_fields = {field_id, "category" if field_id == "category_id" else field_id}
+        field_refs = [ref for ref in result.evidence_refs if ref.field in source_fields]
+        if not field_refs:
+            field_refs = result.evidence_refs[:8]
+        return [evidence_ref_to_chat(ref, result.binding.offer_id) for ref in field_refs[:8]]
+
     facts = []
     if result.title is not None:
         facts.append(
@@ -465,7 +530,7 @@ def product_details_to_chat(result: ProductDetails) -> dict[str, Any]:
                 "status": "VERIFIED",
                 "scope": "CATALOG",
                 "provenance_type": "MOCK_CATALOG",
-                "evidence_refs": [],
+                "evidence_refs": fact_evidence("title"),
             }
         )
     for key, value in sorted(result.attributes.items()):
@@ -477,7 +542,7 @@ def product_details_to_chat(result: ProductDetails) -> dict[str, Any]:
                 "status": "VERIFIED",
                 "scope": "CATALOG",
                 "provenance_type": "MOCK_CATALOG",
-                "evidence_refs": [],
+                "evidence_refs": fact_evidence(key),
             }
         )
     if result.category_id is not None:
@@ -489,7 +554,7 @@ def product_details_to_chat(result: ProductDetails) -> dict[str, Any]:
                 "status": "VERIFIED",
                 "scope": "CATALOG",
                 "provenance_type": "MOCK_CATALOG",
-                "evidence_refs": [],
+                "evidence_refs": fact_evidence("category_id"),
             }
         )
     if result.brand is not None:
@@ -501,7 +566,7 @@ def product_details_to_chat(result: ProductDetails) -> dict[str, Any]:
                 "status": "VERIFIED",
                 "scope": "CATALOG",
                 "provenance_type": "MOCK_CATALOG",
-                "evidence_refs": [],
+                "evidence_refs": fact_evidence("brand"),
             }
         )
     if result.price is not None:
@@ -513,7 +578,7 @@ def product_details_to_chat(result: ProductDetails) -> dict[str, Any]:
                 "status": "VERIFIED",
                 "scope": "PROTOTYPE",
                 "provenance_type": "MOCK_CATALOG",
-                "evidence_refs": [],
+                "evidence_refs": fact_evidence("price"),
             }
         )
     if result.availability:
@@ -525,7 +590,7 @@ def product_details_to_chat(result: ProductDetails) -> dict[str, Any]:
                 "status": "VERIFIED" if result.availability != "UNKNOWN" else "UNKNOWN",
                 "scope": "PROTOTYPE",
                 "provenance_type": "MOCK_CATALOG",
-                "evidence_refs": [],
+                "evidence_refs": fact_evidence("availability"),
             }
         )
     return {
@@ -536,7 +601,8 @@ def product_details_to_chat(result: ProductDetails) -> dict[str, Any]:
         "variants": [],
         "warnings": [],
         "evidence_refs": [
-            evidence_ref_to_chat(ref, result.binding.product_id) for ref in result.evidence_refs
+            evidence_ref_to_chat(ref, result.binding.product_id)
+            for ref in result.evidence_refs[:30]
         ],
     }
 
@@ -546,12 +612,23 @@ def comparison_to_chat(result: Comparison) -> dict[str, Any]:
     for field_id, values in result.rows.items():
         cells = []
         for _, value in enumerate(values):
+            binding_index = len(cells)
+            binding = (
+                result.bindings[binding_index]
+                if binding_index < len(result.bindings)
+                else result.bindings[0]
+            )
+            field_refs = [ref for ref in result.evidence_refs if ref.field == field_id]
+            if not field_refs:
+                field_refs = result.evidence_refs[:8]
             cells.append(
                 {
                     "field_id": field_id,
                     "value": value,
                     "status": "UNKNOWN" if value is None else "VERIFIED",
-                    "evidence_refs": [],
+                    "evidence_refs": [
+                        evidence_ref_to_chat(ref, binding.offer_id) for ref in field_refs[:8]
+                    ],
                 }
             )
         rows.append({"field_id": field_id, "label": field_id, "cells": cells})
@@ -579,7 +656,7 @@ def availability_to_chat(result: Availability) -> dict[str, Any]:
         "scope": "PROTOTYPE",
         "provenance_type": "MOCK_CATALOG",
         "evidence_refs": [
-            evidence_ref_to_chat(ref, result.binding.offer_id) for ref in result.evidence_refs
+            evidence_ref_to_chat(ref, result.binding.offer_id) for ref in result.evidence_refs[:8]
         ],
         "warnings": [result.reason],
     }

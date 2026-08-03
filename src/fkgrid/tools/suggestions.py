@@ -220,11 +220,18 @@ class SuggestionStore:
         now_ms: int,
         expected_state_version: int | None = None,
         expected_cart_version: int | None = None,
+        signed_action_token: str | None = None,
     ) -> SuggestionSelection:
         suggestion_set = self._sets.get(suggestion_set_id)
         if suggestion_set is None:
             return SuggestionSelection(status="NOT_FOUND", suggestion_set_id=suggestion_set_id)
         if not validate_suggestion_set(suggestion_set, session_id, now_ms, self.secret):
+            return SuggestionSelection(
+                status="SUGGESTION_STALE", suggestion_set_id=suggestion_set_id
+            )
+        if signed_action_token is not None and not hmac.compare_digest(
+            signed_action_token, suggestion_set.signature
+        ):
             return SuggestionSelection(
                 status="SUGGESTION_STALE", suggestion_set_id=suggestion_set_id
             )

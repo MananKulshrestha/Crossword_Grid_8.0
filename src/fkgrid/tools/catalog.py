@@ -143,6 +143,8 @@ class DeterministicCatalog:
         if state.category_id is not None:
             filters.setdefault("category_id", state.category_id)
         reasons: list[str] = []
+        if filters.get("unsupported_constraints"):
+            return False, ["UNSUPPORTED_HARD_CONSTRAINT"]
         if "category_id" in filters:
             expected_categories = filters["category_id"]
             expected_categories = (
@@ -168,11 +170,26 @@ class DeterministicCatalog:
                 return False, ["PRICE_UNKNOWN"]
             if record.price < float(filters["min_price"]):
                 return False, ["BELOW_MIN_PRICE"]
+        if "min_price_exclusive" in filters:
+            if record.price is None:
+                return False, ["PRICE_UNKNOWN"]
+            if record.price <= float(filters["min_price_exclusive"]):
+                return False, ["NOT_ABOVE_MIN_PRICE"]
         if "max_price" in filters:
             if record.price is None:
                 return False, ["PRICE_UNKNOWN"]
             if record.price > float(filters["max_price"]):
                 return False, ["ABOVE_MAX_PRICE"]
+        if "max_price_exclusive" in filters:
+            if record.price is None:
+                return False, ["PRICE_UNKNOWN"]
+            if record.price >= float(filters["max_price_exclusive"]):
+                return False, ["NOT_BELOW_MAX_PRICE"]
+        if "price_values" in filters:
+            if record.price is None:
+                return False, ["PRICE_UNKNOWN"]
+            if record.price not in {float(value) for value in filters["price_values"]}:
+                return False, ["PRICE_NOT_IN_SET"]
         if "availability" in filters:
             expected_availability = filters["availability"]
             expected_availability = (
@@ -191,6 +208,25 @@ class DeterministicCatalog:
                 normalize_text(str(value)) for value in expected_values
             }:
                 return False, [f"ATTRIBUTE_MISMATCH:{name}"]
+        for name, expected_values in dict(filters.get("attribute_all_of", {})).items():
+            actual = record.attributes.get(name)
+            if actual is None:
+                return False, [f"ATTRIBUTE_UNKNOWN:{name}"]
+            if not all(
+                normalize_text(str(value)) in normalize_text(actual) for value in expected_values
+            ):
+                return False, [f"ATTRIBUTE_MISMATCH:{name}"]
+        for name, bounds in dict(filters.get("attribute_ranges", {})).items():
+            actual = record.attributes.get(name)
+            if actual is None:
+                return False, [f"ATTRIBUTE_UNKNOWN:{name}"]
+            try:
+                actual_value = float(actual)
+                lower, upper = (float(value) for value in bounds[:2])
+            except (TypeError, ValueError):
+                return False, [f"ATTRIBUTE_NOT_NUMERIC:{name}"]
+            if not lower <= actual_value <= upper:
+                return False, [f"ATTRIBUTE_OUT_OF_RANGE:{name}"]
         for key, field in (
             ("exclude_product_ids", record.binding.product_id),
             ("exclude_sku_ids", record.binding.sku_id),

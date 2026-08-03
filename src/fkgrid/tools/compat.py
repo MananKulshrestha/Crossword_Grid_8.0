@@ -30,6 +30,7 @@ from .interop import (
     commerce_eligibility_to_chat,
     comparison_to_chat,
     compatibility_from_worktree,
+    hard_filter_hash_from_worktree,
     online_search_to_chat,
     payload_of,
     product_details_to_chat,
@@ -144,7 +145,14 @@ def _rank_approximate_colors(result: Any, requested_colors: Sequence[str]) -> tu
     ordered = [
         entry.model_copy(update={"rank": index}) for index, entry in enumerate(ordered, start=1)
     ]
-    return result.model_copy(update={"entries": ordered}), True
+    result_set_id = stable_id(
+        "rs",
+        {
+            "query_hash": result.query_hash,
+            "entries": [entry.binding for entry in ordered],
+        },
+    )
+    return result.model_copy(update={"entries": ordered, "result_set_id": result_set_id}), True
 
 
 class CatalogSearchPortAdapter:
@@ -169,7 +177,20 @@ class CatalogSearchPortAdapter:
         result, approximate_color = _rank_approximate_colors(result, requested_colors)
         if len(result.entries) > requested_limit:
             result = result.model_copy(update={"entries": result.entries[:requested_limit]})
-        payload = search_result_to_chat(result)
+        result = result.model_copy(
+            update={
+                "result_set_id": stable_id(
+                    "rs",
+                    {
+                        "query_hash": result.query_hash,
+                        "entries": [entry.binding for entry in result.entries],
+                    },
+                )
+            }
+        )
+        payload = search_result_to_chat(
+            result, hard_filter_hash=hard_filter_hash_from_worktree(request)
+        )
         if not result.entries:
             payload["warnings"] = list(
                 dict.fromkeys([*payload.get("warnings", []), "NO_ELIGIBLE_MATCH"])
@@ -311,7 +332,7 @@ class RecoveryPortAdapter:
                 "NO_MATCH": "NO_SAFE_RECOVERY",
             }.get(decision.status, decision.status),
             "reasons": list(decision.reasons),
-            "hard_filter_hash": canonical_hash(shared_state.hard_filters, length=64),
+            "hard_filter_hash": hard_filter_hash_from_worktree(query_state),
             "signals": {
                 "confidence": float(decision.confidence),
                 **shared_result.confidence_signals,
@@ -331,7 +352,12 @@ class RecoveryPortAdapter:
         recovered = self._adapter.recover(
             shared_result, query_state_from_worktree(query_state, pinned), pinned, deadline_ms
         )
-        return _as_local(search_result_to_chat(recovered), self.chat_models.search_result)
+        return _as_local(
+            search_result_to_chat(
+                recovered, hard_filter_hash=hard_filter_hash_from_worktree(query_state)
+            ),
+            self.chat_models.search_result,
+        )
 
 
 class QueryRecoveryPortAdapter:
@@ -603,6 +629,7 @@ class SuggestionPortAdapter:
             self.clock_ms,
             expected_state_version=data.get("expected_state_version"),
             expected_cart_version=data.get("expected_cart_version"),
+            signed_action_token=str(data.get("signed_action_token", "")),
         )
         return _as_local(
             suggestion_selection_to_chat(result), self.chat_models.suggestion_selection
