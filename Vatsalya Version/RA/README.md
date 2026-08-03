@@ -76,6 +76,36 @@ expect somewhere around 1–2 hours for the full catalog — bump
 `LLM_MAX_ASYNC`/`OLLAMA_NUM_PARALLEL` higher if the GPU has room, since
 48GB VRAM likely supports more than 4 concurrent 27B requests).
 
+## 0. Provision Qdrant
+
+Tier 3 target per `retrieval-architecture.md` is Qdrant-backed vector
+storage (the ingestion/query code below doesn't use it yet — that's
+Step 3 of `plan.md`, tracked separately). Same Docker pattern as the
+MySQL container in `../README.md`:
+
+```bash
+docker run -d \
+  --name flipkart-qdrant \
+  -p 6333:6333 \
+  -p 6334:6334 \
+  qdrant/qdrant
+```
+
+No persistent volume — data is lost if the container is removed, same
+caveat as the MySQL container.
+
+| Field | Value |
+|---|---|
+| Host | `127.0.0.1` (or `localhost`) |
+| REST port | `6333` |
+| gRPC port | `6334` |
+
+Verify it's up:
+
+```bash
+curl http://localhost:6333/collections
+```
+
 ## 1. Install dependencies
 
 ```bash
