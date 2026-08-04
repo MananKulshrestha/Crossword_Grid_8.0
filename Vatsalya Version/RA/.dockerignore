@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.git/
+.DS_Store
+lightrag.log
+lightrag.log.*
+backups/
+docker/qdrant-init/qdrant_data.tar.gz
+graph_sampling_output/coverage_report.json
+lightrag_storage/*.bak-*
+

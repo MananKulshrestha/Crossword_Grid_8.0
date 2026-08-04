@@ -17,6 +17,34 @@ folded in. Those already live in `product_metadata`
 corpus; LightRAG's own entity extraction is what's responsible for
 pulling brand/category/material *out of* the description text.
 
+## Quick Start — Interactive Web UI
+
+The easiest way to explore the graph and query products is with the web UI:
+
+```bash
+./webui.sh
+```
+
+This script will:
+- ✅ Start the Flask web server automatically
+- ✅ Open your browser to `http://localhost:8000`
+- ✅ Display the interactive graph visualizer and query interface
+
+**Features:**
+- 🔍 **Query Interface** — Type natural language queries to search product listings (e.g., "What cotton shirts are available?", "Find me blue products with round neck...")
+- 📊 **Graph Visualization** — Interactive knowledge graph with 7,000+ nodes showing relationships between products, brands, categories, materials, and features
+- ⛶ **Fullscreen Mode** — Click the fullscreen button to expand the graph for detailed exploration (press Esc or click Exit to return)
+- 🔎 **Node Search** — Search for specific entities in the sidebar
+- 📦 **Mixed Mode Retrieval** — Queries use both Qdrant vector search and knowledge graph traversal for comprehensive product discovery
+
+### Query Examples
+
+- "What cotton shirts are available?"
+- "Show me blue products"
+- "Find products with round neck"
+- "What are the waterproof footwear brands?"
+- "Which products are suitable for casual wear?"
+
 ## How the text turns into a graph
 
 LightRAG does not build the graph directly from the raw catalog rows — it
@@ -123,6 +151,12 @@ and `docker start` anything that's `Exited`.
 pip install -r requirements.txt
 ```
 
+Or use `uv` for faster installation:
+
+```bash
+uv sync
+```
+
 ## 2. Start Ollama and pull models
 
 Embedding runs **locally** by default (`EMBED_BACKEND="local"` in
@@ -202,8 +236,8 @@ on every run via `build_rag()`. `run.sh` checks every server listed here is
 reachable (and has `LLM_MODEL` pulled) before ingesting.
 
 **Hard-fails, no silent fallback**: if `servers.txt` is missing or has no
-URLs, `ingest.py` raises immediately rather than silently falling back to
-a single server — matching this folder's existing no-soft-fallback
+URLs, `ingest.py` raises immediately rather than silently falling back to a
+single server — matching this folder's existing no-soft-fallback
 discipline (`IMPLEMENTATION.md` #5).
 
 If raising `LLM_MAX_ASYNC` (below) to actually push more concurrent
@@ -386,6 +420,8 @@ re-run them; there's nothing to "resume" mid-pass.
 
 ## 5. Query
 
+### Command-line query (raw context):
+
 ```bash
 python query.py "What waterproof footwear brands are available?"
 ```
@@ -397,6 +433,20 @@ search over chunks (every SKU, via Qdrant). Runs with
 (chunks/entities/relationships + source SKU references), not an
 LLM-generated prose answer — response generation belongs to the outer
 chat layer, not this retrieval step.
+
+### Interactive Web UI (queries + visualization):
+
+```bash
+./webui.sh
+```
+
+Starts the Flask web UI server and opens it in your browser at `http://localhost:8000`.
+The UI provides:
+- 🔍 **Natural language query interface** for product discovery
+- 📊 **Interactive graph visualization** of the knowledge graph
+- 🔎 **Entity search** in the sidebar
+- ⛶ **Fullscreen graph view** for detailed exploration
+- 📦 **Mixed mode retrieval** combining vector search and graph traversal
 
 ## Checking how many samples each branch has actually ingested
 
@@ -433,9 +483,10 @@ does not exist):
 ## Run everything with one command
 
 ```bash
-./run.sh              # ingest + sample query
-./run.sh ingest        # ingest only
-./run.sh query "your question here"
+./webui.sh              # Open interactive web UI (recommended)
+./run.sh                # ingest + sample query (command-line)
+./run.sh ingest         # ingest only (command-line)
+./run.sh query "your question here"  # query only (command-line)
 ```
 
 `run.sh` installs dependencies, checks the Ollama server is reachable,

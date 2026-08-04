@@ -2,12 +2,12 @@
 graph (subset only) and chunk-vector index (full catalog, Qdrant-backed) so
 queries can later run in "mix" mode.
 
-Requires every Ollama server listed in servers.txt reachable with LLM_MODEL
-pulled (extraction round-robins across all of them via multi_ollama.py --
-see servers.txt's own comments), OLLAMA_HOST (config.py) reachable with
-EMBED_MODEL pulled (embedding stays single-server), and the Qdrant
-container from README.md's "Qdrant Setup" section running and reachable
-at QDRANT_URL.
+Requires every Ollama server listed in servers.txt reachable with both
+LLM_MODEL and EMBED_MODEL pulled -- extraction AND embedding (when
+EMBED_BACKEND="ollama") round-robin across all of them via the same
+MultiOllamaLoadBalancer instance (multi_ollama.py; see servers.txt's own
+comments) -- and the Qdrant container from README.md's "Qdrant Setup"
+section running and reachable at QDRANT_URL.
 
 Uses apipeline_enqueue_documents + apipeline_process_enqueue_documents
 (not the rag.ainsert() convenience wrapper) because only the low-level
@@ -37,7 +37,6 @@ from tqdm import tqdm
 from lightrag import LightRAG
 from lightrag.base import DocStatus
 from lightrag.kg.shared_storage import initialize_pipeline_status
-from lightrag.llm.ollama import ollama_embed
 from lightrag.utils import EmbeddingFunc, setup_logger
 from lightrag.utils_pipeline import (
     chunk_fields_from_status_doc,
@@ -58,7 +57,6 @@ from config import (
     LLM_MAX_ASYNC,
     LLM_MODEL,
     NUM_CTX,
-    OLLAMA_HOST,
     QDRANT_URL,
     WORKING_DIR,
 )
@@ -75,17 +73,21 @@ setup_logger("lightrag", level="INFO")
 os.environ.setdefault("QDRANT_URL", QDRANT_URL)
 
 
-def embedding_func():
+def embedding_func(load_balancer):
     """Builds the EmbeddingFunc per config.EMBED_BACKEND -- "local" runs
-    sentence-transformers on this machine (local_embed.py), "ollama" calls
-    OLLAMA_HOST like extraction does. See config.py's EMBED_BACKEND
-    comment for why "local" is the default."""
+    sentence-transformers on this machine (local_embed.py), "ollama" round-
+    robins across every server in servers.txt via the same
+    MultiOllamaLoadBalancer instance extraction uses (load_balancer.embed),
+    instead of a single hardcoded host -- so embedding work is distributed
+    across the same cluster capacity extraction already shares, not pinned
+    to one server. See config.py's EMBED_BACKEND comment for why "ollama" is
+    the default."""
     if EMBED_BACKEND == "local":
         from local_embed import local_embed
 
         func = lambda texts: local_embed(texts)
     elif EMBED_BACKEND == "ollama":
-        func = lambda texts: ollama_embed(texts, embed_model=EMBED_MODEL, host=OLLAMA_HOST)
+        func = lambda texts: load_balancer.embed(texts, embed_model=EMBED_MODEL)
     else:
         raise ValueError(f"Unknown EMBED_BACKEND: {EMBED_BACKEND!r} (expected 'local' or 'ollama')")
 
@@ -122,7 +124,7 @@ async def build_rag():
         llm_model_name=LLM_MODEL,
         llm_model_kwargs=llm_kwargs(),
         llm_model_max_async=LLM_MAX_ASYNC,
-        embedding_func=embedding_func(),
+        embedding_func=embedding_func(load_balancer),
         embedding_func_max_async=EMBEDDING_MAX_ASYNC,
         addon_params={"entity_types_guidance": ENTITY_TYPES_GUIDANCE},
     )
@@ -148,10 +150,17 @@ def load_full_extraction_skus():
         return {line.strip() for line in f if line.strip()}
 
 
-async def monitor_processing_progress(rag, total_docs, initial_processed=0, poll_interval=5):
+async def monitor_processing_progress(rag, total_docs, initial_processed=0, poll_interval=2):
     """Monitor progress of document processing by polling doc_status, showing a
-    progress bar with ETA. Runs until all documents are PROCESSED or FAILED."""
+    progress bar with ETA. Runs until all documents are PROCESSED or FAILED.
+
+    poll_interval (default 2 seconds): how often to check doc_status. Shorter
+    intervals give more responsive progress bars but higher polling overhead."""
     start_time = time.time()
+    last_update_time = start_time
+    last_count = initial_processed
+    stuck_threshold = 30  # seconds without progress before warning
+
     with tqdm(
         total=total_docs,
         initial=initial_processed,
@@ -159,20 +168,38 @@ async def monitor_processing_progress(rag, total_docs, initial_processed=0, poll
         unit="docs",
         dynamic_ncols=True,
     ) as pbar:
-        last_count = initial_processed
         while True:
             counts = await rag.get_processing_status()
             processed = counts.get("processed", 0)
             failed = counts.get("failed", 0)
             total_done = processed + failed
+
+            now = time.time()
+            update_delta = total_done - last_count
+
+            # Update progress bar
+            if update_delta > 0:
+                pbar.update(update_delta)
+                last_count = total_done
+                last_update_time = now
+
+            # Warn if stuck (no progress for 30+ seconds)
+            time_since_progress = now - last_update_time
+            if time_since_progress > stuck_threshold and total_done < total_docs:
+                elapsed_mins = time_since_progress / 60
+                pbar.write(
+                    f"⚠️  No progress for {elapsed_mins:.1f}m ({processed} processed, "
+                    f"{failed} failed, {total_docs - total_done} remaining). "
+                    f"Check server logs or network connectivity."
+                )
+
             if total_done == total_docs:
-                pbar.update(total_done - last_count)
                 break
-            pbar.update(total_done - last_count)
-            last_count = total_done
+
             await asyncio.sleep(poll_interval)
+
         elapsed = time.time() - start_time
-        pbar.set_postfix_str(f"completed in {elapsed:.1f}s")
+        pbar.set_postfix_str(f"done in {elapsed:.0f}s ({processed} OK, {failed} failed)")
 
 
 async def resume_failed_documents(rag):
@@ -226,36 +253,87 @@ async def resume_failed_documents(rag):
 
 
 async def main():
+    """Ingest documents into LightRAG with checkpoint/resume and progress tracking.
+
+    Notes on expected warnings/logs:
+    - "WARNING: Duplicate document detected (content_hash)": LightRAG detects when
+      the exact same text (same product description) is being indexed under
+      different SKU IDs. This is handled gracefully by LightRAG and is expected
+      when a product description is genuinely reused across SKUs (e.g., a color
+      variant of the same item). It does NOT indicate a problem — LightRAG
+      deduplicates internally by content hash, so the graph/embedding is still
+      correct and efficient. The warning is informational, not an error.
+    """
     documents, (skipped_empty_description, skipped_duplicates) = build_documents(limit=BATCH_SIZE)
-    attempted = len(documents)
+    loaded = len(documents)
     batch_desc = "no limit (full catalog)" if BATCH_SIZE is None else str(BATCH_SIZE)
     skip_msg = f"{skipped_empty_description} products skipped for having no usable description"
     if skipped_duplicates:
         skip_msg += f", {skipped_duplicates} duplicate SKU IDs"
     print(
-        f"Loaded {attempted} documents for ingestion (batch limit {batch_desc}); "
+        f"Loaded {loaded} documents from the corpus (batch limit {batch_desc}); "
         f"{skip_msg} (excluded from this count, not silently included)"
     )
 
-    if attempted == 0:
+    if loaded == 0:
         print("Nothing to ingest -- exiting without touching LightRAG storage.")
         sys.exit(1)
 
     full_extraction_skus = load_full_extraction_skus()
-    ids = [f"sku-{sku_id}" for sku_id, _ in documents]
-    texts = [text for _, text in documents]
-    process_options = [
-        "" if sku_id in full_extraction_skus else "!" for sku_id, _ in documents
-    ]
-    full_extraction_count = sum(1 for opt in process_options if opt == "")
+    rag = await build_rag()
+
+    # Only enqueue SKUs LightRAG has never seen before. Every previous run of
+    # this script re-submitted the ENTIRE corpus to apipeline_enqueue_documents
+    # on every invocation -- LightRAG's own dedup (filename/content_hash, see
+    # pipeline.py apipeline_enqueue_documents) silently absorbed the already-known
+    # ones as "duplicate document" records instead of re-processing them, so no
+    # already-PROCESSED doc was ever actually redone. But re-submitting tens of
+    # thousands of already-known docs every run was still real, avoidable cost:
+    # minutes of hashing/logging before any new work starts, tens of thousands of
+    # throwaway "dup-" tracking rows accumulating in doc_status forever, and (the
+    # visible symptom) the progress bar below being sized off the full resubmitted
+    # corpus count instead of actual outstanding work, so once cumulative
+    # processed-ever exceeded that count the bar lost its percentage/ETA display
+    # entirely and looked like it was starting over. filter_keys() is the same
+    # existence check the enqueue path itself uses -- doing it here means we never
+    # pay for or create a duplicate record for a SKU we already know about.
+    all_ids = {f"sku-{sku_id}" for sku_id, _ in documents}
+    new_ids = await rag.doc_status.filter_keys(all_ids)
+    new_documents = [(sku_id, text) for sku_id, text in documents if f"sku-{sku_id}" in new_ids]
+    attempted = len(new_documents)
+    already_known = loaded - attempted
     print(
-        f"{full_extraction_count} of {attempted} documents in this run are in the "
-        f"full-extraction subset ({len(full_extraction_skus)} total subset size "
-        f"per {GRAPH_SAMPLING_SUBSET_PATH}); the rest get skip_kg (chunk-embedded "
-        f"into Qdrant only, no LLM extraction call)."
+        f"{attempted} of {loaded} are new to LightRAG ({already_known} already "
+        f"enqueued/processed in a previous run -- skipped, not resubmitted)."
     )
 
-    rag = await build_rag()
+    ids = [f"sku-{sku_id}" for sku_id, _ in new_documents]
+    texts = [text for _, text in new_documents]
+    process_options = [
+        "" if sku_id in full_extraction_skus else "!" for sku_id, _ in new_documents
+    ]
+    full_extraction_count = sum(1 for opt in process_options if opt == "")
+    if attempted:
+        print(
+            f"{full_extraction_count} of {attempted} new documents in this run are in "
+            f"the full-extraction subset ({len(full_extraction_skus)} total subset size "
+            f"per {GRAPH_SAMPLING_SUBSET_PATH}); the rest get skip_kg (chunk-embedded "
+            f"into Qdrant only, no LLM extraction call)."
+        )
+
+    if EMBED_BACKEND == "local":
+        # Forces the sentence-transformers model to load NOW, synchronously,
+        # before any document reaches the embedding step. Without this, the
+        # first real embedding call pays the full cold-load cost (HuggingFace
+        # download + model init, routinely 60s+ on a fresh environment) inside
+        # LightRAG's own internal 60s embedding-worker timeout and fails with
+        # "Worker execution timeout after 60s" -- not a real data/logic
+        # problem, just whichever document happens to go first eating a
+        # one-time cost it shouldn't have to pay. See local_embed.warmup().
+        from local_embed import warmup
+        print("Warming up local embedding model (first-time download/load can take a minute)...")
+        await warmup()
+        print("Embedding model ready.")
 
     # Checkpoint/resume: a doc left PROCESSING/PARSING/ANALYZING by a hard
     # interrupt (kill -9, crash, Ctrl+C) is auto-reset to PENDING by LightRAG
@@ -270,13 +348,62 @@ async def main():
     if resumed_count:
         print(f"\nResumed {resumed_count} previously FAILED document(s) -- reset to PENDING for retry.\n")
 
-    print("=== Enqueueing documents ===")
-    with tqdm(total=attempted, desc="Enqueue", unit="docs", dynamic_ncols=True) as pbar:
-        await rag.apipeline_enqueue_documents(texts, ids=ids, process_options=process_options)
-        pbar.update(attempted)
+    if attempted:
+        print("=== Enqueueing documents ===")
+        with tqdm(total=attempted, desc="Enqueue", unit="docs", dynamic_ncols=True) as pbar:
+            await rag.apipeline_enqueue_documents(texts, ids=ids, process_options=process_options)
+            pbar.update(attempted)
+    else:
+        print("=== No new documents to enqueue -- resuming outstanding work only ===")
 
     print("\n=== Processing documents (this may take a while) ===")
-    await monitor_processing_progress(rag, attempted)
+    # Progress-bar total/baseline come from doc_status itself, not from
+    # `attempted` (this run's newly-enqueued count). `attempted` is only ever
+    # the delta for THIS invocation; get_processing_status() counts every doc
+    # LightRAG has ever tracked (already-PROCESSED/FAILED docs from earlier
+    # runs plus this run's new PENDING ones plus anything resume_failed_documents()
+    # just reset). Using `attempted` as the bar's total previously produced a
+    # bar that overflowed past 100% once the cumulative processed-ever count
+    # exceeded whatever this run happened to (re-)submit -- tqdm then drops the
+    # percentage/ETA display and just prints a bare, unbounded rate counter,
+    # which is exactly the "no ETA, looks like it's starting from the
+    # beginning" symptom. Sizing the bar off doc_status's own totals keeps it
+    # honest: it always reflects real outstanding work, never what this one
+    # invocation happened to (re-)submit.
+    status_counts = await rag.get_processing_status()
+    already_done = status_counts.get("processed", 0) + status_counts.get("failed", 0)
+    total_tracked = sum(status_counts.values())
+    remaining = total_tracked - already_done
+    print(f"Outstanding work: {remaining} document(s) not yet PROCESSED/FAILED "
+          f"(of {total_tracked} tracked total).")
+
+    # apipeline_process_enqueue_documents() does the actual work (embedding +
+    # extraction); monitor_processing_progress() only polls doc_status to
+    # drive the progress bar -- it never does any processing itself. Both
+    # must run concurrently: awaiting the monitor alone (without the
+    # processing call also running as its own task) just polls a status that
+    # never changes, since nothing would be doing the work.
+    #
+    # processing_task is the authoritative signal for completion/failure --
+    # it's awaited directly so any exception it raises propagates normally.
+    # monitor_task is best-effort UI: once processing_task finishes, give the
+    # monitor a brief grace period to catch the final status update (it polls
+    # every 2s) and print its "done" line, then cancel it if it's still going.
+    processing_task = asyncio.create_task(rag.apipeline_process_enqueue_documents())
+    monitor_task = asyncio.create_task(
+        monitor_processing_progress(rag, total_tracked, initial_processed=already_done)
+    )
+    try:
+        await processing_task
+    finally:
+        try:
+            await asyncio.wait_for(asyncio.shield(monitor_task), timeout=3)
+        except asyncio.TimeoutError:
+            monitor_task.cancel()
+            try:
+                await monitor_task
+            except asyncio.CancelledError:
+                pass
 
     await rag.finalize_storages()
 
