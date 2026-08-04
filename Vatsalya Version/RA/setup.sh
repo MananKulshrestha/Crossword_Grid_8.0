@@ -102,6 +102,25 @@ else
   echo "Persistent datadir already had data -- skipped re-import."
 fi
 
+# Tier 1 normalized schema (db/build_tier1.py) -- builds products/skus/
+# offers/taxonomy_nodes/etc. from product_metadata and repoints
+# product_metadata at a VIEW over them. Gated on the "skus" table not
+# existing yet (not on FRESH_MYSQL) since a persisted datadir from before
+# this step existed would otherwise never get it. Idempotent per the
+# script's own docstring, so safe even if this check is ever wrong.
+NEEDS_TIER1="$(mysql -u root -prootpass flipkart -N -e "SHOW TABLES LIKE 'skus';" 2>/dev/null)"
+if [ -z "$NEEDS_TIER1" ]; then
+  echo "Building Tier 1 normalized schema (db/build_tier1.py)..."
+  (
+    cd "$PROJECT_ROOT/db" && \
+    FLIPKART_DB_HOST=127.0.0.1 FLIPKART_DB_PORT=3307 \
+    FLIPKART_DB_USER=root FLIPKART_DB_PASSWORD=rootpass FLIPKART_DB_NAME=flipkart \
+    "$PROJECT_ROOT/.venv/bin/python" build_tier1.py
+  )
+else
+  echo "Tier 1 schema already built (skus table exists) -- skipped."
+fi
+
 echo ""
 echo "=========================================="
 echo "2. Qdrant"
@@ -159,7 +178,11 @@ echo "Verification"
 echo "=========================================="
 
 echo "-- MySQL (flipkart @ 127.0.0.1:3307) --"
-mysql -u root -prootpass flipkart -e "SELECT COUNT(*) AS product_metadata_rows FROM product_metadata;" 2>/dev/null
+mysql -u root -prootpass flipkart -e "
+  SELECT 'product_metadata (view)' t, COUNT(*) c FROM product_metadata
+  UNION ALL SELECT 'skus', COUNT(*) FROM skus
+  UNION ALL SELECT 'products', COUNT(*) FROM products;
+" 2>/dev/null
 
 echo "-- Qdrant collections (http://localhost:6333) --"
 for c in $(curl -s http://localhost:6333/collections | python3 -c "import json,sys;print(' '.join(c['name'] for c in json.load(sys.stdin)['result']['collections']))" 2>/dev/null); do
