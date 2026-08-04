@@ -139,6 +139,14 @@ GRAPH_SAMPLING_SUBSET_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "graph_sampling_output", "full_extraction_skus.txt"
 )
 
+# --- Reranking (merge.py) -------------------------------------------------
+# Cross-encoder used by merge.py's fuse_and_rerank() to reorder the merged
+# BM25/semantic candidate set against the full query text -- see
+# retrieval-architecture.md's "Candidate fusion & rerank". sentence-transformers
+# is already a project dependency (local_embed.py's SentenceTransformer), so
+# CrossEncoder needs no new package, just a different class from the same one.
+RERANK_MODEL = os.environ.get("LIGHTRAG_RERANK_MODEL", "BAAI/bge-reranker-base")
+
 # --- Batch size -----------------------------------------------------------
 # None (default) processes the entire catalog: every SKU gets chunk-embedded
 # into Qdrant, and GRAPH_SAMPLING_SUBSET_PATH decides which ones additionally
