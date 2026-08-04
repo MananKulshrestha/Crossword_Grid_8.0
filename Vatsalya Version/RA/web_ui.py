@@ -30,27 +30,43 @@ async def get_rag():
         _rag_instance = await build_query_rag()
     return _rag_instance
 
+_bg_loop = None
+_bg_loop_thread = None
+_bg_loop_ready = threading.Event()
+
+
+def _run_background_loop():
+    global _bg_loop
+    _bg_loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(_bg_loop)
+    _bg_loop_ready.set()
+    _bg_loop.run_forever()
+
+
 def run_async_in_thread(coro):
-    """Run async code in a separate thread and return result"""
-    result_container = {}
-    exception_container = {}
+    """Run a coroutine on a single persistent background event loop and
+    block until it completes.
 
-    async def wrapper():
-        try:
-            result_container['result'] = await coro
-        except Exception as e:
-            exception_container['error'] = e
+    _rag_instance (get_rag()) is cached process-wide, and LightRAG binds
+    its internal LLM/embedding worker pools to whichever event loop was
+    running the first time it was built. A previous version of this
+    function created and closed a brand-new loop per request -- the first
+    query worked (it built those worker pools on its own throwaway loop),
+    but every query after that failed with "Event loop is closed" as soon
+    as it touched those pools, since the loop that any given request will
+    close is not the loop already reused by build_query_rag(). Keeping one
+    loop alive for the process lifetime, on its own thread, means every
+    request that ever mints or reuses those worker pools does so against
+    the same non-closed loop.
+    """
+    global _bg_loop_thread
+    if _bg_loop_thread is None:
+        _bg_loop_thread = threading.Thread(target=_run_background_loop, daemon=True)
+        _bg_loop_thread.start()
+        _bg_loop_ready.wait()
 
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    try:
-        loop.run_until_complete(wrapper())
-    finally:
-        loop.close()
-
-    if exception_container:
-        raise exception_container['error']
-    return result_container.get('result')
+    future = asyncio.run_coroutine_threadsafe(coro, _bg_loop)
+    return future.result()
 
 # Load data once
 def load_graph_data():
@@ -521,4 +537,15 @@ if __name__ == '__main__':
     print(f"     • Visualize the knowledge graph")
     print(f"     • Search nodes in the graph sidebar")
     print(f"\n{'='*60}\n")
+
+    # Builds _rag_instance (and, via build_query_rag()'s warmup() call,
+    # loads the local embedding model) now, before Flask starts accepting
+    # connections -- torch+sentence_transformers import alone measured
+    # ~90-100s on this host (site-packages on a FUSE-mounted volume), so
+    # without this the first real user request pays that cost instead of
+    # server startup.
+    print("Warming up query engine (first-time model import/load can take a minute or two)...")
+    run_async_in_thread(get_rag())
+    print("Query engine ready.\n")
+
     app.run(host='0.0.0.0', port=8000, debug=False)

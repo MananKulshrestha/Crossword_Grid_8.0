@@ -1,0 +1,30 @@
+LightRAG Backup
+===============
+Created: 20260804_204325
+Hostname: MacBookPro
+User: gr
+
+Contents:
+---------
+- lightrag_storage/           All LightRAG data including LLM cache
+- graph_sampling_output/      Graph sampling subset and reports
+- config.py                   Configuration (models, async settings, paths)
+- servers.txt                 Ollama server list for extraction
+- BACKUP_INFO.txt             This file
+
+LLM Cache Location:
+- lightrag_storage/kv_store_llm_response_cache.json
+
+Restore Instructions:
+---------------------
+Run: ./import.sh lightrag_backup_20260804_204325.zip
+(import.sh restores lightrag_storage/, config, servers.txt, AND recreates
+the Qdrant Docker volume + container from qdrant_data.tar.gz -- see
+import.sh's own comments for what it does step by step.)
+
+Notes:
+------
+- This backup does NOT include the source data files (flipkart_lightrag_corpus.md, flipkart_catalog_structured.jsonl)
+- Qdrant data IS included as qdrant_data.tar.gz (tar of the Docker volume's /qdrant/storage), when Qdrant was running at backup time -- see "Looking for Qdrant data" output above for whether this succeeded
+- LLM cache (kv_store_llm_response_cache.json) is included to avoid re-running extractions
+

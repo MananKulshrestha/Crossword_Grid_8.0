@@ -145,6 +145,139 @@ MySQL (`flipkart-mysql`, per `Vatsalya Version/README.md`) should be
 running the same way — check with `docker ps -a --filter "name=flipkart"`
 and `docker start` anything that's `Exited`.
 
+### No-Docker fallback (sandboxes / CI containers without Docker-in-Docker)
+
+Some environments (e.g. an already-unprivileged container running this
+agent) can't run `dockerd` at all — no permission to mount `overlay` or set
+up `iptables` NAT. In that case, run both services as plain host processes
+instead of containers; everything downstream (`config.py`'s `QDRANT_URL`,
+`db/build_tier1.py`'s `FLIPKART_DB_*` env vars) only cares about a
+host:port, not how the process was started.
+
+**MySQL** — install natively and put it on port `3307` to match this repo's
+existing convention (so `db/build_tier1.py`'s defaults and `Vatsalya
+Version/README.md`'s connection details still apply unchanged):
+
+```bash
+apt-get install -y mysql-server
+# bind-address 0.0.0.0, not the package default 127.0.0.1 -- needed so an
+# external port-forward (RunPod, ngrok, an SSH tunnel target, ...) can
+# actually reach it, not just processes inside this container. Port 3307,
+# not the default 3306, to match this repo's existing convention.
+sed -i 's/^bind-address\s*=.*/bind-address\t\t= 0.0.0.0/' /etc/mysql/mysql.conf.d/mysqld.cnf
+echo 'port = 3307' >> /etc/mysql/mysql.conf.d/mysqld.cnf
+service mysql start
+
+mysql -u root -e "
+  CREATE DATABASE IF NOT EXISTS flipkart CHARACTER SET utf8mb4;
+  CREATE USER IF NOT EXISTS 'flipkart_user'@'%' IDENTIFIED WITH mysql_native_password BY 'flipkart_pass';
+  GRANT ALL PRIVILEGES ON flipkart.* TO 'flipkart_user'@'%';
+  ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY 'rootpass';
+  FLUSH PRIVILEGES;
+"
+```
+
+`'flipkart_user'@'%'` (any host) is what makes the remote connection below
+work at all — MySQL's default is to only accept `flipkart_user` connections
+originating from `localhost`, which a port-forwarded connection is not, as
+far as the server's `bind-address` is concerned. `root` deliberately stays
+`@'localhost'`-only above: expose `flipkart_user` (scoped to the `flipkart`
+database) remotely, not `root`.
+
+#### Connecting from a laptop MySQL client (RunPod / any TCP-forwarded port)
+
+This container has no public IP of its own — whatever's forwarding the
+port (RunPod's proxy, an SSH tunnel, ngrok, ...) is what gives you a
+reachable `host:port` from your laptop. Once you have that:
+
+1. **Get the forwarded address.** On RunPod specifically: open the pod's
+   **Connect** tab → **TCP Port Mappings**. If `3307` (or whatever this
+   MySQL is actually listening on) is exposed there, RunPod shows something
+   like `<pod-id>-3307.proxy.runpod.net` or a `<public-ip>:<mapped-port>`
+   pair — **the external port is very often NOT `3307`** (RunPod maps your
+   internal port to a different external one per pod). Use exactly what
+   RunPod's UI shows, not the internal `3307`.
+2. **Point your MySQL client at that address.** In a GUI client (TablePlus,
+   MySQL Workbench, Sequel Ace, DBeaver, ...), fill in:
+   - **Host** — the hostname/IP RunPod gave you (e.g. `xxxxx-3307.proxy.runpod.net`),
+     *not* `localhost`/`127.0.0.1` — those only mean "this laptop" from the
+     client's perspective.
+   - **Port** — the *external/mapped* port RunPod gave you, not `3307`
+     unless RunPod happens to map it 1:1.
+   - **User** — `flipkart_user`
+   - **Password** — `flipkart_pass`
+   - **Database** — `flipkart`
+3. **Or from the CLI**, same idea:
+   ```bash
+   mysql -h <runpod-host> -P <runpod-external-port> -u flipkart_user -pflipkart_pass flipkart
+   ```
+   Connection URL form (same fields, if your client takes a single string
+   instead): `mysql://flipkart_user:flipkart_pass@<runpod-host>:<runpod-external-port>/flipkart`
+
+If the connection times out rather than being refused outright, the port
+likely isn't actually mapped/exposed on RunPod's side yet (step 1) — that's
+configured in RunPod's pod settings, not from inside this container. If it's
+refused immediately, double check `bind-address` above is `0.0.0.0` (a
+restart is required after changing it) and that `3307` is the port RunPod
+is actually forwarding to.
+
+**Qdrant** — Qdrant's own prebuilt Linux binaries need a fairly recent
+glibc; on an older base image (e.g. Ubuntu 20.04) the default
+`x86_64-unknown-linux-gnu` release will fail with `GLIBC_2.32' not found`.
+Use the statically-linked `musl` release instead — same binary, no glibc
+dependency:
+
+```bash
+mkdir -p /opt/qdrant/storage && cd /opt/qdrant
+curl -sL https://github.com/qdrant/qdrant/releases/latest/download/qdrant-x86_64-unknown-linux-musl.tar.gz | tar xz
+QDRANT__STORAGE__STORAGE_PATH=/opt/qdrant/storage nohup ./qdrant > /var/log/qdrant.log 2>&1 &
+```
+
+Same REST/gRPC ports (`6333`/`6334`), same `curl http://localhost:6333/collections`
+verification. No persistent volume concept here — the storage path *is*
+the persistence; back up `/opt/qdrant/storage` directly if you need to.
+
+### Building the Tier 1 catalog schema (`db/` folder)
+
+The Docker/native steps above only get you the flat legacy table
+(`product_metadata`, one row per SKU, straight from `../flipkart_metadata.sql`
+via `../README.md`'s import step). `db/` builds the normalized **Tier 1**
+schema from `requirements.md` section 4.2 on top of that — separate
+`catalog_versions` / `taxonomy_nodes` / `category_schemas` / `products` /
+`skus` / `offers` / `product_attributes` / `sku_attributes` /
+`index_versions` tables — and repoints `product_metadata` at a `VIEW` that
+reconstructs the original flat shape from the normalized tables, so
+`sql_filter.py` and everything else that reads `product_metadata` needs
+zero code changes.
+
+```bash
+cd db
+pip install pymysql python-dotenv   # only extra deps build_tier1.py needs
+python build_tier1.py
+```
+
+Reads `FLIPKART_DB_HOST` / `_PORT` / `_USER` / `_PASSWORD` / `_NAME` env
+vars (defaults: `127.0.0.1:3307`, `flipkart_user`/`flipkart_pass`,
+`flipkart` — override with `root`/`rootpass` if `flipkart_user` doesn't
+have `DROP`/`CREATE` privileges yet). **Idempotent and destructive-safe**:
+on the first run it renames `product_metadata` to `product_metadata_legacy`
+and treats that as the permanent source of truth; every run (first or
+Nth) drops and rebuilds every Tier 1 table from `product_metadata_legacy`
+and recreates the `product_metadata` view on top, so it's always safe to
+re-run after the legacy table changes. See the module docstring in
+`db/build_tier1.py` for the exact field-mapping decisions (e.g.
+`material` collapses to one value per product family, not per SKU).
+
+After running, `product_metadata` is a view — `SELECT * FROM
+product_metadata` still works exactly as before, but the real per-SKU rows
+live in `skus`/`offers`/`products`. Verify:
+
+```sql
+SHOW FULL TABLES;                        -- product_metadata is now VIEW, not BASE TABLE
+SELECT COUNT(*) FROM skus;               -- should match product_metadata's old row count
+SELECT COUNT(*) FROM product_metadata;   -- view still returns the same row shape
+```
+
 ## 1. Install dependencies
 
 ```bash
@@ -420,6 +553,62 @@ re-run them; there's nothing to "resume" mid-pass.
 
 ## 5. Query
 
+### Query-time LLM backend (`.env`)
+
+`query.py` (and `web_ui.py`) never touch the Ollama cluster by default —
+`config.py`'s `INFERENCE_BACKEND` defaults to **`deepinfra`**, a hosted
+OpenAI-compatible API (`deepinfra_llm.py` reuses LightRAG's own
+`openai_complete_if_cache`/`openai_embed` wrappers pointed at DeepInfra's
+`base_url`, nothing reimplemented). This is completely independent of
+ingestion, which always uses Ollama regardless of this setting — see
+`ingest.py`'s `build_rag()` vs. `query.py`'s `build_query_rag()`.
+
+Set up:
+
+```bash
+cp .env.example .env
+```
+
+`.env` already exists in this checkout (gitignored, never committed) and is
+filled in and verified working:
+- `INFERENCE_BACKEND=deepinfra`
+- `DEEPINFRA_API_KEY` — set
+- `DEEPINFRA_LLM_MODEL=google/gemma-4-26B-A4B-it` — the smaller of
+  DeepInfra's two Gemma 4 listings: an MoE variant with only ~4B params
+  activated per token, vs. the dense `google/gemma-4-31B-it` (31B active) —
+  also the cheaper of the two on DeepInfra's pricing. Confirmed reachable
+  with a live `chat/completions` call (200 response) as of this setup.
+- `DEEPINFRA_EMBED_MODEL` — deliberately left **blank**. DeepInfra has no
+  embedding model in the same space as what ingestion actually embedded
+  with (local `sentence-transformers`/torch, see `EMBED_BACKEND` below) —
+  query embeddings must stay on that same backend or vector search
+  silently returns garbage, so there's no DeepInfra model to put here
+  unless the whole corpus gets re-embedded first.
+
+To point this at a different model/key, in `.env`:
+- `DEEPINFRA_API_KEY` — from https://deepinfra.com/dash/api_keys
+- `DEEPINFRA_LLM_MODEL` — exact model ID from DeepInfra's catalog (e.g.
+  `Qwen/Qwen3-235B-A22B-Instruct-2507`)
+- `DEEPINFRA_EMBED_MODEL` — only needed if you also set
+  `LIGHTRAG_QUERY_EMBED_BACKEND=deepinfra`; leave unset otherwise (see next
+  paragraph)
+
+`config.py` loads `.env` via `python-dotenv` with `override=False`, so an
+already-exported shell/CI env var always wins over the file.
+
+**Don't touch `QUERY_EMBED_BACKEND` unless you've re-embedded the whole
+corpus.** It defaults to whatever `EMBED_BACKEND` ingestion used (`local`
+by default), *not* to `INFERENCE_BACKEND` — query vectors have to land in
+the same space as what's already in Qdrant, or cosine similarity search
+silently returns garbage with no error. Setting `LIGHTRAG_QUERY_EMBED_BACKEND=deepinfra`
+is only safe after re-embedding every SKU with `DEEPINFRA_EMBED_MODEL`
+too. It's entirely fine (and the normal setup) to answer with a DeepInfra
+LLM while still embedding queries locally/via Ollama.
+
+Switch back to the Ollama cluster for query-time LLM calls too (e.g. no
+DeepInfra budget) with `INFERENCE_BACKEND=ollama` in `.env` — this reuses
+the same `servers.txt` round-robin ingestion uses.
+
 ### Command-line query (raw context):
 
 ```bash
@@ -461,24 +650,65 @@ independent scripts). Where to look:
 | Graph sampling (`graph_sampling.py`) | `python graph_sampling.py`, or read `graph_sampling_output/coverage_report.json` if already run | Total catalog size, SKUs chosen for full extraction, coverage stats |
 | LightRAG (`ingest.py`) | End-of-run summary (above), or re-run `python ingest.py` any time — the summary always reflects the true current state of `lightrag_storage/`, not just this run | Processed / Failed / Resumed / Skipped counts, total across all runs so far |
 
-As of the last run in this environment (no Ollama/Qdrant available in this
-session, so LightRAG itself has **not** been ingested yet — `lightrag_storage/`
-does not exist):
+As of the last setup pass in this environment:
 
-- **SQL**: N/A (queried live, not ingested).
-- **BM25**: not yet built in this environment (`rank_bm25` isn't installed
-  in `.venv` here) — run `pip install -r requirements.txt && python
-  bm25_index.py --build` to get a real count; expect ~19,996–19,998 (every
-  SKU with a usable description, per `graph_sampling_output/coverage_report.json`'s
+- **SQL**: MySQL is provisioned and the Tier 1 schema is built (see "Building
+  the Tier 1 catalog schema" above) — **19,998 unique SKUs** across
+  `skus`/`product_metadata`. Queried live, not ingested, so there's no
+  separate "samples ingested" count for it.
+- **BM25**: not yet built in this environment — run `python bm25_index.py
+  --build` to get a real count; expect ~19,996–19,998 (every SKU with a
+  usable description, per `graph_sampling_output/coverage_report.json`'s
   `skus_with_usable_description`).
 - **Graph sampling**: already run — `graph_sampling_output/coverage_report.json`
   shows **2,673 of 20,000 SKUs (13.4%)** chosen for full graph extraction,
   covering 86/86 categories, 1,448/1,448 qualifying brands, 97/99 materials.
-- **LightRAG**: **0 processed so far** — `ingest.py` has never been run
-  end-to-end in this environment (no `lightrag_storage/` present). Run it
-  once Ollama + Qdrant are reachable; the summary it prints is the
-  authoritative "how many samples ingested" number going forward, and stays
-  accurate across as many interrupted/resumed runs as it takes.
+- **LightRAG**: **0 processed so far** in this environment — Qdrant is up
+  and empty (`curl http://localhost:6333/collections` returns `[]`), but
+  `ingest.py` has never been run end-to-end here (no `lightrag_storage/`
+  present, entity extraction needs a reachable Ollama cluster per
+  `servers.txt`, which this environment doesn't have). Run it once Ollama +
+  Qdrant are reachable; the summary it prints is the authoritative "how many
+  samples ingested" number going forward.
+
+## SKU consistency check across the source files and MySQL
+
+The catalog exists as four independent artifacts that all need to agree on
+the same set of SKUs: `../flipkart_metadata.sql` (source dump →
+`product_metadata`/`skus` in MySQL), `../flipkart_catalog_structured.jsonl`
+(structured per-SKU records), `../flipkart_lightrag_corpus.md` (the
+free-text corpus `load_documents.py` actually feeds LightRAG — see "Corpus
+is description-only" above), and whatever's landed in MySQL after import.
+Comparing **unique `sku_id`s only** (a handful of source rows share a
+duplicate `sku_id` by design — see `../README.md` step 5 — so duplicates
+are expected and excluded from this comparison, not a bug):
+
+| Source | Total rows | Unique SKUs | Duplicate SKU IDs |
+|---|---|---|---|
+| `flipkart_metadata.sql` | 20,000 `INSERT` statements | **19,998** | `JEAEGE8Q8GXYFTGU`, `ACCEJ6TESY7AFT5W` (×2 each) |
+| `flipkart_catalog_structured.jsonl` | 20,000 records | **19,998** | same two SKU IDs |
+| `flipkart_lightrag_corpus.md` | 19,999 `Product ID:` blocks | **19,997** | same two SKU IDs |
+| MySQL `product_metadata` / `skus` (after `INSERT IGNORE` import + Tier 1 build) | — | **19,998** | N/A — `sku_id` is a primary key, duplicates are silently deduped on import |
+
+**Result: `flipkart_metadata.sql`, the JSONL, and MySQL agree exactly** —
+same 19,998 unique SKUs, same two duplicate IDs collapsed the same way.
+
+**The LightRAG corpus (`flipkart_lightrag_corpus.md`) is missing one SKU**
+that exists everywhere else: `GRPEFKPR8Y9W66AZ` ("Polyfibre S.A.T Set Of 3
+Super Tacky Grip", brand `Polyfibre`, category `Sports & Fitness` — present
+in MySQL, absent from the corpus file). This means once `ingest.py` runs,
+LightRAG/Qdrant will end up with 19,997 SKUs at most from the full-catalog
+chunk-embedding pass, not 19,998 — a pre-existing gap in the corpus
+generation step (`flipkart_to_lightrag.py`, outside this folder), not
+something introduced by this session's setup. Investigate there if all
+19,998 need to be queryable.
+
+**MySQL vs. Qdrant/LightRAG SKUs**: not comparable yet in this environment
+— Qdrant has zero collections (`ingest.py` hasn't been run here, see
+above). Once ingestion runs, the equivalent check is comparing MySQL's
+`skus.sku_id` set against the source `sku_id`s LightRAG's `doc_status`
+store reports as `PROCESSED` (`ingest.py`'s end-of-run summary), keeping
+the corpus gap above in mind as the expected ceiling.
 
 ## Run everything with one command
 

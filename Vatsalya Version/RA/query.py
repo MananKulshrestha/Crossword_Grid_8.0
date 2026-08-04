@@ -74,6 +74,19 @@ async def build_query_rag():
     else:
         embed_fn = ingest_embedding_func(load_balancer)
 
+    if QUERY_EMBED_BACKEND == "local":
+        # Same reasoning as ingest.py's build_rag(): force the
+        # sentence-transformers model to load now, synchronously, instead of
+        # letting the first real query's embedding call race LightRAG's
+        # internal 60s worker timeout (routinely lost on a cold model load --
+        # see local_embed.warmup()). Matters even more here than in
+        # ingest.py: a caller like web_ui.py builds this rag instance once
+        # and reuses it for every subsequent request, so without this only
+        # the very first query pays (and risks losing to) the cold-load cost.
+        from local_embed import warmup
+
+        await warmup()
+
     if INFERENCE_BACKEND == "deepinfra":
         from deepinfra_llm import DeepInfraLLM
 

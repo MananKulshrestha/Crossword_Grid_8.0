@@ -1,5 +1,6 @@
 lightrag_storage/
 bm25_storage/
+runtime
 __pycache__/
 *.pyc
 .pytest_cache/
