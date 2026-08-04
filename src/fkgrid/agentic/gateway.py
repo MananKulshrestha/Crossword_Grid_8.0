@@ -7,6 +7,7 @@ import json
 import os
 import time
 from collections.abc import Mapping
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Protocol
 from urllib.error import HTTPError, URLError
@@ -114,6 +115,7 @@ class PromptRegistry:
         except KeyError as exc:
             raise ValueError(f"no shopper prompt registered for {call_type.value}") from exc
 
+    @lru_cache(maxsize=None)
     def text(self, call_type: ModelCallType) -> str:
         spec = self.spec(call_type)
         return (self.root / spec.filename).read_text(encoding="utf-8")
@@ -132,7 +134,10 @@ class PromptRegistry:
             "file_checksum": self.checksum(call_type),
         }
 
+    @lru_cache(maxsize=None)
     def output_schema(self, call_type: ModelCallType) -> dict[str, Any]:
+        """Build each immutable schema once per prompt registry instance."""
+
         if call_type is ModelCallType.RESOLVE_INTENT_AND_DELTA:
             return IntentDeltaV1.model_json_schema()
         if call_type is ModelCallType.GENERATE_CLARIFYING_QUESTION:
@@ -183,6 +188,56 @@ class PromptRegistry:
             max_output_tokens=max_output_tokens,
             compatibility_tuple=compatibility,
         )
+
+
+_CART_OPERATION_TYPES = frozenset(
+    {
+        "ADD_ITEM",
+        "SET_QUANTITY",
+        "INCREMENT_ITEM",
+        "DECREMENT_ITEM",
+        "REMOVE_ITEM",
+        "CLEAR_CART",
+    }
+)
+
+
+def _normalize_provider_output(call_type: ModelCallType, output: dict[str, Any]) -> dict[str, Any]:
+    """Normalize one known provider alias without inventing cart targets.
+
+    Some OpenAI-compatible models reuse the delta-operation discriminator
+    ``op`` for cart drafts even though the application cart contract calls that
+    field ``type``. Only declared cart operation names are normalized; IDs,
+    quantities, references, and catalog facts remain untouched for the normal
+    application validation and acknowledged-result binding stages.
+    """
+
+    if call_type is not ModelCallType.RESOLVE_INTENT_AND_DELTA:
+        return output
+    action_parameters = output.get("action_parameters")
+    if not isinstance(action_parameters, dict):
+        return output
+    raw_operations = action_parameters.get("operations")
+    if not isinstance(raw_operations, list):
+        return output
+    normalized_operations: list[Any] = []
+    changed = False
+    for raw_operation in raw_operations:
+        if not isinstance(raw_operation, dict):
+            normalized_operations.append(raw_operation)
+            continue
+        operation = dict(raw_operation)
+        if "type" not in operation and operation.get("op") in _CART_OPERATION_TYPES:
+            operation["type"] = operation.pop("op")
+            changed = True
+        normalized_operations.append(operation)
+    if not changed:
+        return output
+    normalized_parameters = dict(action_parameters)
+    normalized_parameters["operations"] = normalized_operations
+    normalized_output = dict(output)
+    normalized_output["action_parameters"] = normalized_parameters
+    return normalized_output
 
 
 def _validate_provider_output(request: ModelRequest, output: dict[str, Any]) -> list[ValidationIssue]:
@@ -434,6 +489,7 @@ _GOOGLE_SCHEMA_KEYS = frozenset(
 _GOOGLE_ANY_VALUE_SCHEMA = {"type": "string"}
 
 
+@lru_cache(maxsize=1)
 def _compact_intent_provider_schema() -> dict[str, Any]:
     """Return a small provider hint for the large intent union.
 
@@ -768,6 +824,7 @@ class Gemma4ModelAdapter:
             output = json.loads(content) if isinstance(content, str) else content
             if not isinstance(output, dict):
                 raise ValueError("provider output is not a JSON object")
+            output = _normalize_provider_output(request.logical_call_type, output)
             validation_issues = _validate_provider_output(request, output)
             if validation_issues:
                 return _response(

@@ -3,6 +3,7 @@ import unittest
 from fastapi.testclient import TestClient
 
 from fkgrid.agentic.contracts import (
+    Action,
     Constraint,
     ConstraintOperator,
     ModelCallType,
@@ -41,11 +42,70 @@ class FastApiWorkflowTests(unittest.TestCase):
         self.assertIn("Chat with the shopper agent", docs.text)
         self.assertIn("/v1/sessions/", docs.text)
         self.assertIn("fkgrid-chat-input", docs.text)
+        self.assertIn("Cart disabled", docs.text)
         self.assertIn("/v1/sessions/{session_id}/turns", schema["paths"])
         self.assertIn("/v1/sessions/{session_id}/trace", schema["paths"])
         self.assertIn("/v1/catalog/facets", schema["paths"])
         self.assertIn("examples", schema["components"]["schemas"]["ApiTurnRequest"])
         self.assertEqual(schema["info"]["title"], "FK GRiD Shopper Agentic API")
+
+    def test_natural_language_controls_bypass_model_intent_extraction(self) -> None:
+        gateway = FakeModelGateway()
+        runtime = ApiRuntime(
+            gateway=gateway,
+            model_mode="fake",
+            model_alias=Gemma4ModelAdapter.default_model_alias,
+            protocol="test",
+        )
+        client = TestClient(create_app(runtime))
+        self.assertEqual(
+            client.post("/v1/sessions", json={"session_id": "control-session"}).status_code,
+            201,
+        )
+
+        controls = (
+            ("show-cart", "Yeah so show me the cart. What all is there in it?", Action.SHOW_CART),
+            ("help", "What else can you do?", Action.HELP),
+            ("reset", "Start a new search", Action.RESET_SEARCH),
+        )
+        for turn_id, message, expected_action in controls:
+            response = client.post(
+                "/v1/sessions/control-session/turns",
+                json={
+                    "client_turn_id": turn_id,
+                    "idempotency_key": f"{turn_id}-key",
+                    "message": message,
+                },
+            )
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["response"]["action"], expected_action.value)
+
+        self.assertEqual(gateway.calls, [])
+
+    def test_fixture_runtime_reports_cart_readiness_without_a_database_probe(self) -> None:
+        fixture_status = self.client.get("/v1/model")
+        self.assertEqual(fixture_status.status_code, 200)
+        self.assertEqual(fixture_status.json()["cart_mode"], "fixture")
+        self.assertTrue(fixture_status.json()["cart_ready"])
+        self.assertIsNone(fixture_status.json()["cart_error"])
+
+        database_runtime = ApiRuntime.from_environment(
+            {
+                "FKGRID_MODEL_MODE": "fake",
+                "FKGRID_CART_MODE": "database",
+                "FKGRID_SPEECH_MODE": "disabled",
+            }
+        )
+        database_client = TestClient(create_app(database_runtime))
+        database_status = database_client.get("/v1/model")
+        self.assertEqual(database_status.status_code, 200)
+        self.assertEqual(database_status.json()["cart_mode"], "database")
+        self.assertFalse(database_status.json()["cart_ready"])
+        self.assertEqual(
+            database_status.json()["cart_error"],
+            "CART_CATALOG_VERSION_MISMATCH",
+        )
+        self.assertFalse(database_client.get("/readyz").json()["ready"])
 
     def test_swagger_turns_use_the_existing_orchestrator_and_versions(self) -> None:
         created = self.client.post("/v1/sessions", json={"session_id": "swagger-session"})

@@ -70,6 +70,7 @@ from .query_lexicon import (
     apply_explicit_catalog_terms,
     deterministic_cart_intent,
     deterministic_catalog_intent,
+    deterministic_control_intent,
     deterministic_reference_intent,
     is_greeting_or_help_message,
 )
@@ -728,12 +729,7 @@ class TurnOrchestrator:
         return (intent, []) if not issues else (None, issues)
 
     def _deterministic_exact_grammar(self, message: str) -> IntentDeltaV1 | None:
-        lower = message.casefold().strip()
-        if lower in {"show cart", "show my cart", "cart"}:
-            return IntentDeltaV1(primary_action=Action.SHOW_CART)
-        if lower in {"help", "what can you do"} or is_greeting_or_help_message(message):
-            return IntentDeltaV1(primary_action=Action.HELP)
-        return None
+        return deterministic_control_intent(message)
 
     def _typed_action_to_intent(self, ui_action: Any, snapshot: Any) -> IntentDeltaV1:
         if ui_action is None:

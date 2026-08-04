@@ -817,6 +817,53 @@ class AgenticWorkflowTests(unittest.TestCase):
         self.assertEqual(transport.payload["tools"], [])
         self.assertEqual(transport.payload["model"], compatibility().intent_model_alias)
 
+    def test_prompt_registry_caches_immutable_text_and_output_schema(self) -> None:
+        prompts = PromptRegistry()
+        call_type = ModelCallType.RESOLVE_INTENT_AND_DELTA
+        self.assertIs(prompts.text(call_type), prompts.text(call_type))
+        self.assertIs(prompts.output_schema(call_type), prompts.output_schema(call_type))
+
+    def test_gemma_adapter_normalizes_provider_cart_operation_alias(self) -> None:
+        class Transport:
+            def post_json(self, _payload, _timeout_ms):
+                return {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": json.dumps(
+                                    {
+                                        "schema_version": "IntentDeltaV1",
+                                        "primary_action": "UPDATE_CART",
+                                        "delta_operations": [],
+                                        "references": [],
+                                        "action_parameters": {
+                                            "operations": [{"op": "ADD_ITEM", "quantity": 1}]
+                                        },
+                                        "unknown_terms": [],
+                                        "candidate_interpretations": [],
+                                        "clarification_candidate": None,
+                                    }
+                                )
+                            }
+                        }
+                    ]
+                }
+
+        prompts = PromptRegistry()
+        request = prompts.build_request(
+            ModelCallType.RESOLVE_INTENT_AND_DELTA,
+            {"current_message_verbatim": "add the first result to my cart"},
+            compatibility(),
+            "cart-alias-call",
+            1800,
+            compatibility().intent_model_alias,
+        )
+        response = Gemma4ModelAdapter(Transport()).complete(request)
+        self.assertEqual(response.status, ModelStatus.OK)
+        operation = response.output_payload["action_parameters"]["operations"][0]
+        self.assertEqual(operation["type"], "ADD_ITEM")
+        self.assertNotIn("op", operation)
+
     def test_gemma_provider_failure_keeps_a_safe_traceable_reason(self) -> None:
         class Transport:
             def post_json(self, _payload, _timeout_ms):

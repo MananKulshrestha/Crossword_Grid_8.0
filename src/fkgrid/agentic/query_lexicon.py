@@ -9,6 +9,7 @@ message into typed operations; it never reads memory or invents catalog facts.
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass
 
 from .contracts import (
@@ -172,6 +173,80 @@ _GREETING_OR_HELP_MESSAGES = frozenset(
         "help",
         "what can you do",
         "what can you help me with",
+        "what else can you do",
+        "what do you do",
+        "how can you help",
+        "how can you help me",
+        "what are you able to do",
+    }
+)
+
+_CONTROL_CART_ALLOWED_WORDS = frozenset(
+    {
+        "all",
+        "are",
+        "can",
+        "contents",
+        "display",
+        "do",
+        "inside",
+        "in",
+        "is",
+        "it",
+        "list",
+        "me",
+        "my",
+        "open",
+        "ok",
+        "okay",
+        "please",
+        "see",
+        "show",
+        "so",
+        "tell",
+        "the",
+        "there",
+        "what",
+        "whats",
+        "view",
+        "well",
+        "within",
+        "would",
+        "yeah",
+        "yes",
+        "you",
+        "cart",
+        "items",
+    }
+)
+_CONTROL_CART_ACTION_WORDS = frozenset(
+    {
+        "add",
+        "buy",
+        "change",
+        "checkout",
+        "clear",
+        "delete",
+        "empty",
+        "increase",
+        "put",
+        "remove",
+        "save",
+        "set",
+        "update",
+    }
+)
+_RESET_SEARCH_MESSAGES = frozenset(
+    {
+        "clear filters",
+        "clear my filters",
+        "clear my search",
+        "clear search",
+        "new search",
+        "reset",
+        "reset search",
+        "start a new search",
+        "start over",
     }
 )
 
@@ -333,6 +408,52 @@ _DETERMINISTIC_CATALOG_UNSAFE_WORDS = frozenset(
 def is_greeting_or_help_message(text: str) -> bool:
     normalized = re.sub(r"[\s,!?;:.]+", " ", text.casefold()).strip()
     return normalized in _GREETING_OR_HELP_MESSAGES
+
+
+def deterministic_control_intent(message: str) -> IntentDeltaV1 | None:
+    """Recognize narrow model-free controls before provider intent extraction.
+
+    This is deliberately an allowlist, not a general natural-language parser.
+    A cart mutation or product-specific request remains on the model path and
+    the server-side typed cart/eligibility gates remain authoritative.
+    """
+
+    lower = message.casefold().strip()
+    if not lower:
+        return None
+    if lower in {"show cart", "show my cart", "cart"}:
+        return IntentDeltaV1(primary_action=Action.SHOW_CART)
+    if lower in {"help", "what can you do"} or is_greeting_or_help_message(message):
+        return IntentDeltaV1(primary_action=Action.HELP)
+    if (
+        "cart" not in lower
+        and "reset" not in lower
+        and "search" not in lower
+        and "filter" not in lower
+    ):
+        return None
+
+    normalized = unicodedata.normalize("NFKC", lower)
+    normalized = normalized.replace("'", "").replace("’", "")
+    normalized = " ".join(re.findall(r"[a-z0-9]+", normalized))
+    if normalized in _RESET_SEARCH_MESSAGES:
+        return IntentDeltaV1(
+            primary_action=Action.RESET_SEARCH,
+            delta_operations=[ClearSearchStateOperation()],
+        )
+    if normalized in _GREETING_OR_HELP_MESSAGES:
+        return IntentDeltaV1(primary_action=Action.HELP)
+    words = set(normalized.split())
+    if normalized in {"cart", "my cart", "the cart"}:
+        return IntentDeltaV1(primary_action=Action.SHOW_CART)
+    if (
+        "cart" in words
+        and words <= _CONTROL_CART_ALLOWED_WORDS
+        and not words.intersection(_CONTROL_CART_ACTION_WORDS)
+        and words.intersection({"show", "display", "view", "open", "see", "list", "what", "tell"})
+    ):
+        return IntentDeltaV1(primary_action=Action.SHOW_CART)
+    return None
 
 
 def _cart_ordinal_match(text: str) -> re.Match[str] | None:

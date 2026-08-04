@@ -43,6 +43,9 @@ class ModelRuntimeStatus(StrictModel):
     catalog_size: int
     catalog_seed: int
     catalog_version: str
+    cart_mode: str
+    cart_ready: bool
+    cart_error: str | None = None
     configured: bool
     configuration_error: str | None = None
     speech_configured: bool
@@ -221,6 +224,9 @@ def _model_status(runtime: ApiRuntime) -> ModelRuntimeStatus:
         catalog_size=runtime.catalog_size,
         catalog_seed=runtime.catalog_seed,
         catalog_version=runtime.catalog_version,
+        cart_mode=runtime.cart_mode,
+        cart_ready=runtime.cart_ready,
+        cart_error=runtime.cart_error,
         configured=runtime.model_configured,
         configuration_error=runtime.model_error,
         speech_configured=runtime.speech_configured,
@@ -321,6 +327,9 @@ def _swagger_chat_html(openapi_url: str) -> HTMLResponse:
   .fkgrid-chat-bubble.error { color: #912018; background: #fff4f2; border-color: #fecdca; }
   .fkgrid-chat-results { margin: 8px 0 0; padding-left: 21px; }
   .fkgrid-chat-result { margin: 3px 0; }
+  .fkgrid-chat-result[data-cart-eligible="false"] { color: #667085; }
+  .fkgrid-chat-result-status { margin-left: 6px; font-size: 11px; color: #667085; }
+  .fkgrid-chat-result-status[data-cart-eligible="false"] { color: #b42318; }
   .fkgrid-chat-meta { margin-top: 8px; color: #667085; font-size: 11px; }
   #fkgrid-chat-form { display: flex; gap: 9px; align-items: flex-end; }
   #fkgrid-chat-input {
@@ -447,6 +456,10 @@ def _swagger_chat_html(openapi_url: str) -> HTMLResponse:
     log.scrollTop = log.scrollHeight;
     return bubble;
   };
+  const factValue = (entry, label) => {
+    const fact = (entry.facts || []).find((candidate) => candidate.label === label);
+    return fact ? fact.typed_value : null;
+  };
   const addAssistant = (body, raw) => {
     const response = body.response || {};
     const bubble = addBubble('assistant', response.summary || 'The agent returned no summary.');
@@ -456,7 +469,20 @@ def _swagger_chat_html(openapi_url: str) -> HTMLResponse:
       response.search_entries.forEach((entry) => {
         const item = document.createElement('li');
         item.className = 'fkgrid-chat-result';
+        const availability = factValue(entry, 'availability');
+        const cartEligible = availability === 'AVAILABLE';
+        item.dataset.cartEligible = cartEligible ? 'true' : 'false';
+        item.setAttribute('aria-disabled', cartEligible ? 'false' : 'true');
         item.textContent = entry.title || entry.binding?.product_id || 'Catalog result';
+        if (availability !== null) {
+          const status = document.createElement('span');
+          status.className = 'fkgrid-chat-result-status';
+          status.dataset.cartEligible = cartEligible ? 'true' : 'false';
+          status.textContent = cartEligible
+            ? 'Available for prototype cart'
+            : `Cart disabled · ${String(availability).toLowerCase()}`;
+          item.appendChild(status);
+        }
         list.appendChild(item);
       });
       bubble.appendChild(list);
@@ -708,7 +734,7 @@ def create_app(runtime: ApiRuntime | None = None) -> FastAPI:
     @application.get("/readyz", response_model=ReadinessResponse, tags=["system"])
     def readiness() -> ReadinessResponse:
         return ReadinessResponse(
-            ready=api_runtime.model_configured,
+            ready=api_runtime.model_configured and api_runtime.cart_ready,
             service="fkgrid-agentic-api",
             model=_model_status(api_runtime),
         )

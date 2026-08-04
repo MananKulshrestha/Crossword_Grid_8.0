@@ -53,7 +53,7 @@ from fkgrid.api.catalog import (
     build_catalog_entries,
     fixture_facets,
 )
-from fkgrid.cart.adapter import DatabaseCartAdapter
+from fkgrid.cart.adapter import DatabaseCartAdapter, database_cart_readiness
 from fkgrid.speech import (
     DEFAULT_SPEECH_MODEL_ALIAS,
     DeepInfraWhisperAdapter,
@@ -221,6 +221,12 @@ class ApiRuntime:
             if self.catalog_entries
             else "catalog-fixture-v1"
         )
+        self.cart_error = (
+            database_cart_readiness(self.catalog_version)
+            if self.cart_mode == "database"
+            else None
+        )
+        self.cart_ready = self.cart_error is None
         self.tooling: RuntimeTooling = build_runtime_tooling(
             self.catalog_entries,
             demo_compatibility(model_alias),
