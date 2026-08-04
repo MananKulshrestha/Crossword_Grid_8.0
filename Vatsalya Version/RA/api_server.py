@@ -61,15 +61,16 @@ def warm_up():
 
     Deliberately does NOT touch sql_filter (sql_filter.py connects to MySQL
     fresh on every call, no persistent connection to warm -- see its
-    module docstring) or semantic_search's LightRAG/Qdrant/Ollama
-    connection (semantic_search.py builds a fresh LightRAG instance via
-    ingest.build_rag() and tears it down with finalize_storages() on every
-    single call -- see semantic_search.py's _search_async(); there is no
-    process-wide instance analogous to web_ui.py's cached _rag_instance to
-    warm here, since the current architecture never caches it. This is the
-    same reason every /api/search request pays LightRAG storage
-    initialization, not just the first one -- see manan.md's "Known
-    limitations" section).
+    module docstring). semantic_search's LightRAG/Qdrant connection IS
+    warmed here (below): semantic_search.py caches one process-wide rag
+    instance (get_rag()) on a single persistent background event loop,
+    same pattern as web_ui.py's _rag_instance -- see semantic_search.py's
+    module-level comment for why (repeated asyncio.run() per call used to
+    both reload the whole graph/Qdrant/KV stack on every request AND crash
+    on the 2nd+ request with LightRAG's shared-storage locks bound to an
+    already-closed event loop). Building it now, synchronously, means the
+    first real request doesn't pay that cost (or risk failing fast on bad
+    DeepInfra/Qdrant config) instead of every request after warm-up.
     """
     start = time.monotonic()
     print("Warming up search_catalog (first-time model import/load can take a minute or two)...")
@@ -90,6 +91,11 @@ def warm_up():
 
     print("  - loading cross-encoder reranker (merge.py)...")
     merge._get_cross_encoder()
+
+    print("  - building LightRAG query instance (semantic_search.py)...")
+    import semantic_search
+
+    semantic_search.run_async_in_thread(semantic_search.get_rag())
 
     print(f"Warm-up complete in {time.monotonic() - start:.1f}s. Query engine ready.\n")
 
