@@ -1,5 +1,13 @@
 import os
 
+from dotenv import load_dotenv
+
+# Loads .env from this folder if present (API keys, model IDs) without
+# overriding whatever's already exported in the real environment --
+# override=False so an already-exported value (CI secrets, a teammate's own
+# shell export) always wins over the .env file.
+load_dotenv(override=False)
+
 # --- Ollama connection -------------------------------------------------
 # ingest.py no longer uses this for anything -- both extraction and
 # embedding (EMBED_BACKEND="ollama") round-robin across every server listed
@@ -76,6 +84,40 @@ LLM_MAX_ASYNC = int(os.environ.get("LIGHTRAG_LLM_MAX_ASYNC", "16"))
 # With EMBED_BACKEND="ollama", it should scale with servers.txt's server
 # count times each server's own OLLAMA_NUM_PARALLEL, same as LLM_MAX_ASYNC.
 EMBEDDING_MAX_ASYNC = int(os.environ.get("LIGHTRAG_EMBEDDING_MAX_ASYNC", "4"))
+
+# --- Query-time inference backend ---------------------------------------
+# Ingestion (ingest.py) ALWAYS uses the Ollama cluster (servers.txt) --
+# INFERENCE_BACKEND is read only by query.py's build_query_rag() and has no
+# effect on ingest.py. This controls which backend answers the LLM calls
+# LightRAG's retrieval makes at query time (keyword extraction / reasoning
+# in "mix" mode) -- default "deepinfra" since query.py is meant to run
+# against DeepInfra's hosted models rather than the local Ollama cluster;
+# set to "ollama" to route query-time LLM calls through the same
+# MultiOllamaLoadBalancer/servers.txt setup ingestion uses instead.
+INFERENCE_BACKEND = os.environ.get("INFERENCE_BACKEND", "deepinfra")
+
+# DeepInfra is OpenAI-API-compatible at /v1/openai (see
+# https://deepinfra.com/docs) -- deepinfra_llm.py reuses LightRAG's own
+# lightrag.llm.openai wrappers pointed at this base_url/api_key rather than
+# a from-scratch HTTP client.
+DEEPINFRA_API_KEY = os.environ.get("DEEPINFRA_API_KEY", "")
+DEEPINFRA_BASE_URL = os.environ.get("DEEPINFRA_BASE_URL", "https://api.deepinfra.com/v1/openai")
+# Exact model IDs as listed on DeepInfra (e.g. "Qwen/Qwen3-235B-A22B-Instruct-2507",
+# "BAAI/bge-m3") -- no built-in default since DeepInfra's catalog/pricing
+# changes over time; set both in .env before using INFERENCE_BACKEND=deepinfra.
+DEEPINFRA_LLM_MODEL = os.environ.get("DEEPINFRA_LLM_MODEL", "")
+DEEPINFRA_EMBED_MODEL = os.environ.get("DEEPINFRA_EMBED_MODEL", "")
+
+# Which embedding backend query.py's embedding_func uses -- deliberately
+# defaults to EMBED_BACKEND (whatever ingestion actually used), NOT
+# INFERENCE_BACKEND. Query embeddings must land in the same vector space as
+# whatever's already stored in Qdrant, or cosine similarity search silently
+# returns garbage (no error, just bad retrieval) -- switching this to
+# "deepinfra" is only safe if you re-embed the whole corpus with DeepInfra's
+# embedding model too (see local_embed.py's docstring re: rebuild_vdb).
+# Independent of INFERENCE_BACKEND: you can query with a DeepInfra LLM while
+# still embedding queries with the same local/Ollama backend ingestion used.
+QUERY_EMBED_BACKEND = os.environ.get("LIGHTRAG_QUERY_EMBED_BACKEND", EMBED_BACKEND)
 
 # --- Qdrant connection -------------------------------------------------
 # LightRAG's QdrantVectorDBStorage reads its connection straight from the

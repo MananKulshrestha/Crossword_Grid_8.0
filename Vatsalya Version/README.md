@@ -125,3 +125,296 @@ This container has no persistent volume — data is lost once it's removed.
 ```bash
 docker rm -f flipkart-mysql
 ```
+
+---
+
+# Qdrant Setup (Docker) — Vector Database
+
+Qdrant is a vector database used by LightRAG for storing and searching product embeddings (chunks, entities, relationships).
+
+## 1. Prerequisites
+
+- Docker installed and running (`docker --version`, `docker ps`).
+- The RA module and its dependencies are set up (see `RA/README.md`).
+
+## 2. Create a persistent volume for Qdrant data
+
+```bash
+docker volume create flipkart_qdrant_data
+```
+
+This ensures data persists even if the container is stopped or restarted.
+
+## 3. Start the Qdrant container
+
+```bash
+docker run -d \
+  --name flipkart-qdrant \
+  --restart unless-stopped \
+  -p 6333:6333 \
+  -p 6334:6334 \
+  -v flipkart_qdrant_data:/qdrant/storage \
+  qdrant/qdrant
+```
+
+**Port mapping:**
+- `6333` — REST API (used by LightRAG for vector operations)
+- `6334` — gRPC API (optional, for high-performance queries)
+
+**Restart policy:** `--restart unless-stopped` ensures the container automatically restarts after a reboot or Docker daemon restart.
+
+## 4. Verify Qdrant is running
+
+```bash
+curl http://localhost:6333/collections
+```
+
+You should see a JSON response with the collections list (empty on first run).
+
+## 5. Connection details
+
+| Field    | Value                         |
+|----------|-------------------------------|
+| Host     | `127.0.0.1` (or `localhost`) |
+| REST Port | `6333`                       |
+| gRPC Port | `6334`                       |
+| Database | Collections auto-created by LightRAG |
+| Env var  | `QDRANT_URL` (default: `http://localhost:6333` in `RA/config.py`) |
+
+**Collections created by LightRAG during ingest:**
+- `lightrag_vdb_chunks_<model>_<dim>d` — Product descriptions/chunks
+- `lightrag_vdb_entities_<model>_<dim>d` — Extracted entities (brands, materials, etc.)
+- `lightrag_vdb_relationships_<model>_<dim>d` — Relationship vectors
+
+## 6. Manage the container
+
+**Start a stopped container:**
+```bash
+docker start flipkart-qdrant
+```
+
+**Stop the container:**
+```bash
+docker stop flipkart-qdrant
+```
+
+**View logs:**
+```bash
+docker logs flipkart-qdrant
+```
+
+**Full cleanup (removes container and volume, losing all data):**
+```bash
+docker rm -f flipkart-qdrant
+docker volume rm flipkart_qdrant_data
+```
+
+---
+
+# LightRAG Import — Restore from Backup
+
+The `RA/import.sh` script restores a complete LightRAG pipeline state from a backup file (`lightrag_backup_*.zip`), created by `RA/backup.sh`.
+
+## What gets restored
+
+- **LightRAG storage** (`lightrag_storage/`) — document processing state, graph, KV stores
+- **Graph sampling output** (`graph_sampling_output/`) — subset of SKUs chosen for full extraction
+- **Configuration** (`config.py`, `servers.txt`) — pipeline settings and Ollama server URLs
+- **Qdrant vector database** — embeddings for chunks, entities, and relationships
+
+## What does NOT get restored (bring these separately)
+
+- Source data files: `flipkart_lightrag_corpus.md`, `flipkart_catalog_structured.jsonl`
+- Ollama servers themselves (only URLs from `servers.txt` are restored)
+- Python environment (run `pip install -r requirements.txt` or `uv sync`)
+
+## Quick start
+
+### 1. Get a backup file
+
+If you already have a backup from `RA/backup.sh`:
+
+```bash
+ls -lh RA/backups/
+```
+
+Example file: `lightrag_backup_20260804_145154.zip`
+
+### 2. Run the import script
+
+```bash
+cd RA
+./import.sh lightrag_backup_20260804_145154.zip
+```
+
+The script will:
+- Extract the backup
+- Restore `lightrag_storage/` (prompts if one already exists)
+- Restore `graph_sampling_output/`
+- Restore `config.py` and `servers.txt` (saves as `.fromBackup` if they differ locally)
+- **Recreate the Qdrant container and volume** with all vector data pre-loaded
+- Verify Qdrant is reachable at `http://localhost:6333`
+
+### 3. Verify restoration
+
+**Check Qdrant collections:**
+```bash
+curl http://localhost:6333/collections
+```
+
+You should see three collections (chunks, entities, relationships).
+
+**Check LightRAG storage:**
+```bash
+ls -la RA/lightrag_storage/
+```
+
+**Run a test query:**
+```bash
+cd RA
+python query.py "What cotton shirts are available?"
+```
+
+## Import script in detail
+
+### Usage
+
+```bash
+./import.sh <backup_zip_file>
+```
+
+**Arguments:**
+- `<backup_zip_file>` — Path to the backup ZIP file (can be relative or absolute).
+  - If the file is in `RA/backups/`, just use the filename (e.g., `./import.sh lightrag_backup_20260804_145154.zip`).
+
+**Example:**
+```bash
+./import.sh ../backups/lightrag_backup_20260804_145154.zip
+./import.sh lightrag_backup_20260804_145154.zip  # auto-looks in RA/backups/
+```
+
+### What happens step by step
+
+1. **Extracts the backup ZIP** into a temporary directory.
+
+2. **Restores LightRAG storage** (`lightrag_storage/`):
+   - If your local `lightrag_storage/` already exists and has data, the script prompts before overwriting.
+   - Skipped silently if the backup has no storage directory.
+
+3. **Restores graph sampling output** (`graph_sampling_output/`):
+   - List of SKUs chosen for full extraction, coverage report.
+   - Skipped if not in the backup.
+
+4. **Restores configuration files** (`config.py`, `servers.txt`):
+   - **If they differ** from your local copies, saved as `.fromBackup` for manual review (especially important for `servers.txt`, which is often machine-specific).
+   - **If they match** your local files, restored directly.
+   - Skipped if not in the backup.
+
+5. **Recreates Qdrant Docker setup**:
+   - **If Qdrant data exists in the backup** (`qdrant_data.tar.gz`):
+     - Checks if a container named `flipkart-qdrant` already exists (prompts to remove it if so).
+     - Creates a fresh Docker volume `flipkart_qdrant_data`.
+     - Extracts Qdrant data into the volume (using a temporary Alpine container).
+     - Starts a new Qdrant container with `--restart unless-stopped`.
+     - Waits for the container to become reachable at `http://localhost:6333`.
+   - **If no Qdrant data in backup**:
+     - Prints a warning — old backups or backups made when Qdrant wasn't running won't have vector data.
+     - You'll need to re-ingest with `RA/ingest.py` to regenerate embeddings.
+   - **If Docker is not installed**, prints a warning and skips Qdrant restore (you can re-run the script once Docker is available).
+
+### After import completes
+
+The script prints next steps:
+
+1. **Install Python dependencies** (if not already done):
+   ```bash
+   pip install -r requirements.txt
+   # or: uv sync
+   ```
+
+2. **Check `servers.txt`**:
+   - Review which Ollama servers are listed.
+   - Update for your local machine if needed (especially if you restored from another developer's backup).
+
+3. **Verify Qdrant**:
+   ```bash
+   curl http://localhost:6333/collections
+   ```
+
+4. **Resume/continue ingestion** (if needed):
+   ```bash
+   python ingest.py
+   ```
+   - Already-processed SKUs are skipped automatically.
+   - Failed SKUs are retried.
+   - New SKUs (if the catalog grew since the backup) are ingested.
+
+5. **Run a test query**:
+   ```bash
+   python query.py "your question here"
+   ```
+   - Or start the interactive web UI: `./webui.sh`
+
+## Troubleshooting
+
+### "Backup file not found"
+Make sure the ZIP file exists and the path is correct:
+```bash
+ls -lh lightrag_backup_*.zip
+ls -lh RA/backups/lightrag_backup_*.zip
+```
+
+### "A container named 'flipkart-qdrant' already exists"
+The script found an existing Qdrant container. You have two options:
+- **Let it remove the old one** — answer `y` to restore fresh data from the backup.
+- **Keep the old one** — answer `n` to skip Qdrant restore (data stays unchanged).
+
+### Qdrant collections don't show up after import
+1. Wait a few seconds after import completes (container startup can take a moment).
+2. Manually check:
+   ```bash
+   curl -s http://localhost:6333/collections | jq .
+   ```
+3. If still empty, Qdrant data may not have been in the backup. Re-ingest:
+   ```bash
+   cd RA && python ingest.py
+   ```
+
+### "My servers.txt differs from the backup's version"
+The script saves the backup's version as `servers.txt.fromBackup`. Review and merge if needed:
+```bash
+diff RA/servers.txt RA/servers.txt.fromBackup
+```
+
+Then decide which version to keep (usually your local `servers.txt`, which lists your Ollama servers).
+
+---
+
+# Workflow: Backup and Restore
+
+## Backing up the pipeline
+
+Create a backup anytime you have a stable ingestion state:
+
+```bash
+cd RA
+./backup.sh
+```
+
+Output: `RA/backups/lightrag_backup_<timestamp>.zip`
+
+This includes:
+- LightRAG storage (document status, graph, embeddings metadata)
+- Graph sampling output
+- Configuration files
+- Qdrant vector database (full collections)
+
+## Restoring on another machine
+
+1. Copy the backup ZIP to the destination machine (or place it in `RA/backups/`).
+2. Run import:
+   ```bash
+   cd RA
+   ./import.sh lightrag_backup_<timestamp>.zip
+   ```
+3. Follow the "Next steps" printed at the end of the script.

@@ -12,9 +12,9 @@ from collections import defaultdict, Counter
 from flask import Flask, jsonify, request
 from lightrag import QueryParam
 from config import WORKING_DIR
-from ingest import build_rag
+from query import build_query_rag
 
-STORAGE_DIR = Path("/Users/gr/Desktop/Crossword_Grid_8.0/Vatsalya Version/RA/lightrag_storage")
+STORAGE_DIR = Path(WORKING_DIR)
 GRAPHML_FILE = STORAGE_DIR / "graph_chunk_entity_relation.graphml"
 
 app = Flask(__name__)
@@ -27,7 +27,7 @@ async def get_rag():
     """Get or create RAG instance"""
     global _rag_instance
     if _rag_instance is None:
-        _rag_instance = await build_rag()
+        _rag_instance = await build_query_rag()
     return _rag_instance
 
 def run_async_in_thread(coro):
