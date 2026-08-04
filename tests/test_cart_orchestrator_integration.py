@@ -75,6 +75,25 @@ DB_PASSWORD = "flipkart_pass"
 DB_NAME = "flipkart"
 
 
+def _database_available() -> bool:
+    try:
+        connection = pymysql.connect(
+            host=DB_HOST,
+            port=DB_PORT,
+            user=DB_USER,
+            password=DB_PASSWORD,
+            database=DB_NAME,
+            connect_timeout=1,
+        )
+    except Exception:
+        return False
+    connection.close()
+    return True
+
+
+DATABASE_AVAILABLE = _database_available()
+
+
 def _connect():
     return pymysql.connect(
         host=DB_HOST, port=DB_PORT, user=DB_USER, password=DB_PASSWORD,
@@ -121,6 +140,7 @@ def _compatibility() -> CompatibilityTuple:
     )
 
 
+@unittest.skipUnless(DATABASE_AVAILABLE, "requires the configured MySQL cart database")
 class CartOrchestratorIntegrationTests(unittest.TestCase):
     def setUp(self) -> None:
         self.session_id = f"session_{uuid.uuid4().hex}"

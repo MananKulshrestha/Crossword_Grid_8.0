@@ -530,6 +530,13 @@ class TurnOrchestrator:
         )
         intent, issues = self._parse_and_validate_model_intent(model_response, projection)
         if intent is not None:
+            intent = self._apply_explicit_reference_precedence(
+                intent,
+                projection,
+                trace_id,
+                events,
+                request,
+            )
             return intent, []
 
         # Exactly one repair call. It receives sanitized validation codes, never
@@ -576,6 +583,13 @@ class TurnOrchestrator:
         )
         intent, repair_issues = self._parse_and_validate_model_intent(repair_response, projection)
         if intent is not None:
+            intent = self._apply_explicit_reference_precedence(
+                intent,
+                projection,
+                trace_id,
+                events,
+                request,
+            )
             return intent, []
         fallback = self._deterministic_exact_grammar(request.message or "")
         if fallback is not None:
@@ -647,6 +661,46 @@ class TurnOrchestrator:
             )
             return fallback, []
         return None, (issues + repair_issues)[:20]
+
+    def _apply_explicit_reference_precedence(
+        self,
+        intent: IntentDeltaV1,
+        projection: Any,
+        trace_id: str,
+        events: list[TraceEvent],
+        request: TurnRequest,
+    ) -> IntentDeltaV1:
+        """Keep explicit ordinal reference actions authoritative over routing.
+
+        A provider can return a schema-valid but semantically wrong primary
+        action for phrases such as ``show details for the first one``.  The
+        reviewed deterministic grammar only overrides when it found at least
+        one explicit ordinal, so ambiguous language still follows the model
+        and the existing clarification path.
+        """
+
+        explicit = deterministic_reference_intent(projection.current_message_verbatim)
+        if explicit is None or not explicit.references:
+            return intent
+        model_action = normalize_action(intent.primary_action)
+        explicit_action = normalize_action(explicit.primary_action)
+        if model_action is explicit_action:
+            return intent
+        self._event(
+            events,
+            trace_id,
+            request.client_turn_id,
+            "INTENT_NORMALIZED",
+            "explicit_reference_precedence",
+            "OVERRIDDEN",
+            fallback=FallbackState.DETERMINISTIC_EXACT_GRAMMAR,
+            safe_metadata={
+                "model_action": model_action.value,
+                "explicit_action": explicit_action.value,
+                "reference_count": len(explicit.references),
+            },
+        )
+        return explicit
 
     def _parse_and_validate_model_intent(self, model_response: Any, projection: Any) -> tuple[IntentDeltaV1 | None, list[str]]:
         if model_response.status is not ModelStatus.OK or model_response.output_payload is None:

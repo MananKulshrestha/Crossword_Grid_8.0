@@ -676,8 +676,16 @@ def apply_explicit_cart_terms(
         if len(existing_operations) != 1 or not isinstance(existing_operations[0], dict):
             return intent
         operation = dict(existing_operations[0])
-        if operation.get("type") != "ADD_ITEM":
+        # Some OpenAI-compatible providers follow the compact intent schema's
+        # delta-operation discriminator and return ``op`` for the cart draft
+        # as well.  Normalize that bounded provider variant before the typed
+        # cart request is built; the acknowledged result binding remains the
+        # only allowed target.
+        operation_type = operation.get("type", operation.get("op"))
+        if operation_type != "ADD_ITEM":
             return intent
+        operation["type"] = "ADD_ITEM"
+        operation.pop("op", None)
         if not isinstance(operation.get("operation_id"), str) or not operation["operation_id"]:
             operation["operation_id"] = f"chat_add_ordinal_{ordinal}"
         operation["result_entry_id"] = entry.result_entry_id

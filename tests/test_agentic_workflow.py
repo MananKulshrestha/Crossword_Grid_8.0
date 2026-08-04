@@ -403,6 +403,73 @@ class AgenticWorkflowTests(unittest.TestCase):
             [event.stage for event in details.trace.events],
         )
 
+    def test_explicit_reference_action_overrides_valid_wrong_provider_route(self) -> None:
+        snapshot, entries = fixture()
+        app, dependencies = orchestrator(snapshot, entries)
+        search = app.handle(
+            TurnRequest(
+                session_id="session_1",
+                client_turn_id="turn_reference_override_search",
+                idempotency_key="key_reference_override_search",
+                expected_state_version=0,
+                expected_cart_version=0,
+                message="Find a shirt",
+            )
+        )
+        assert search.response is not None
+
+        wrong_but_valid_response = ModelResponse(
+            call_id="model_wrong_reference_action",
+            status=ModelStatus.OK,
+            output_payload={
+                "schema_version": "IntentDeltaV1",
+                "primary_action": "RESEARCH_EXTERNAL",
+                "delta_operations": [],
+                "references": [{"kind": "ORDINAL", "value": "first"}],
+                "action_parameters": {},
+                "unknown_terms": [],
+                "candidate_interpretations": [],
+                "clarification_candidate": None,
+            },
+            input_hash="wrong-reference-input",
+            output_hash="wrong-reference-output",
+            provider_name="fake",
+            model_alias="gemma-4-26b-a4b-it",
+            prompt_id="intent_v3",
+            prompt_version="3",
+            latency_ms=1,
+        )
+        gateway = dependencies["gateway"]  # type: ignore[assignment]
+        gateway.queue_response(  # type: ignore[attr-defined]
+            ModelCallType.RESOLVE_INTENT_AND_DELTA,
+            wrong_but_valid_response,
+        )
+
+        details = app.handle(
+            TurnRequest(
+                session_id="session_1",
+                client_turn_id="turn_reference_override_details",
+                idempotency_key="key_reference_override_details",
+                expected_state_version=1,
+                expected_cart_version=0,
+                message="Show details for the first one",
+            )
+        )
+
+        assert details.response is not None
+        self.assertEqual(
+            details.response.terminal_state,
+            TerminalState.ANSWERED_WITH_PRODUCT_DETAILS,
+        )
+        override = next(
+            event
+            for event in details.trace.events
+            if event.logical_name == "explicit_reference_precedence"
+        )
+        self.assertEqual(override.status, "OVERRIDDEN")
+        self.assertEqual(override.safe_metadata["model_action"], "RESEARCH_EXTERNAL")
+        self.assertEqual(override.safe_metadata["explicit_action"], "PRODUCT_DETAILS")
+
     def test_reference_follow_up_uses_deterministic_fallback_when_model_and_repair_fail(self) -> None:
         snapshot, entries = fixture()
         app, dependencies = orchestrator(snapshot, entries)
@@ -1155,6 +1222,38 @@ class AgenticWorkflowTests(unittest.TestCase):
             {"kind": "ORDINAL", "value": "3"},
             [reference.model_dump() for reference in corrected.references],
         )
+
+    def test_explicit_cart_terms_normalize_provider_op_shape(self) -> None:
+        from fkgrid.agentic.contracts import ActiveResultBinding, IntentDeltaV1
+        from fkgrid.agentic.query_lexicon import apply_explicit_cart_terms
+
+        corrected = apply_explicit_cart_terms(
+            IntentDeltaV1(
+                primary_action=Action.UPDATE_CART,
+                action_parameters={
+                    "operations": [{"op": "ADD_ITEM", "quantity": 3}]
+                },
+            ),
+            "add 3 to the cart",
+            [
+                ActiveResultBinding(
+                    result_entry_id="entry_3",
+                    display_position=3,
+                    binding=ProductBinding(
+                        product_id="product_3",
+                        sku_id="sku_3",
+                        offer_id="offer_3",
+                        catalog_version="catalog-v1",
+                    ),
+                )
+            ],
+        )
+
+        operation = corrected.action_parameters["operations"][0]
+        self.assertEqual(operation["type"], "ADD_ITEM")
+        self.assertNotIn("op", operation)
+        self.assertEqual(operation["result_entry_id"], "entry_3")
+        self.assertEqual(operation["operation_id"], "chat_add_ordinal_3")
 
 
 if __name__ == "__main__":
