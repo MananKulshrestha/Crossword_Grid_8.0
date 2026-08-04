@@ -1,0 +1,17 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * { @apply border-slate-200; }
+  body { @apply min-h-screen bg-[#f1f3f6] font-sans text-fk-ink antialiased; }
+  button, input, textarea { font: inherit; }
+}
+
+@layer components {
+  .page-shell { @apply mx-auto w-full max-w-[1440px] px-4 sm:px-6 lg:px-8; }
+  .surface { @apply rounded-xl border border-slate-200 bg-white shadow-card; }
+  .eyebrow { @apply text-xs font-bold uppercase tracking-[.12em] text-slate-500; }
+  .focus-ring { @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fk-blue focus-visible:ring-offset-2; }
+}
