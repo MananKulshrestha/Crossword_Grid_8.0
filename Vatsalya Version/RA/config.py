@@ -1,12 +1,13 @@
 import os
 
 # --- Ollama connection -------------------------------------------------
-# Used for embedding calls only. LLM extraction calls (the expensive,
-# GPU-bound part) instead round-robin across every server listed in
-# servers.txt via multi_ollama.py -- see ingest.py's build_rag() and
-# servers.txt's own comments. OLLAMA_HOST is still the fallback/default
-# single-server value servers.txt ships with, and remains what embedding
-# uses regardless of how many extraction servers are configured.
+# ingest.py no longer uses this for anything -- both extraction and
+# embedding (EMBED_BACKEND="ollama") round-robin across every server listed
+# in servers.txt via the same MultiOllamaLoadBalancer instance (see
+# multi_ollama.py and ingest.py's build_rag()/embedding_func()), so there is
+# no single "the" Ollama host for ingestion to hardcode. Kept only as the
+# single-server default other scripts (e.g. query.py) that don't need
+# servers.txt's multi-server round-robin can read.
 OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11345")
 
 # --- Models --------------------------------------------------------------
@@ -25,9 +26,22 @@ EMBED_DIM = 768  # nomic-embed-text output size
 
 # "local" runs embedding on this machine via sentence-transformers/torch
 # (local_embed.py, Apple Silicon MPS if available else CPU) instead of the
-# Ollama cluster -- removes embedding<->extraction GPU contention entirely
-# and doesn't need OLLAMA_HOST to serve EMBED_MODEL at all. "ollama" keeps
-# embedding on OLLAMA_HOST alongside (or separate from) extraction.
+# Ollama cluster -- removes embedding<->extraction GPU contention entirely.
+# Default here: "ollama" (round-robining embedding across servers.txt, via
+# the SAME MultiOllamaLoadBalancer/round-robin cycle extraction uses -- see
+# multi_ollama.py's embed()) was tried and measured SLOWER in practice, not
+# faster -- ~1.3s/doc with "local" vs. 10-19s/doc with "ollama". The theory
+# behind trying "ollama" (idle GPUs => spare embedding capacity) undersold
+# the cost: LLM_MAX_ASYNC(16) + EMBEDDING_MAX_ASYNC(4) = 20 concurrent
+# requests now contend for the same 4 physical servers, so EVERY doc's
+# embedding call -- skip_kg docs included, ~85% of the corpus -- queues
+# behind however many multi-second gemma4:e4b extraction generations are
+# already in flight on that server, instead of running instantly and
+# independently on the laptop's own CPU/MPS. "ollama" remains available
+# (LIGHTRAG_EMBED_BACKEND=ollama) for a cluster with slack extraction
+# capacity relative to EMBEDDING_MAX_ASYNC, but isn't the default until that
+# contention is addressed (e.g. dedicating a server to embedding-only,
+# outside the extraction round-robin).
 EMBED_BACKEND = os.environ.get("LIGHTRAG_EMBED_BACKEND", "local")
 
 # Reasoning models (qwen3-family) support a "think" toggle -- forwarded to
@@ -50,14 +64,17 @@ NUM_CTX = int(os.environ.get("LIGHTRAG_NUM_CTX", "8192"))
 # requests are distributed round-robin across every server in servers.txt
 # (multi_ollama.py), so with N servers each server sees roughly
 # LLM_MAX_ASYNC / N concurrent requests -- raise LLM_MAX_ASYNC as servers
-# are added, don't leave it sized for a single server. EMBEDDING_MAX_ASYNC
-# is unaffected by servers.txt -- embedding always targets OLLAMA_HOST alone.
-LLM_MAX_ASYNC = int(os.environ.get("LIGHTRAG_LLM_MAX_ASYNC", "4"))
+# are added, don't leave it sized for a single server. With
+# EMBED_BACKEND="ollama", EMBEDDING_MAX_ASYNC requests share that SAME
+# round-robin cycle (interleaved with extraction requests, not a separate
+# pool) -- raise it alongside LLM_MAX_ASYNC as servers are added, same
+# reasoning.
+LLM_MAX_ASYNC = int(os.environ.get("LIGHTRAG_LLM_MAX_ASYNC", "16"))
 # With EMBED_BACKEND="local", concurrent encode() calls contend for the
 # same CPU/MPS device rather than parallelizing (see local_embed.py) --
 # this is serialized internally regardless of this value in that mode.
-# Only matters for EMBED_BACKEND="ollama", where it should match
-# OLLAMA_NUM_PARALLEL on OLLAMA_HOST.
+# With EMBED_BACKEND="ollama", it should scale with servers.txt's server
+# count times each server's own OLLAMA_NUM_PARALLEL, same as LLM_MAX_ASYNC.
 EMBEDDING_MAX_ASYNC = int(os.environ.get("LIGHTRAG_EMBEDDING_MAX_ASYNC", "4"))
 
 # --- Qdrant connection -------------------------------------------------

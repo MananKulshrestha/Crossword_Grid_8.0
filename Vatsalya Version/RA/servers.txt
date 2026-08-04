@@ -12,7 +12,7 @@
 # lines (e.g. a second `ollama serve` on another port/GPU pair, or another
 # node's forwarded port) to actually parallelize extraction; no code
 # changes needed, ingest.py re-reads this file on every run.
-http://127.0.0.1:11435
-http://127.0.0.1:11436
+#http://127.0.0.1:11435
+#http://127.0.0.1:11436
 http://127.0.0.1:11437
 http://127.0.0.1:11438
