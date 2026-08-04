@@ -375,3 +375,67 @@ papered over with a default.
    `only_need_context=True` actually returns.
 4. Wire all three branches into the actual `search_catalog(query_state)`
    entrypoint.
+
+## Web UI and Interactive Visualization
+
+### Query Interface (`web_ui.py`)
+
+A Flask-based web UI (`web_ui.py`) provides interactive querying and graph visualization:
+
+```bash
+./webui.sh  # Opens browser to http://localhost:8000
+```
+
+The UI offers:
+- **Query Interface** — Natural language queries against the LightRAG index in mixed mode (`mode="mix"`, `only_need_context=True`)
+- **Graph Visualization** — Interactive vis.js network graph showing all 7,000+ nodes and relationships
+- **Fullscreen Mode** — Click the ⛶ button to expand the graph for detailed exploration (press Esc or click Exit to return)
+- **Node Search** — Sidebar search to find and highlight specific entities
+- **Stats Dashboard** — Real-time view of document counts, entities, relations, and document status
+
+### Implementation Details
+
+**Query Execution:**
+- `web_ui.py`'s `/api/query` POST endpoint accepts natural language queries
+- Runs `rag.aquery()` in a separate thread (async-to-sync wrapper) to avoid blocking Flask's event loop
+- Returns raw context via `QueryParam(mode="mix", only_need_context=True)` — same format as `query.py`
+- Displays results in a scrollable panel with truncation for readability
+
+**Graph Rendering:**
+- Frontend uses vis.js for interactive network visualization
+- Limited to first 500 nodes for performance (full node count shown)
+- Physics simulation enabled for organic layout; pan/zoom/click to explore
+- Node selection shows connected edges and metadata in sidebar
+
+**Fullscreen Implementation:**
+- CSS class `.fullscreen-mode` hides sidebar/header/query section
+- Button toggles `isFullscreen` state and appends/removes close button
+- Keyboard shortcut (Esc key) provides quick exit
+- Network re-fits to viewport on toggle for optimal view
+
+### Data Flow
+
+1. `load_graph_data()` parses `lightrag_storage/graph_chunk_entity_relation.graphml` once on server start
+2. `load_stats()` reads JSON checkpoints (`doc_status`, `entities`, `relations`) for sidebar
+3. On query: `run_async_in_thread()` wraps the async `rag.aquery()` call
+4. Flask returns JSON results; frontend formats and displays them
+
+### Configuration
+
+- **Port**: 8000 (hardcoded, can be changed in `__main__` or `webui.sh`)
+- **Graph Storage**: Points to `STORAGE_DIR / "graph_chunk_entity_relation.graphml"` from `config.py`
+- **RAG Instance**: Lazily initialized on first query, reused for subsequent queries
+- **Threading**: One event loop per query to avoid conflicts with Flask's own event loop
+
+### webui.sh Launcher
+
+`webui.sh` is a bash script that:
+- Checks port 8000 is free (kills existing process if needed)
+- Installs dependencies (`uv sync`)
+- Starts the server in background
+- Auto-opens browser using `open` (macOS) / `xdg-open` (Linux) / `start` (Windows)
+- Displays a formatted startup banner with features and URL
+- Handles Ctrl+C gracefully to shut down the server
+
+See README.md's "Quick Start — Interactive Web UI" section for usage examples.
+
