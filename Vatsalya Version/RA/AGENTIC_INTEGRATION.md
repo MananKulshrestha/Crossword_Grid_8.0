@@ -24,6 +24,144 @@ All `chat-agentic-docs` file paths below are relative to that repo's root
 
 ---
 
+## Retrieval Pipeline Overview
+
+This section walks one search request end-to-end, stage by stage, before
+the rest of the document goes deep on contract detail per stage. Every
+stage below is **Confirmed (code today)** except the last, which is
+**Recommendation** (§5) — same labeling discipline as the rest of this
+document.
+
+```
+Intent Parsing  →  SQL Hard Filter  ─┐
+                                       ├─→ Candidate Merge → CrossEncoder Reranker → search_catalog() → Agentic Adapter
+                        BM25          ─┤
+                LightRAG/Qdrant       ─┘
+```
+
+Note the shape: SQL Hard Filter, BM25, and LightRAG/Qdrant all run off the
+same `query_state` — they are not a sequential pipeline where one filters
+the next. BM25 and the semantic branch search the *entire* corpus
+regardless of hard constraints; the SQL filter's eligible-SKU set is only
+applied afterward, at the Candidate Merge stage, as an intersection —
+never as a pre-filter on what BM25/semantic search over. (In `merge.py`'s
+actual code, `sql_filter.eligible_skus()` is *called* first, but its
+result sits unused until the intersection line later — call order isn't
+application order; see below.)
+
+### Intent Parsing (agentic side)
+**Confirmed (code today) — happens entirely inside `chat-agentic-docs`,
+before RA is ever called.** Full detail in §2/§3.
+- **Purpose:** turn one turn's raw user message + prior session state into
+  a structured delta, then merge it into the session's persistent
+  `QueryState`.
+- **Input:** the raw message, `TurnSnapshot` (prior `QueryState` + recent
+  turn context).
+- **Output:** a merged, typed `QueryState` (`agentic/contracts.py:271-283`)
+  — `hard_constraints: list[Constraint]`, `soft_preferences:
+  list[Preference]`, `query_terms: list[str]`.
+- **Responsibility:** the *only* place natural language gets turned into
+  structured constraints/terms. Nothing downstream (SQL, BM25, LightRAG)
+  does any further NL parsing — they consume already-structured input.
+
+### SQL Hard Filter (`sql_filter.py`)
+**Confirmed (code today).** Contract detail in §1, mapping detail in §6.
+- **Purpose:** the one deterministic, never-relaxed eligibility gate —
+  price cap, category, size, stock status.
+- **Input:** `hard_constraints: dict` (`max_price`/`category`/`size`/
+  `stock_status`).
+- **Output:** every matching `product_metadata` row, as a dict —
+  `eligible_skus()` (`sql_filter.py:42-72`).
+- **Responsibility:** answers "is this SKU allowed to appear at all,"
+  never "is this SKU relevant." Its output isn't consumed until the
+  Candidate Merge stage below.
+
+### BM25 (`bm25_index.py`)
+**Confirmed (code today).**
+- **Purpose:** exact-token lexical recall — brand spellings, model codes,
+  specific fabric/feature words — over the same description-only corpus
+  LightRAG indexes.
+- **Input:** `soft_query_text`.
+- **Output:** `[(sku_id, score), ...]`, sorted descending by BM25 score —
+  `search()` (`bm25_index.py:82-95`).
+- **Responsibility:** catches exact-token matches embeddings/graph
+  extraction can smooth over or drop.
+
+### LightRAG/Qdrant — semantic branch (`semantic_search.py`)
+**Confirmed (code today).**
+- **Purpose:** meaning/relation-level recall — thematic or paraphrased
+  matches that share no literal tokens with the query.
+- **Input:** `soft_query_text`.
+- **Output:** `list[Candidate]`, ranked by LightRAG's own retrieval order
+  (chunk-vector matches first, then entity/relationship-only fills). No
+  real similarity score is exposed by LightRAG's public query API, so
+  `branch_signal` here is rank-derived (`1/rank`), not a comparable
+  number — full reasoning in `semantic_search.py`'s module docstring.
+- **Responsibility:** the one branch that can surface a relevant SKU with
+  zero shared tokens with the query text.
+
+### Candidate Merge (`merge.py` — `_union` + eligibility intersection)
+**Confirmed (code today).**
+- **Purpose:** combine BM25's and the semantic branch's candidates into
+  one deduplicated set, then apply the SQL eligible-set as the one
+  mandatory filter.
+- **Input:** BM25 candidates, semantic candidates, the SQL eligible-row
+  map.
+- **Output:** a `Candidate` list, each with `metadata` attached from its
+  eligible row — anything not in the eligible set is dropped
+  unconditionally, regardless of BM25/semantic score.
+- **Responsibility:** union, never intersection, between BM25 and
+  semantic (a SKU only needs one branch to survive to here) —
+  `merge.py:74-85`. No score fusion happens at this stage or any other:
+  each branch's `branch_signal` stays on its own `BranchHit`, never
+  combined into one number.
+
+### CrossEncoder Reranker (`merge.py` — `fuse_and_rerank`)
+**Confirmed (code today).**
+- **Purpose:** the single relevance signal that actually determines final
+  order — every stage before this one only decided *whether* a SKU
+  survives, not *where* it ranks.
+- **Input:** the surviving candidate set + `full_query_text`.
+- **Output:** each candidate's `rerank_score`, set from
+  `CrossEncoder.predict((full_query_text, candidate_text(c)))`
+  (`merge.py:126-130`), sorted descending, truncated to `top_n`.
+- **Responsibility:** `candidate_text()` (`candidate.py:72-88`) is the
+  same corpus text regardless of which branch found the candidate, so
+  this stage is blind to provenance — a BM25-only, semantic-only, or
+  both-branches candidate all get scored on identical footing.
+
+### `search_catalog()` (`search_catalog.py`)
+**Confirmed (code today).** Full contract in §1.
+- **Purpose:** the single external entrypoint — everything above this
+  line is an internal implementation detail RA is free to change without
+  breaking callers.
+- **Input:** `query_state: dict` (`hard_constraints`, `soft_query_text`,
+  `full_query_text`).
+- **Output:** `list[dict]` — `sku_id`, `rerank_score`, `metadata`,
+  `branches`, `evidence`, already sorted.
+- **Responsibility:** splits `query_state`, delegates to
+  `merge.fuse_and_rerank`, shapes `Candidate` objects into the plain-dict
+  contract — no retrieval logic of its own.
+
+### Agentic Adapter
+**Recommendation — not yet built (§5).**
+- **Purpose:** translate between the orchestrator's typed
+  `SearchRequest`/`QueryState` and RA's plain-dict `query_state`/output,
+  in both directions, so `search_catalog()` can be called from
+  `CatalogSearchPort.search()` without either side changing its own
+  contract.
+- **Input:** agentic `SearchRequest` (typed `QueryState`, `top_k`,
+  `compatibility_tuple`).
+- **Output:** agentic `SearchResult` (`SearchEntry`/`Fact`-shaped, with
+  `confidence_signals`/`hard_filter_hash` populated) — consumed next by
+  the orchestrator's confidence gate (`assess_retrieval_confidence`, §2).
+- **Responsibility:** the seam described in full in §5, including which
+  parts are settled (the cart-adapter pattern to follow) and which are
+  open decisions (§7) — this overview places the adapter in the overall
+  flow, it does not resolve those decisions.
+
+---
+
 ## 1. RA side today — `search_catalog`'s real contract
 
 **Confirmed (code today).** The only function meant to be called from
