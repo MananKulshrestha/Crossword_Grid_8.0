@@ -46,15 +46,15 @@ def build_reranker_request(
         hard_constraints[constraint.field] = value
 
     new_query_text = " ".join(extraction.query_terms).strip()
-    if new_query_text:
-        soft_query_text = new_query_text
-    elif extraction.action == Action.REFINE and session_state.last_reranker_request is not None:
-        # A REFINE turn narrowing an existing search ("price under 5000")
-        # carries no new query terms - keep searching for the same product,
-        # don't let the refine sentence itself become the soft query.
-        soft_query_text = session_state.last_reranker_request.soft_query_text
+    if extraction.action == Action.REFINE and session_state.last_reranker_request is not None:
+        # A REFINE narrows an existing search - it never replaces the soft
+        # query, it adds to it. "running shoes" + "only adidas" -> "running
+        # shoes adidas", not just "adidas" (which would drop the product
+        # type entirely and search for any Adidas product).
+        prior_text = session_state.last_reranker_request.soft_query_text
+        soft_query_text = f"{prior_text} {new_query_text}".strip() if new_query_text else prior_text
     else:
-        soft_query_text = message
+        soft_query_text = new_query_text or message
 
     return RerankerRequest(
         soft_query_text=soft_query_text,

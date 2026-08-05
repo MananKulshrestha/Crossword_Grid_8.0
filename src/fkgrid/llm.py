@@ -40,58 +40,40 @@ recent conversation, then output ONLY a JSON object matching this schema:
   "reply": string|null
 }
 
-Use CHITCHAT when the message is not a shopping request at all - greetings
-("hi", "hello"), small talk ("how are you"), thanks, or anything else that
-doesn't ask to search, inspect, compare, or change the cart. For CHITCHAT,
-set "reply" to a short, friendly, direct reply to the shopper (no tool call
-will be made - this reply is shown as-is), and leave query_terms,
-constraints, references, and cart_operations empty. For every other
-action, leave "reply" null.
+RULES
 
-Only include a constraint if the shopper actually stated it (a price
-ceiling, a category, a size, an in-stock requirement). Never invent a price
-limit, category, or size the shopper did not mention - leave constraints
-empty rather than guess. There is no "more than X" / minimum-price filter
-available at all - if the shopper gives a lower bound, drop it silently and
-keep only any upper bound they also gave (or no price constraint if they
-only gave a lower bound); never approximate a minimum with anything else.
-"category" constraints are EXACT filters - the catalog only has a small
-fixed set of literal category names (e.g. "Watches", "Wearable Smart
-Devices", "Footwear") - only set this field when the shopper names one of
-those exactly (or something you are confident is literally the catalog's
-name for it), never a descriptive phrase you composed yourself (e.g.
-"sports watch", "green watch" is NOT a category - it is a descriptive
-query). Anything descriptive - color, style, occasion, material, brand, a
-category-ish phrase you are not sure is a literal catalog value - belongs
-in query_terms instead, since that is matched softly, not filtered exactly
-(there is no "brand" hard filter at all - always put a brand name in
-query_terms, never in constraints). When unsure whether a word is a real
-category or just descriptive, put it in query_terms, not constraints. For
-"max_price", the value MUST be a plain number (int or float, never a
-string, never containing commas or a currency symbol) in the same rupee
-units the shopper used - do NOT convert to paise or any other unit (e.g.
-"under 2000 rupees" -> {"field": "max_price", "value": 2000}). Use REFINE
-when the shopper is narrowing an existing
-search (e.g. "cheaper ones", "only blue"). Use SEARCH for a fresh product
-query. A REFINE turn keeps every hard constraint from the previous search
-unless the shopper explicitly lifts one - if they say "any size"/"any
-price"/"any brand"/"no price limit" etc, name that field in
-"clear_constraints" (e.g. ["size"]) so it stops being applied; do not also
-put a new constraint for that field. Leave clear_constraints empty on
-every other turn. Use references with 1-based ordinals when the shopper refers to a
-previous result ("the first one", "the second one"). When the shopper says
-"all of them"/"everything"/"all the results" instead of naming specific
-ones, set that reference's "all" to true and leave ordinal/sku_id null -
-this applies to comparing all last results or adding all of them to the
-cart (one cart_operation with an "all" reference covers every entry, you
-do not need to enumerate them). When the shopper says "the first N"
-("the first 3", "the top 5 results") set that reference's "count" to N
-and leave ordinal/sku_id/all unset - same one-reference-covers-many rule,
-do not enumerate individual ordinals for it. If the shopper types
-an exact product/sku id (an alphanumeric code, e.g. "SHOE58EKXSEYAYX6"),
-put it in the reference's sku_id field verbatim instead of an ordinal -
-do this even if that sku was never shown in this conversation, it will be
-looked up directly. Output strict JSON, no prose.
+- CHITCHAT: message isn't a shopping request (greeting, small talk, thanks).
+  Set "reply" to a short direct reply; leave every other field empty/null.
+- SEARCH: a fresh product request. REFINE: narrowing the CURRENT search
+  (cheaper, a color, a brand, a size, dropping a filter). query_terms for a
+  REFINE are ADDED words, not a replacement - the caller appends them to the
+  previous search text, so only put the NEW words in query_terms, never
+  repeat old ones.
+- constraints: only "max_price" (number, shopper's own rupee units, never
+  paise, never a string/comma), "category" (ONLY a literal catalog name like
+  "Footwear" - never a descriptive phrase), "size", "stock_status". No
+  "brand" field exists and no minimum-price field exists - a brand name
+  always goes in query_terms; a lower price bound is dropped silently. If
+  unsure whether a word is a real category, put it in query_terms instead.
+- clear_constraints: on a REFINE, name any field the shopper explicitly
+  lifted ("any size", "no price limit") so it stops applying. Don't also
+  add a new constraint for that same field in the same turn.
+- references: 1-based "ordinal" for "the second one"; "sku_id" verbatim for
+  an exact product code even if never shown before; "all": true for
+  "all of them"/"everything" (one reference covers every result); "count": N
+  for "the first N" (one reference covers the first N, don't enumerate).
+
+EXAMPLES (previous soft_query_text in parens where relevant)
+
+1. ("running shoes") "only adidas" -> REFINE, query_terms=["adidas"]
+   (caller merges to "running shoes adidas" - never emit query_terms that
+   drop the original product type).
+2. ("clothes", hard_constraints has size=M) "any size is fine" -> REFINE,
+   query_terms=[], clear_constraints=["size"].
+3. "add the first 3 to my cart" -> UPDATE_CART, cart_operations=[{"type":
+   "ADD_ITEM", "reference": {"count": 3}, "confirmation": true}].
+
+Output strict JSON, no prose.
 """
 
 
