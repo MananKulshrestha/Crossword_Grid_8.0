@@ -5,16 +5,20 @@ MySQL error, unresolved reference) returns an explicit ERROR TurnResult
 immediately. No retries, no cascading fallbacks, no cached/stale data
 returned in place of a real answer - a failure is a hard pause.
 
-Every stage is recorded onto TurnResult.trace (stage name, exact input,
-exact output) so a caller - the CLI in cli.py, or Swagger's raw response -
-can see precisely what each step did.
+Every reranker result and every sku_id a reference resolves to is checked
+against MySQL directly (single source of truth for what actually exists),
+never trusted from the model. Results are recorded on TurnResult.trace
+(stage name, exact input, exact output, ok/found flags) so a caller - the
+CLI in cli.py, or Swagger's raw response - can see precisely what happened
+at each step, including which sku_ids were hallucinated by the reranker or
+the extractor.
 """
 
 from __future__ import annotations
 
 import uuid
 
-from . import catalog, cart, followups, llm, memory
+from . import catalog, cart, enhancer, followups, llm, memory
 from .catalog import CatalogError, RerankerError
 from .contracts import (
     Action,
@@ -43,7 +47,7 @@ def _error(tracer: _Tracer, message: str, code: str) -> TurnResult:
     return TurnResult(status=TurnStatus.ERROR, message=message, error_code=code, trace=tracer.steps)
 
 
-def _resolve_reference(reference: Reference | None, last_results: list[SearchEntry]) -> SearchEntry | None:
+def _from_last_results(reference: Reference | None, last_results: list[SearchEntry]) -> SearchEntry | None:
     if reference is None:
         return None
     if reference.sku_id:
@@ -52,6 +56,52 @@ def _resolve_reference(reference: Reference | None, last_results: list[SearchEnt
         index = reference.ordinal - 1
         if 0 <= index < len(last_results):
             return last_results[index]
+    return None
+
+
+def _resolve_entry(
+    tracer: _Tracer, reference: Reference | None, last_results: list[SearchEntry]
+) -> SearchEntry | None:
+    """Resolve a reference to a catalog entry, verifying against MySQL directly
+    when the reference names an explicit sku_id that isn't in the last search
+    results (e.g. "compare SKU123 to SKU456" for skus never searched this
+    session). Records one trace step either way so the CLI can show
+    green/red per sku_id."""
+
+    entry = _from_last_results(reference, last_results)
+    if entry is not None:
+        tracer.record(
+            "resolve_reference",
+            {"reference": reference.model_dump()},
+            {"sku_id": entry.sku_id, "source": "session_results", "found_in_mysql": True},
+            ok=True,
+        )
+        return entry
+
+    if reference is not None and reference.sku_id:
+        details = catalog.get_details(reference.sku_id)
+        if details.found and details.entry is not None:
+            tracer.record(
+                "resolve_reference",
+                {"reference": reference.model_dump()},
+                {"sku_id": reference.sku_id, "source": "mysql_lookup", "found_in_mysql": True},
+                ok=True,
+            )
+            return details.entry
+        tracer.record(
+            "resolve_reference",
+            {"reference": reference.model_dump()},
+            {"sku_id": reference.sku_id, "source": "mysql_lookup", "found_in_mysql": False},
+            ok=False,
+        )
+        return None
+
+    tracer.record(
+        "resolve_reference",
+        {"reference": reference.model_dump() if reference else None},
+        {"sku_id": None, "source": "none", "found_in_mysql": False},
+        ok=False,
+    )
     return None
 
 
@@ -73,16 +123,13 @@ def handle_turn(request: TurnRequest) -> TurnResult:
     tracer.record("query_extractor", history_in, extraction.model_dump(mode="json"))
 
     enhance_in = {
+        "message": request.message,
         "extraction": extraction.model_dump(mode="json"),
         "prior_reranker_request": (
             session.last_reranker_request.model_dump(mode="json") if session.last_reranker_request else None
         ),
     }
-    try:
-        reranker_request = llm.enhance_query(extraction, session)
-    except LLMError as exc:
-        tracer.record("query_enhancer", enhance_in, {"error": str(exc)}, ok=False)
-        return _error(tracer, "Could not build a search request.", str(exc))
+    reranker_request = enhancer.build_reranker_request(request.message, extraction, session)
     tracer.record("query_enhancer", enhance_in, reranker_request.model_dump(mode="json"))
 
     action = extraction.action
@@ -97,6 +144,15 @@ def handle_turn(request: TurnRequest) -> TurnResult:
             tracer.record("reranker_search", reranker_request.model_dump(mode="json"), {"error": str(exc)}, ok=False)
             return _error(tracer, "The catalog is unavailable.", str(exc))
         tracer.record("reranker_search", reranker_request.model_dump(mode="json"), search_result.model_dump(mode="json"))
+        # Every sku_id the reranker returned, checked against MySQL directly -
+        # a dedicated stage so it's obvious in the trace/CLI which ones were
+        # real catalog rows and which were reranker hallucinations.
+        tracer.record(
+            "sku_verification",
+            {"candidate_sku_ids": search_result.verified_sku_ids + search_result.hallucinated_sku_ids},
+            {"verified_sku_ids": search_result.verified_sku_ids, "hallucinated_sku_ids": search_result.hallucinated_sku_ids},
+            ok=not search_result.hallucinated_sku_ids,
+        )
         memory.set_last_results(request.session_id, search_result.entries, reranker_request)
         result = TurnResult(
             status=TurnStatus.OK,
@@ -106,10 +162,8 @@ def handle_turn(request: TurnRequest) -> TurnResult:
         )
 
     elif action == Action.PRODUCT_DETAILS:
-        entry = _resolve_reference(extraction.references[0] if extraction.references else None, session.last_results)
+        entry = _resolve_entry(tracer, extraction.references[0] if extraction.references else None, session.last_results)
         if entry is None:
-            tracer.record("resolve_reference", {"references": [r.model_dump() for r in extraction.references]},
-                           {"error": "REFERENCE_UNRESOLVED"}, ok=False)
             return _error(tracer, "Could not resolve which product you mean.", "REFERENCE_UNRESOLVED")
         details = catalog.get_details(entry.sku_id)
         tracer.record("catalog_get_details", {"sku_id": entry.sku_id}, details.model_dump(mode="json"))
@@ -117,11 +171,14 @@ def handle_turn(request: TurnRequest) -> TurnResult:
                              product_details=details)
 
     elif action == Action.COMPARE:
-        entries = [_resolve_reference(ref, session.last_results) for ref in extraction.references]
-        if len(entries) < 2 or any(entry is None for entry in entries):
-            tracer.record("resolve_reference", {"references": [r.model_dump() for r in extraction.references]},
-                           {"error": "REFERENCE_UNRESOLVED"}, ok=False)
-            return _error(tracer, "Could not resolve which products to compare.", "REFERENCE_UNRESOLVED")
+        entries = [_resolve_entry(tracer, ref, session.last_results) for ref in extraction.references]
+        unresolved = [ref for ref, entry in zip(extraction.references, entries) if entry is None]
+        if len(entries) < 2 or unresolved:
+            return _error(
+                tracer,
+                "Could not resolve which products to compare - one or more sku_ids were not found in MySQL.",
+                "REFERENCE_UNRESOLVED",
+            )
         sku_ids = [entry.sku_id for entry in entries]
         comparison = catalog.compare(sku_ids)
         tracer.record("catalog_compare", {"sku_ids": sku_ids}, comparison.model_dump(mode="json"))
@@ -129,10 +186,8 @@ def handle_turn(request: TurnRequest) -> TurnResult:
                              comparison=comparison)
 
     elif action == Action.CHECK_AVAILABILITY:
-        entry = _resolve_reference(extraction.references[0] if extraction.references else None, session.last_results)
+        entry = _resolve_entry(tracer, extraction.references[0] if extraction.references else None, session.last_results)
         if entry is None:
-            tracer.record("resolve_reference", {"references": [r.model_dump() for r in extraction.references]},
-                           {"error": "REFERENCE_UNRESOLVED"}, ok=False)
             return _error(tracer, "Could not resolve which product you mean.", "REFERENCE_UNRESOLVED")
         availability = catalog.check_availability(entry.sku_id)
         tracer.record("catalog_check_availability", {"sku_id": entry.sku_id}, availability.model_dump(mode="json"))
@@ -148,11 +203,10 @@ def handle_turn(request: TurnRequest) -> TurnResult:
         resolved_operations: list[CartOperationDraft] = []
         for operation in extraction.cart_operations:
             if operation.type.value == "ADD_ITEM":
-                entry = _resolve_reference(operation.reference, session.last_results)
+                entry = _resolve_entry(tracer, operation.reference, session.last_results)
                 if entry is None:
-                    tracer.record("resolve_reference", {"reference": operation.reference.model_dump() if operation.reference else None},
-                                   {"error": "REFERENCE_UNRESOLVED"}, ok=False)
-                    return _error(tracer, "Could not resolve which product to add.", "REFERENCE_UNRESOLVED")
+                    return _error(tracer, "Could not resolve which product to add - sku_id not found in MySQL.",
+                                   "REFERENCE_UNRESOLVED")
                 resolved_operations.append(
                     operation.model_copy(update={
                         "sku_id": entry.sku_id,

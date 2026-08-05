@@ -119,6 +119,11 @@ class SearchEntry(BaseModel):
 class SearchResult(BaseModel):
     entries: list[SearchEntry] = Field(default_factory=list)
     result_set_id: str | None = None
+    # Every sku_id the reranker returned, split by whether MySQL actually
+    # has it. hallucinated_sku_ids exist only in the reranker's output, not
+    # the catalog - the CLI prints these in red.
+    verified_sku_ids: list[str] = Field(default_factory=list)
+    hallucinated_sku_ids: list[str] = Field(default_factory=list)
 
 
 class ProductDetails(BaseModel):

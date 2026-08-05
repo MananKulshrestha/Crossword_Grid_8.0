@@ -1,8 +1,12 @@
-"""LLM calls for query extraction and query enhancement.
+"""LLM call for query extraction.
 
-One call per step. No retry, no repair loop, no regex fallback: on any
-failure (timeout, non-OK HTTP, invalid JSON, schema-invalid output) this
-raises LLMError, which the orchestrator treats as a hard pause.
+One call. No retry, no repair loop, no regex fallback: on any failure
+(timeout, non-OK HTTP, invalid JSON, schema-invalid output) this raises
+LLMError, which the orchestrator treats as a hard pause.
+
+Query enhancement is NOT an LLM call - see enhancer.py. It deterministically
+copies whatever the extractor actually found into the reranker request
+shape, so it can never invent a constraint the shopper didn't mention.
 """
 
 from __future__ import annotations
@@ -15,7 +19,7 @@ import urllib.request
 from pydantic import ValidationError
 
 from .config import LLMConfig, load_llm_config
-from .contracts import ChatTurn, QueryExtraction, RerankerRequest, SessionState
+from .contracts import ChatTurn, QueryExtraction
 
 
 @functools.lru_cache(maxsize=1)
@@ -34,25 +38,17 @@ recent conversation, then output ONLY a JSON object matching this schema:
   "cart_operations": [{"type": "ADD_ITEM"|"SET_QUANTITY"|"REMOVE_ITEM"|"CLEAR_CART", "reference": {...}|null, "cart_item_id": string|null, "quantity": int|null, "confirmation": bool}]
 }
 
-Use REFINE when the shopper is narrowing an existing search (e.g. "cheaper
-ones", "only blue"). Use SEARCH for a fresh product query. Use references
-with 1-based ordinals when the shopper refers to a previous result
-("the first one", "the second one"). Output strict JSON, no prose.
-"""
-
-_ENHANCEMENT_SYSTEM_PROMPT = """\
-You convert a structured query extraction plus prior search constraints into
-the exact request body for a product search API. Output ONLY a JSON object:
-
-{
-  "soft_query_text": string,
-  "hard_constraints": {"max_price": number, "min_price": number, "brand": string, "category": string, "stock_status": "in_stock"},
-  "top_n": int
-}
-
-Only include hard_constraints keys that are actually known. soft_query_text
-should be a short natural-language description of what the shopper wants.
-Default top_n to 10 unless the shopper asked for a specific count.
+Only include a constraint if the shopper actually stated it (a price, a
+brand, a category, an in-stock requirement). Never invent a price limit,
+brand, or category the shopper did not mention - leave constraints empty
+rather than guess. Use REFINE when the shopper is narrowing an existing
+search (e.g. "cheaper ones", "only blue"). Use SEARCH for a fresh product
+query. Use references with 1-based ordinals when the shopper refers to a
+previous result ("the first one", "the second one"). If the shopper types
+an exact product/sku id (an alphanumeric code, e.g. "SHOE58EKXSEYAYX6"),
+put it in the reference's sku_id field verbatim instead of an ordinal -
+do this even if that sku was never shown in this conversation, it will be
+looked up directly. Output strict JSON, no prose.
 """
 
 
@@ -117,21 +113,3 @@ def extract_query(message: str, chat_history: list[ChatTurn]) -> QueryExtraction
         return QueryExtraction.model_validate(payload)
     except ValidationError as exc:
         raise LLMError("EXTRACTION_SCHEMA_INVALID") from exc
-
-
-def enhance_query(extraction: QueryExtraction, session_state: SessionState) -> RerankerRequest:
-    prior = session_state.last_reranker_request.model_dump() if (
-        extraction.action.value == "REFINE" and session_state.last_reranker_request
-    ) else None
-    payload = _chat_completion(
-        _ENHANCEMENT_SYSTEM_PROMPT,
-        {
-            "extraction": extraction.model_dump(mode="json"),
-            "prior_reranker_request": prior,
-        },
-        RerankerRequest.model_json_schema(),
-    )
-    try:
-        return RerankerRequest.model_validate(payload)
-    except ValidationError as exc:
-        raise LLMError("ENHANCEMENT_SCHEMA_INVALID") from exc

@@ -9,6 +9,7 @@ the old orchestrator, undo-last-removal bridging) is dropped.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import uuid
 
@@ -77,7 +78,7 @@ def show_cart(session_id: str) -> CartSnapshot:
 
 def _fetch_offer(cursor, offer_id: str) -> dict | None:
     cursor.execute(
-        "SELECT price_paise, availability_status FROM offers "
+        "SELECT catalog_version, price_paise, availability_status FROM offers "
         "WHERE offer_id=%s AND status='ACTIVE'",
         (offer_id,),
     )
@@ -125,12 +126,13 @@ def _apply_operations(cursor, cart_id: str, request: UpdateCartRequest) -> list[
             else:
                 cursor.execute(
                     "INSERT INTO cart_items "
-                    "(cart_item_id, cart_id, product_id, sku_id, offer_id, quantity, "
+                    "(cart_item_id, cart_id, catalog_version, product_id, sku_id, offer_id, quantity, "
                     "unit_price_paise, availability_status, status, price_as_of, availability_as_of) "
-                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,'ACTIVE',NOW(6),NOW(6))",
+                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,'ACTIVE',NOW(6),NOW(6))",
                     (
                         f"item_{uuid.uuid4().hex}",
                         cart_id,
+                        offer["catalog_version"],
                         operation.product_id,
                         operation.sku_id,
                         operation.offer_id,
@@ -202,13 +204,14 @@ def update_cart(request: UpdateCartRequest) -> UpdateCartResult:
             return UpdateCartResult(status="REJECTED", reason=f"OPERATION_TYPE_NOT_SUPPORTED:{operation.type}")
 
     cart_id = _cart_id(request.session_id)
-    request_hash = json.dumps(
+    request_hash_input = json.dumps(
         {
             "operations": [op.model_dump(mode="json") for op in request.operations],
             "expected_cart_version": request.expected_cart_version,
         },
         sort_keys=True,
     )
+    request_hash = hashlib.sha256(request_hash_input.encode("utf-8")).hexdigest()
 
     with db.connection() as conn:
         conn.begin()

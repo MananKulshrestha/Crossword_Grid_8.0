@@ -120,19 +120,29 @@ def search(request: RerankerRequest) -> SearchResult:
     sku_ids = [item.get("sku_id") for item in results if item.get("sku_id")]
     rows = _fetch_rows(sku_ids)
 
+    # Check every sku_id the reranker returned against MySQL, not just the
+    # first top_n - a hallucinated sku_id should be visible even if it
+    # would have been truncated anyway.
     entries: list[SearchEntry] = []
+    verified: list[str] = []
+    hallucinated: list[str] = []
     for item in results:
         sku_id = item.get("sku_id")
-        row = rows.get(sku_id) if sku_id else None
-        if row is None:
+        if not sku_id:
             continue
-        entries.append(_entry_from_row(row, item.get("rerank_score")))
-        if len(entries) >= request.top_n:
-            break
+        row = rows.get(sku_id)
+        if row is None:
+            hallucinated.append(sku_id)
+            continue
+        verified.append(sku_id)
+        if len(entries) < request.top_n:
+            entries.append(_entry_from_row(row, item.get("rerank_score")))
 
     return SearchResult(
         entries=entries,
         result_set_id=f"reranker-{hash(tuple(sku_ids)) & 0xFFFFFFFF:08x}" if entries else None,
+        verified_sku_ids=verified,
+        hallucinated_sku_ids=hallucinated,
     )
 
 

@@ -23,6 +23,18 @@ import urllib.request
 
 BASE_URL = os.environ.get("FKGRID_API_BASE_URL", "http://127.0.0.1:8000")
 
+_GREEN = "\033[32m"
+_RED = "\033[31m"
+_RESET = "\033[0m"
+
+
+def _green(text: str) -> str:
+    return f"{_GREEN}{text}{_RESET}"
+
+
+def _red(text: str) -> str:
+    return f"{_RED}{text}{_RESET}"
+
 
 def _post(path: str, body: dict | None = None) -> dict:
     data = json.dumps(body or {}).encode("utf-8")
@@ -60,6 +72,25 @@ def _print_step(index: int, step: dict) -> None:
     print(_dump(step.get("input", {})))
     print("output:")
     print(_dump(step.get("output", {})))
+
+    output = step.get("output", {})
+
+    if step["stage"] == "sku_verification":
+        print("sku check against MySQL:")
+        for sku_id in output.get("verified_sku_ids", []):
+            print(f"  {_green(sku_id)}  (in MySQL)")
+        for sku_id in output.get("hallucinated_sku_ids", []):
+            print(f"  {_red(sku_id)}  (NOT in MySQL - reranker hallucination)")
+
+    if step["stage"] == "resolve_reference":
+        sku_id = output.get("sku_id")
+        if sku_id:
+            if output.get("found_in_mysql"):
+                print(f"resolved: {_green(sku_id)}  (source: {output.get('source')})")
+            else:
+                print(f"resolved: {_red(sku_id)}  (NOT in MySQL)")
+        elif not step.get("ok", True):
+            print(_red("resolved: no sku_id could be determined from the reference"))
 
 
 class _Waiter:
