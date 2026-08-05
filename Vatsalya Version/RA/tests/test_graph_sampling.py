@@ -6,6 +6,7 @@ tests/test_sql_filter.py and tests/test_bm25.py.
 """
 
 import sys
+from functools import lru_cache
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -13,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import graph_sampling as gs  # noqa: E402
 
 
+@lru_cache(maxsize=1)
 def _run():
     records = gs.load_structured_records()
     from load_documents import build_documents

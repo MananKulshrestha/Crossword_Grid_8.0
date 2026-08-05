@@ -153,6 +153,33 @@ class FastApiWorkflowTests(unittest.TestCase):
         self.assertEqual(eligibility_event["safe_metadata"]["tool_output"]["eligible"], True)
         self.assertIn("route_primary_action", [event["logical_name"] for event in detail_events])
 
+    def test_active_results_rehydrate_full_entries_with_display_positions(self) -> None:
+        created = self.client.post("/v1/sessions", json={"session_id": "active-results-session"})
+        self.assertEqual(created.status_code, 201)
+
+        search = self.client.post(
+            "/v1/sessions/active-results-session/turns",
+            json={
+                "client_turn_id": "active-results-turn-1",
+                "idempotency_key": "active-results-key-1",
+                "message": "Find a laptop under 80000",
+            },
+        )
+        self.assertEqual(search.status_code, 200)
+        search_response = search.json()["response"]
+
+        active = self.client.get("/v1/sessions/active-results-session/active-results")
+        self.assertEqual(active.status_code, 200)
+        payload = active.json()
+        self.assertEqual(payload["result_set_id"], search_response["result_set_id"])
+        self.assertEqual(len(payload["items"]), 5)
+        first = payload["items"][0]
+        self.assertEqual(first["display_position"], 1)
+        self.assertTrue(first["title"])
+        labels = {fact["label"] for fact in first["facts"]}
+        self.assertIn("brand", labels)
+        self.assertIn("price", labels)
+
     def test_trace_exposes_structured_model_tool_output_and_recent_memory(self) -> None:
         created = self.client.post("/v1/sessions", json={"session_id": "trace-session"})
         self.assertEqual(created.status_code, 201)

@@ -433,6 +433,21 @@ def search_result_to_chat(
                     ],
                 }
             )
+        if entry.brand is not None:
+            facts.append(
+                {
+                    "fact_id": stable_id("fact", {"entry": entry_id, "field": "brand"}),
+                    "label": "brand",
+                    "typed_value": entry.brand,
+                    "status": "VERIFIED",
+                    "scope": "CATALOG",
+                    "provenance_type": "MOCK_CATALOG",
+                    "evidence_refs": [
+                        evidence_ref_to_chat(ref, entry.binding.product_id)
+                        for ref in entry.evidence_refs[:8]
+                    ],
+                }
+            )
         for field, value in sorted(entry.attributes.items()):
             facts.append(
                 {

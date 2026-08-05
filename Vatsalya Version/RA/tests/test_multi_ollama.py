@@ -11,6 +11,7 @@ live server, so it's exempted the same way IMPLEMENTATION.md's "no soft
 fallbacks" discipline exempts genuinely untestable-without-infra pieces).
 """
 
+import asyncio
 import sys
 from pathlib import Path
 
@@ -23,7 +24,7 @@ from multi_ollama import load_servers, MultiOllamaLoadBalancer  # noqa: E402
 
 def test_load_servers_reads_committed_servers_txt():
     servers = load_servers("servers.txt")
-    assert servers == ["http://localhost:11345"]
+    assert servers == ["http://127.0.0.1:11437", "http://127.0.0.1:11438"]
 
 
 def test_load_servers_ignores_comments_and_blank_lines(tmp_path):
@@ -54,20 +55,29 @@ def test_load_servers_empty_file_raises(tmp_path):
 
 def test_round_robin_cycles_in_order():
     lb = MultiOllamaLoadBalancer(["a", "b", "c"])
-    picks = [lb.get_next_server() for _ in range(7)]
+    async def collect():
+        return [await lb.get_next_server() for _ in range(7)]
+
+    picks = asyncio.run(collect())
     assert picks == ["a", "b", "c", "a", "b", "c", "a"]
 
 
 def test_round_robin_counts_requests():
     lb = MultiOllamaLoadBalancer(["a", "b"])
-    for _ in range(5):
-        lb.get_next_server()
+    async def collect():
+        for _ in range(5):
+            await lb.get_next_server()
+
+    asyncio.run(collect())
     assert lb.request_count == 5
 
 
 def test_single_server_always_returns_itself():
     lb = MultiOllamaLoadBalancer(["only-one"])
-    assert [lb.get_next_server() for _ in range(3)] == ["only-one"] * 3
+    async def collect():
+        return [await lb.get_next_server() for _ in range(3)]
+
+    assert asyncio.run(collect()) == ["only-one"] * 3
 
 
 def test_empty_server_list_raises():

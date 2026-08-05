@@ -13,6 +13,23 @@ export function ShopperProvider({ children }: { children: ReactNode }) {
   const [latest, setLatest] = useState<ShopperResponse>(); const [history, setHistory] = useState<ShopperResponse[]>([]); const [compare, setCompare] = useState<Entry[]>([]);
   const bootstrap = useCallback(async () => { try { const cached = localStorage.getItem(storageKey); const next = cached ? await shopperApi.getSession(cached).catch(() => shopperApi.createSession()) : await shopperApi.createSession(); localStorage.setItem(storageKey, next.session_id); setSession(next); setError(undefined); } catch (cause) { setError(errorMessage(cause)); } finally { setReady(true); } }, []);
   useEffect(() => { void bootstrap(); }, [bootstrap]);
+  useEffect(() => {
+    if (!session || latest || history.length || !session.acknowledged_entries.length) return;
+    void shopperApi.activeResults(session.session_id).then((page) => {
+      if (!page.items.length) return;
+      const restoredSearch = {
+        response_id: "restored-search",
+        action: "SEARCH",
+        terminal_state: "ANSWERED_WITH_GROUNDED_RESULTS",
+        summary: "Restored the active shortlist from this shopping session.",
+        facts: [],
+        search_entries: page.items,
+        result_set_id: page.result_set_id ?? undefined,
+        warnings: [],
+      } satisfies ShopperResponse;
+      setHistory([restoredSearch]);
+    }).catch(() => undefined);
+  }, [history.length, latest, session]);
   const refresh = useCallback(async () => { if (!session) return; const next = await shopperApi.getSession(session.session_id); setSession(next); }, [session]);
   const send = useCallback(async (message?: string, action?: Action, payload: Record<string, unknown> = {}) => {
     if (!session) return; setError(undefined);

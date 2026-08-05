@@ -104,6 +104,7 @@ class SearchEntry(StrictModel):
     binding: ProductBinding
     title: str
     category_id: str
+    brand: str | None = None
     score: float
     score_components: dict[str, float] = Field(default_factory=dict)
     attributes: dict[str, str] = Field(default_factory=dict)

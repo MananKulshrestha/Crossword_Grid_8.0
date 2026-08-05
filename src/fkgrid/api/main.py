@@ -101,6 +101,23 @@ class CatalogItem(StrictModel):
     binding: ProductBinding
     title: str
     facts: list[Fact]
+    matched_criteria: list[str] = Field(default_factory=list, max_length=8)
+    unknown_criteria: list[str] = Field(default_factory=list, max_length=8)
+
+
+class ActiveResultItem(StrictModel):
+    display_position: int
+    result_entry_id: str
+    binding: ProductBinding
+    title: str
+    facts: list[Fact]
+    matched_criteria: list[str] = Field(default_factory=list, max_length=8)
+    unknown_criteria: list[str] = Field(default_factory=list, max_length=8)
+
+
+class ActiveResultsResponse(StrictModel):
+    result_set_id: str | None
+    items: list[ActiveResultItem] = Field(default_factory=list, max_length=10)
 
 
 class CatalogPage(StrictModel):
@@ -870,6 +887,8 @@ def create_app(runtime: ApiRuntime | None = None) -> FastAPI:
                     binding=entry.binding,
                     title=entry.title,
                     facts=entry.facts,
+                    matched_criteria=entry.matched_criteria,
+                    unknown_criteria=entry.unknown_criteria,
                 )
                 for position, entry in enumerate(entries, start=1)
             ],
@@ -901,6 +920,58 @@ def create_app(runtime: ApiRuntime | None = None) -> FastAPI:
     def get_session(session_id: str) -> SessionView:
         _get_session_or_404(api_runtime, session_id)
         return _session_view(api_runtime, session_id)
+
+    @application.get(
+        "/v1/sessions/{session_id}/active-results",
+        response_model=ActiveResultsResponse,
+        tags=["sessions"],
+        summary="Read the full entries for the session's active result set",
+        description=(
+            "Rehydrates the session-owned active shortlist from canonical catalog "
+            "records. The session snapshot intentionally stores only exact reference "
+            "bindings, so this endpoint never reconstructs product facts from IDs."
+        ),
+    )
+    def get_active_results(session_id: str) -> ActiveResultsResponse:
+        managed = _get_session_or_404(api_runtime, session_id)
+        with managed.lock:
+            snapshot = managed.state.snapshot.model_copy(deep=True)
+
+        by_binding = {
+            (
+                entry.binding.product_id,
+                entry.binding.sku_id,
+                entry.binding.offer_id,
+                entry.binding.catalog_version,
+            ): entry
+            for entry in api_runtime.catalog_entries
+        }
+        items: list[ActiveResultItem] = []
+        for active in snapshot.acknowledged_entries:
+            binding_key = (
+                active.binding.product_id,
+                active.binding.sku_id,
+                active.binding.offer_id,
+                active.binding.catalog_version,
+            )
+            entry = by_binding.get(binding_key)
+            if entry is None:
+                continue
+            items.append(
+                ActiveResultItem(
+                    display_position=active.display_position,
+                    result_entry_id=active.result_entry_id,
+                    binding=active.binding,
+                    title=entry.title,
+                    facts=entry.facts,
+                    matched_criteria=entry.matched_criteria,
+                    unknown_criteria=entry.unknown_criteria,
+                )
+            )
+        return ActiveResultsResponse(
+            result_set_id=snapshot.acknowledged_result_set_id,
+            items=items,
+        )
 
     @application.get(
         "/v1/sessions/{session_id}/trace",
@@ -986,6 +1057,8 @@ app = create_app()
 
 __all__ = [
     "ApiTurnRequest",
+    "ActiveResultItem",
+    "ActiveResultsResponse",
     "CatalogFacets",
     "CatalogPage",
     "SessionCreateRequest",

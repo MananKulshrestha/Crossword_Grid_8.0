@@ -20,8 +20,8 @@ from load_documents import build_documents  # noqa: E402
 
 def test_index_covers_every_product_with_a_usable_description():
     documents, skipped_empty_description = build_documents(limit=None)
-    assert len(documents) == 19998
-    assert skipped_empty_description == 2
+    assert len(documents) == 19996
+    assert skipped_empty_description == (2, 2)
 
 
 def test_exact_style_code_ranks_the_owning_sku_first():

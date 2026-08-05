@@ -329,6 +329,7 @@ class DeterministicCatalog:
                 binding=record.binding,
                 title=record.title,
                 category_id=record.category_id,
+                brand=record.brand,
                 score=score,
                 score_components=components,
                 attributes=record.attributes,
