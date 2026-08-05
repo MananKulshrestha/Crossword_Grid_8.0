@@ -12,6 +12,10 @@ dependencies = [
   "pydantic>=2.7,<3",
   "PyMySQL>=1.1,<2",
   "uvicorn>=0.30,<1",
+  # Needed unconditionally by fkgrid.catalog.adapter.RetrievalCatalogAdapter
+  # (calls the deployed Retrieval API). Was previously optional-only
+  # because nothing in the core package made an outbound HTTP call.
+  "httpx>=0.27,<1",
 ]
 
 [project.optional-dependencies]
