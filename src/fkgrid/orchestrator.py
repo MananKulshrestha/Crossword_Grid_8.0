@@ -59,6 +59,20 @@ def _from_last_results(reference: Reference | None, last_results: list[SearchEnt
     return None
 
 
+def _expand_reference(reference: Reference | None, last_results: list[SearchEntry]) -> list[Reference]:
+    """Turns an "all"- or "count"-flagged reference into one per-ordinal
+    reference per matching entry in the last search results, so downstream
+    resolution/verification works exactly as it does for a single explicit
+    reference."""
+
+    if reference is not None and reference.all:
+        return [Reference(ordinal=index + 1) for index in range(len(last_results))]
+    if reference is not None and reference.count is not None:
+        n = max(0, min(reference.count, len(last_results)))
+        return [Reference(ordinal=index + 1) for index in range(n)]
+    return [reference]
+
+
 def _resolve_entry(
     tracer: _Tracer, reference: Reference | None, last_results: list[SearchEntry]
 ) -> SearchEntry | None:
@@ -185,8 +199,13 @@ def handle_turn(request: TurnRequest) -> TurnResult:
                              product_details=details)
 
     elif action == Action.COMPARE:
-        entries = [_resolve_entry(tracer, ref, session.last_results) for ref in extraction.references]
-        unresolved = [ref for ref, entry in zip(extraction.references, entries) if entry is None]
+        expanded_refs = [
+            expanded
+            for ref in extraction.references
+            for expanded in _expand_reference(ref, session.last_results)
+        ]
+        entries = [_resolve_entry(tracer, ref, session.last_results) for ref in expanded_refs]
+        unresolved = [ref for ref, entry in zip(expanded_refs, entries) if entry is None]
         if len(entries) < 2 or unresolved:
             return _error(
                 tracer,
@@ -196,6 +215,13 @@ def handle_turn(request: TurnRequest) -> TurnResult:
         sku_ids = [entry.sku_id for entry in entries]
         comparison = catalog.compare(sku_ids)
         tracer.record("catalog_compare", {"sku_ids": sku_ids}, comparison.model_dump(mode="json"))
+        try:
+            comparison.summary = llm.summarize_comparison(comparison)
+            tracer.record("comparison_summary", {"sku_ids": sku_ids}, {"summary": comparison.summary})
+        except LLMError as exc:
+            # Best-effort - the raw comparison rows are the authoritative
+            # answer, a summarizer failure must not fail the whole turn.
+            tracer.record("comparison_summary", {"sku_ids": sku_ids}, {"error": str(exc)}, ok=False)
         result = TurnResult(status=TurnStatus.OK, message="Here is the comparison.", action=action,
                              comparison=comparison)
 
@@ -217,17 +243,19 @@ def handle_turn(request: TurnRequest) -> TurnResult:
         resolved_operations: list[CartOperationDraft] = []
         for operation in extraction.cart_operations:
             if operation.type.value == "ADD_ITEM":
-                entry = _resolve_entry(tracer, operation.reference, session.last_results)
-                if entry is None:
-                    return _error(tracer, "Could not resolve which product to add - sku_id not found in MySQL.",
-                                   "REFERENCE_UNRESOLVED")
-                resolved_operations.append(
-                    operation.model_copy(update={
-                        "sku_id": entry.sku_id,
-                        "product_id": entry.product_id,
-                        "offer_id": entry.offer_id,
-                    })
-                )
+                for ref in _expand_reference(operation.reference, session.last_results):
+                    entry = _resolve_entry(tracer, ref, session.last_results)
+                    if entry is None:
+                        return _error(tracer, "Could not resolve which product to add - sku_id not found in MySQL.",
+                                       "REFERENCE_UNRESOLVED")
+                    resolved_operations.append(
+                        operation.model_copy(update={
+                            "reference": ref,
+                            "sku_id": entry.sku_id,
+                            "product_id": entry.product_id,
+                            "offer_id": entry.offer_id,
+                        })
+                    )
             else:
                 resolved_operations.append(operation)
 

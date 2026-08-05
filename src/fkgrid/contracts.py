@@ -60,6 +60,12 @@ class Reference(BaseModel):
 
     ordinal: int | None = None
     sku_id: str | None = None
+    # True for "all of them"/"everything" - every entry in last_results, not
+    # just one. Mutually exclusive with ordinal/sku_id in practice.
+    all: bool = False
+    # Set for "the first N" ("the first 3 results") - the first `count`
+    # entries in last_results. Mutually exclusive with ordinal/sku_id/all.
+    count: int | None = None
 
 
 class CartOperationType(str, Enum):
@@ -148,6 +154,10 @@ class ComparisonRow(BaseModel):
 
 class Comparison(BaseModel):
     rows: list[ComparisonRow] = Field(default_factory=list)
+    # Best-effort natural-language summary of the comparison rows. None if
+    # the summarizer call failed - the raw rows are still authoritative and
+    # always present regardless.
+    summary: str | None = None
 
 
 class Availability(BaseModel):

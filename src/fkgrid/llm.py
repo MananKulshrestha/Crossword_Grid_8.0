@@ -19,7 +19,7 @@ import urllib.request
 from pydantic import ValidationError
 
 from .config import LLMConfig, load_llm_config
-from .contracts import ChatTurn, QueryExtraction
+from .contracts import ChatTurn, Comparison, QueryExtraction
 
 
 @functools.lru_cache(maxsize=1)
@@ -34,7 +34,7 @@ recent conversation, then output ONLY a JSON object matching this schema:
   "action": "CHITCHAT" | "SEARCH" | "REFINE" | "PRODUCT_DETAILS" | "COMPARE" | "CHECK_AVAILABILITY" | "SHOW_CART" | "UPDATE_CART",
   "query_terms": [string],
   "constraints": [{"field": "max_price"|"min_price"|"brand"|"category"|"stock_status", "value": any}],
-  "references": [{"ordinal": int|null, "sku_id": string|null}],
+  "references": [{"ordinal": int|null, "sku_id": string|null, "all": bool, "count": int|null}],
   "cart_operations": [{"type": "ADD_ITEM"|"SET_QUANTITY"|"REMOVE_ITEM"|"CLEAR_CART", "reference": {...}|null, "cart_item_id": string|null, "quantity": int|null, "confirmation": bool}],
   "reply": string|null
 }
@@ -70,7 +70,15 @@ by 100 (e.g. "under 2000 rupees" -> {"field": "max_price", "value": 200000};
 when the shopper is narrowing an existing
 search (e.g. "cheaper ones", "only blue"). Use SEARCH for a fresh product
 query. Use references with 1-based ordinals when the shopper refers to a
-previous result ("the first one", "the second one"). If the shopper types
+previous result ("the first one", "the second one"). When the shopper says
+"all of them"/"everything"/"all the results" instead of naming specific
+ones, set that reference's "all" to true and leave ordinal/sku_id null -
+this applies to comparing all last results or adding all of them to the
+cart (one cart_operation with an "all" reference covers every entry, you
+do not need to enumerate them). When the shopper says "the first N"
+("the first 3", "the top 5 results") set that reference's "count" to N
+and leave ordinal/sku_id/all unset - same one-reference-covers-many rule,
+do not enumerate individual ordinals for it. If the shopper types
 an exact product/sku id (an alphanumeric code, e.g. "SHOE58EKXSEYAYX6"),
 put it in the reference's sku_id field verbatim instead of an ordinal -
 do this even if that sku was never shown in this conversation, it will be
@@ -139,3 +147,32 @@ def extract_query(message: str, chat_history: list[ChatTurn]) -> QueryExtraction
         return QueryExtraction.model_validate(payload)
     except ValidationError as exc:
         raise LLMError("EXTRACTION_SCHEMA_INVALID") from exc
+
+
+_SUMMARY_SYSTEM_PROMPT = """\
+You are a shopping assistant. You are given a product comparison as rows of
+{field, cells: [{sku_id, value}]}. Write a short (2-4 sentence) plain-text
+summary highlighting the key differences (price, rating, availability,
+brand) and, if one option is clearly better value, say so. Do not invent
+any fact not present in the rows. Output ONLY a JSON object:
+{"summary": string}
+"""
+
+_SUMMARY_SCHEMA = {
+    "type": "object",
+    "properties": {"summary": {"type": "string"}},
+    "required": ["summary"],
+    "additionalProperties": False,
+}
+
+
+def summarize_comparison(comparison: Comparison) -> str:
+    payload = _chat_completion(
+        _SUMMARY_SYSTEM_PROMPT,
+        {"rows": [row.model_dump(mode="json") for row in comparison.rows]},
+        _SUMMARY_SCHEMA,
+    )
+    summary = payload.get("summary")
+    if not isinstance(summary, str) or not summary.strip():
+        raise LLMError("SUMMARY_SCHEMA_INVALID")
+    return summary
