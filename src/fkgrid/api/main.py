@@ -43,6 +43,7 @@ class ModelRuntimeStatus(StrictModel):
     catalog_size: int
     catalog_seed: int
     catalog_version: str
+    catalog_mode: str
     cart_mode: str
     cart_ready: bool
     cart_error: str | None = None
@@ -224,6 +225,7 @@ def _model_status(runtime: ApiRuntime) -> ModelRuntimeStatus:
         catalog_size=runtime.catalog_size,
         catalog_seed=runtime.catalog_seed,
         catalog_version=runtime.catalog_version,
+        catalog_mode=runtime.catalog_mode,
         cart_mode=runtime.cart_mode,
         cart_ready=runtime.cart_ready,
         cart_error=runtime.cart_error,
