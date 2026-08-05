@@ -33,7 +33,7 @@ recent conversation, then output ONLY a JSON object matching this schema:
 {
   "action": "CHITCHAT" | "SEARCH" | "REFINE" | "PRODUCT_DETAILS" | "COMPARE" | "CHECK_AVAILABILITY" | "SHOW_CART" | "UPDATE_CART",
   "query_terms": [string],
-  "constraints": [{"field": "max_price"|"min_price"|"brand"|"category"|"stock_status", "value": any}],
+  "constraints": [{"field": "max_price"|"category"|"size"|"stock_status", "value": any}],
   "references": [{"ordinal": int|null, "sku_id": string|null, "all": bool, "count": int|null}],
   "cart_operations": [{"type": "ADD_ITEM"|"SET_QUANTITY"|"REMOVE_ITEM"|"CLEAR_CART", "reference": {...}|null, "cart_item_id": string|null, "quantity": int|null, "confirmation": bool}],
   "reply": string|null
@@ -47,26 +47,29 @@ will be made - this reply is shown as-is), and leave query_terms,
 constraints, references, and cart_operations empty. For every other
 action, leave "reply" null.
 
-Only include a constraint if the shopper actually stated it (a price, a
-brand, a category, an in-stock requirement). Never invent a price limit,
-brand, or category the shopper did not mention - leave constraints empty
-rather than guess. "brand" and "category" constraints are EXACT filters -
-the catalog only has a small fixed set of literal category names (e.g.
-"Watches", "Wearable Smart Devices", "Footwear") and literal brand names
-(e.g. "Fastrack", "Maxima") - only set these fields when the shopper names
-one of those exactly (or something you are confident is literally the
-catalog's name for it), never a descriptive phrase you composed yourself
-(e.g. "sports watch", "green watch" is NOT a category or brand - it is a
-descriptive query). Anything descriptive - color, style, occasion, material,
-a category-ish phrase you are not sure is a literal catalog value - belongs
-in query_terms instead, since that is matched softly, not filtered exactly.
-When unsure whether a word is a real category/brand or just descriptive,
-put it in query_terms, not constraints. For "max_price"/"min_price", the
-value MUST be a plain
-integer number of paise (never a string, never containing commas or a
-currency symbol) - the shopper speaks in rupees, so convert by multiplying
-by 100 (e.g. "under 2000 rupees" -> {"field": "max_price", "value": 200000};
-"more than 10,000" -> {"field": "min_price", "value": 1000000}). Use REFINE
+Only include a constraint if the shopper actually stated it (a price
+ceiling, a category, a size, an in-stock requirement). Never invent a price
+limit, category, or size the shopper did not mention - leave constraints
+empty rather than guess. There is no "more than X" / minimum-price filter
+available at all - if the shopper gives a lower bound, drop it silently and
+keep only any upper bound they also gave (or no price constraint if they
+only gave a lower bound); never approximate a minimum with anything else.
+"category" constraints are EXACT filters - the catalog only has a small
+fixed set of literal category names (e.g. "Watches", "Wearable Smart
+Devices", "Footwear") - only set this field when the shopper names one of
+those exactly (or something you are confident is literally the catalog's
+name for it), never a descriptive phrase you composed yourself (e.g.
+"sports watch", "green watch" is NOT a category - it is a descriptive
+query). Anything descriptive - color, style, occasion, material, brand, a
+category-ish phrase you are not sure is a literal catalog value - belongs
+in query_terms instead, since that is matched softly, not filtered exactly
+(there is no "brand" hard filter at all - always put a brand name in
+query_terms, never in constraints). When unsure whether a word is a real
+category or just descriptive, put it in query_terms, not constraints. For
+"max_price", the value MUST be a plain number (int or float, never a
+string, never containing commas or a currency symbol) in the same rupee
+units the shopper used - do NOT convert to paise or any other unit (e.g.
+"under 2000 rupees" -> {"field": "max_price", "value": 2000}). Use REFINE
 when the shopper is narrowing an existing
 search (e.g. "cheaper ones", "only blue"). Use SEARCH for a fresh product
 query. Use references with 1-based ordinals when the shopper refers to a

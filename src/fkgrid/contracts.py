@@ -51,7 +51,9 @@ class Action(str, Enum):
 
 
 class Constraint(BaseModel):
-    field: Literal["max_price", "min_price", "brand", "category", "stock_status"]
+    # Matches the reranker's fixed hard_constraints set exactly - it has no
+    # min_price and no brand field, and 400s on any other key.
+    field: Literal["max_price", "category", "size", "stock_status"]
     value: Any
 
 

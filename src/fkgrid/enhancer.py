@@ -1,7 +1,7 @@
 """Query enhancer: deterministically converts a QueryExtraction into the
 exact reranker request shape. Not an LLM call - it only copies constraints
-the extractor actually found, so it can never invent a price/brand/category
-the shopper never mentioned.
+the extractor actually found, so it can never invent a price/category the
+shopper never mentioned.
 
 The reranker endpoint takes exactly three top-level fields:
     {"soft_query_text": str, "hard_constraints": dict, "top_n": int}
@@ -12,11 +12,11 @@ from __future__ import annotations
 from .contracts import Action, QueryExtraction, RerankerRequest, SessionState
 
 _DEFAULT_TOP_N = 10
-_PRICE_FIELDS = {"max_price", "min_price"}
+_PRICE_FIELDS = {"max_price"}
 
 
 def _coerce_constraint_value(field: str, value: object) -> int | float | str | bool | None:
-    """The reranker expects max_price/min_price as a plain paise integer.
+    """The reranker expects max_price as a plain rupee number (int/float).
     A misbehaving extractor call could still hand back a string like
     "10,000" - reject rather than send something that 400s the whole turn."""
 

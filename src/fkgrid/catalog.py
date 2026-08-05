@@ -56,7 +56,8 @@ def _call_reranker(request: RerankerRequest) -> list[dict]:
         with urllib.request.urlopen(http_request, timeout=config.timeout_s) as response:
             raw = response.read()
     except urllib.error.HTTPError as exc:
-        raise RerankerError(f"RERANKER_HTTP_{exc.code}") from exc
+        detail = exc.read().decode("utf-8", errors="replace")[:500]
+        raise RerankerError(f"RERANKER_HTTP_{exc.code}:{detail}") from exc
     except urllib.error.URLError as exc:
         raise RerankerError(f"RERANKER_UNAVAILABLE:{exc.reason}") from exc
     except TimeoutError as exc:
