@@ -19,3 +19,29 @@ dependencies = [
     "sentence-transformers>=5.6.1",
     "tqdm>=4.70.0",
 ]
+
+[tool.setuptools]
+py-modules = [
+    "api_server",
+    "bm25_index",
+    "candidate",
+    "check_ingestion_status",
+    "check_storage",
+    "check_unique_docs",
+    "config",
+    "deepinfra_llm",
+    "diagnose",
+    "graph_sampling",
+    "graph_visualizer",
+    "ingest",
+    "load_documents",
+    "local_embed",
+    "main",
+    "merge",
+    "multi_ollama",
+    "query",
+    "search_catalog",
+    "semantic_search",
+    "sql_filter",
+    "web_ui",
+]

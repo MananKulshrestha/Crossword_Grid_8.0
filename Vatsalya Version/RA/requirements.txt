@@ -1,4 +1,5 @@
 lightrag-hku
+flask
 ollama
 openai
 python-dotenv
@@ -8,4 +9,5 @@ PyMySQL
 pytest
 rank_bm25
 qdrant-client
+requests
 tqdm
