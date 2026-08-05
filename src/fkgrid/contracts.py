@@ -125,11 +125,13 @@ class SearchEntry(BaseModel):
     availability_status: str | None = None
     quantity: int | None = None
     rerank_score: float | None = None
+    bm25_score: float | None = None
 
 
 class SearchResult(BaseModel):
     entries: list[SearchEntry] = Field(default_factory=list)
     result_set_id: str | None = None
+    search_mode: Literal["normal", "fast"] = "normal"
     # Every sku_id the reranker returned, split by whether MySQL actually
     # has it. hallucinated_sku_ids exist only in the reranker's output, not
     # the catalog - the CLI prints these in red.

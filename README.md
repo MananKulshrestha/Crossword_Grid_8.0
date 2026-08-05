@@ -8,6 +8,14 @@ research-provider, Qdrant, LightRAG, and Graph RAG owners finish their adapters.
 
 ## What is implemented
 
+Search supports two backend modes. `FKGRID_SEARCH_MODE=normal` (the default)
+keeps the existing RunPod reranker flow. `FKGRID_SEARCH_MODE=fast` branches
+after intent extraction and deterministic query enhancement, then uses only
+read-only SQL hard filters, in-process BM25 over the existing product title and
+description columns, and deterministic ranking. It does not call RunPod for
+retrieval, create embeddings, rerank, or change database objects/data. The
+fast response includes `search_mode: "fast"` and per-entry `bm25_score`.
+
 - strict Pydantic contracts for the turn state machine, compatibility tuple,
   model requests/responses, intent/delta output, evidence, exact product
   bindings, cart operations, research claims, suggestions, traces, and terminal

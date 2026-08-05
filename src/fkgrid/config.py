@@ -34,6 +34,25 @@ class ConfigError(RuntimeError):
     """Raised when required configuration is missing. No silent defaults for secrets."""
 
 
+def load_search_mode() -> str:
+    """Return the shopper search mode without changing any external state.
+
+    ``normal`` preserves the existing RunPod reranker path. ``fast`` is the
+    read-only SQL-hard-filter/BM25 path. The boolean alias is accepted for
+    local deployments that want a simple feature flag; the explicit mode wins
+    when both variables are present.
+    """
+
+    configured = os.environ.get("FKGRID_SEARCH_MODE")
+    if configured is None:
+        fast_flag = os.environ.get("FKGRID_FAST_MODE", "false").strip().lower()
+        configured = "fast" if fast_flag in {"1", "true", "yes", "on"} else "normal"
+    mode = configured.strip().lower()
+    if mode not in {"normal", "fast"}:
+        raise ConfigError("FKGRID_SEARCH_MODE must be 'normal' or 'fast'")
+    return mode
+
+
 def load_mysql_config() -> MySQLConfig:
     return MySQLConfig(
         host=os.environ.get("FKGRID_MYSQL_HOST", "213.173.105.95"),

@@ -20,6 +20,7 @@ import uuid
 
 from . import catalog, cart, enhancer, followups, llm, memory
 from .catalog import CatalogError, RerankerError
+from .config import ConfigError, load_search_mode
 from .contracts import (
     Action,
     CartOperationDraft,
@@ -164,14 +165,30 @@ def handle_turn(request: TurnRequest) -> TurnResult:
 
     if action in (Action.SEARCH, Action.REFINE):
         try:
-            search_result = catalog.search(reranker_request)
+            search_mode = load_search_mode()
+            if search_mode == "fast":
+                search_result = catalog.fast_search(reranker_request)
+                tracer.record(
+                    "fast_sql_bm25_search",
+                    reranker_request.model_dump(mode="json"),
+                    search_result.model_dump(mode="json"),
+                )
+            else:
+                search_result = catalog.search(reranker_request)
+                tracer.record(
+                    "reranker_search",
+                    reranker_request.model_dump(mode="json"),
+                    search_result.model_dump(mode="json"),
+                )
         except RerankerError as exc:
             tracer.record("reranker_search", reranker_request.model_dump(mode="json"), {"error": str(exc)}, ok=False)
             return _error(tracer, "The search service is unavailable.", str(exc))
         except CatalogError as exc:
-            tracer.record("reranker_search", reranker_request.model_dump(mode="json"), {"error": str(exc)}, ok=False)
+            tracer.record("catalog_search", reranker_request.model_dump(mode="json"), {"error": str(exc)}, ok=False)
             return _error(tracer, "The catalog is unavailable.", str(exc))
-        tracer.record("reranker_search", reranker_request.model_dump(mode="json"), search_result.model_dump(mode="json"))
+        except ConfigError as exc:
+            tracer.record("search_mode", {}, {"error": str(exc)}, ok=False)
+            return _error(tracer, "Search mode configuration is invalid.", str(exc))
         # Every sku_id the reranker returned, checked against MySQL directly -
         # a dedicated stage so it's obvious in the trace/CLI which ones were
         # real catalog rows and which were reranker hallucinations.
