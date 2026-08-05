@@ -1,0 +1,21 @@
+[project]
+name = "ra"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "einops>=0.8.2",
+    "flask>=3.0.0",
+    "lightrag-hku>=1.5.5",
+    "ollama>=0.6.2",
+    "openai>=2.53.0",
+    "pymysql>=1.2.0",
+    "python-dotenv>=1.0.0",
+    "pytest>=9.1.1",
+    "qdrant-client>=1.18.0",
+    "rank-bm25>=0.2.2",
+    "requests>=2.34.2",
+    "sentence-transformers>=5.6.1",
+    "tqdm>=4.70.0",
+]

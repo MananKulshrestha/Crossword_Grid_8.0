@@ -1,0 +1,18 @@
+# Ollama servers used for LightRAG entity/relation extraction
+# (ingest.py -- llm_model_func only, NOT embedding, which still uses the
+# single OLLAMA_HOST in config.py). One URL per line; '#' comments and
+# blank lines are ignored. Requests round-robin across every URL listed
+# here -- see multi_ollama.py and README.md's multi-server setup section.
+#
+# Each URL should be its own `ollama serve` process, ideally pinned to a
+# distinct GPU (or GPU pair) via CUDA_VISIBLE_DEVICES so they don't
+# contend for the same VRAM, each started with its own OLLAMA_NUM_PARALLEL.
+#
+# Single-server default -- matches OLLAMA_HOST in config.py. Add more
+# lines (e.g. a second `ollama serve` on another port/GPU pair, or another
+# node's forwarded port) to actually parallelize extraction; no code
+# changes needed, ingest.py re-reads this file on every run.
+#http://127.0.0.1:11435
+#http://127.0.0.1:11436
+http://127.0.0.1:11437
+http://127.0.0.1:11438
