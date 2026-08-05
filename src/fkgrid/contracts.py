@@ -94,6 +94,10 @@ class QueryExtraction(BaseModel):
     action: Action
     query_terms: list[str] = Field(default_factory=list)
     constraints: list[Constraint] = Field(default_factory=list)
+    # Field names to remove from the CARRIED-FORWARD hard_constraints on a
+    # REFINE turn (e.g. shopper said "any size" -> clear_constraints=["size"]).
+    # Only meaningful on REFINE; ignored otherwise.
+    clear_constraints: list[str] = Field(default_factory=list)
     references: list[Reference] = Field(default_factory=list)
     cart_operations: list[CartOperationDraft] = Field(default_factory=list)
     # Only populated when action is CHITCHAT - the extractor's direct reply

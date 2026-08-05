@@ -36,6 +36,8 @@ def build_reranker_request(
 
     if extraction.action == Action.REFINE and session_state.last_reranker_request is not None:
         hard_constraints.update(session_state.last_reranker_request.hard_constraints)
+        for field in extraction.clear_constraints:
+            hard_constraints.pop(field, None)
 
     for constraint in extraction.constraints:
         value = _coerce_constraint_value(constraint.field, constraint.value)

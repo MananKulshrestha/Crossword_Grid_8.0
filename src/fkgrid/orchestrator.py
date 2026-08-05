@@ -172,6 +172,40 @@ def handle_turn(request: TurnRequest) -> TurnResult:
             tracer.record("reranker_search", reranker_request.model_dump(mode="json"), {"error": str(exc)}, ok=False)
             return _error(tracer, "The catalog is unavailable.", str(exc))
         tracer.record("reranker_search", reranker_request.model_dump(mode="json"), search_result.model_dump(mode="json"))
+
+        if search_result.entries:
+            candidates = [
+                {
+                    "sku_id": entry.sku_id,
+                    "title": entry.title,
+                    "brand": entry.brand,
+                    "category": entry.category,
+                }
+                for entry in search_result.entries
+            ]
+            try:
+                keep_ids = set(
+                    llm.filter_relevant_sku_ids(
+                        reranker_request.soft_query_text, reranker_request.hard_constraints, candidates
+                    )
+                )
+                dropped = [c["sku_id"] for c in candidates if c["sku_id"] not in keep_ids]
+                search_result.entries = [entry for entry in search_result.entries if entry.sku_id in keep_ids]
+                tracer.record(
+                    "relevance_filter",
+                    {"soft_query_text": reranker_request.soft_query_text, "candidate_sku_ids": [c["sku_id"] for c in candidates]},
+                    {"kept_sku_ids": [entry.sku_id for entry in search_result.entries], "dropped_sku_ids": dropped},
+                )
+            except LLMError as exc:
+                # Best-effort - a filter failure must not fail the whole search,
+                # keep every reranker result unfiltered.
+                tracer.record(
+                    "relevance_filter",
+                    {"soft_query_text": reranker_request.soft_query_text, "candidate_sku_ids": [c["sku_id"] for c in candidates]},
+                    {"error": str(exc)},
+                    ok=False,
+                )
+
         # Every sku_id the reranker returned, checked against MySQL directly -
         # a dedicated stage so it's obvious in the trace/CLI which ones were
         # real catalog rows and which were reranker hallucinations.

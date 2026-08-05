@@ -34,6 +34,7 @@ recent conversation, then output ONLY a JSON object matching this schema:
   "action": "CHITCHAT" | "SEARCH" | "REFINE" | "PRODUCT_DETAILS" | "COMPARE" | "CHECK_AVAILABILITY" | "SHOW_CART" | "UPDATE_CART",
   "query_terms": [string],
   "constraints": [{"field": "max_price"|"category"|"size"|"stock_status", "value": any}],
+  "clear_constraints": [string],
   "references": [{"ordinal": int|null, "sku_id": string|null, "all": bool, "count": int|null}],
   "cart_operations": [{"type": "ADD_ITEM"|"SET_QUANTITY"|"REMOVE_ITEM"|"CLEAR_CART", "reference": {...}|null, "cart_item_id": string|null, "quantity": int|null, "confirmation": bool}],
   "reply": string|null
@@ -72,7 +73,12 @@ units the shopper used - do NOT convert to paise or any other unit (e.g.
 "under 2000 rupees" -> {"field": "max_price", "value": 2000}). Use REFINE
 when the shopper is narrowing an existing
 search (e.g. "cheaper ones", "only blue"). Use SEARCH for a fresh product
-query. Use references with 1-based ordinals when the shopper refers to a
+query. A REFINE turn keeps every hard constraint from the previous search
+unless the shopper explicitly lifts one - if they say "any size"/"any
+price"/"any brand"/"no price limit" etc, name that field in
+"clear_constraints" (e.g. ["size"]) so it stops being applied; do not also
+put a new constraint for that field. Leave clear_constraints empty on
+every other turn. Use references with 1-based ordinals when the shopper refers to a
 previous result ("the first one", "the second one"). When the shopper says
 "all of them"/"everything"/"all the results" instead of naming specific
 ones, set that reference's "all" to true and leave ordinal/sku_id null -
@@ -167,6 +173,57 @@ _SUMMARY_SCHEMA = {
     "required": ["summary"],
     "additionalProperties": False,
 }
+
+
+_RELEVANCE_SYSTEM_PROMPT = """\
+You are a shopping search result filter. The reranker already applied the
+exact hard filters (price/category/size/stock) and did a soft semantic
+match on the soft_query_text, but it sometimes returns clearly wrong items
+anyway. Given the soft_query_text and a list of candidate products (each
+with sku_id, title, brand, category), decide which ones are genuinely
+plausible matches for what the shopper asked for and which are obviously
+wrong (e.g. wrong product type entirely, or a described attribute like a
+color/material the title contradicts).
+
+Be conservative: only drop an item if it is clearly, obviously wrong - not
+merely a weaker or less-ideal match. If you are unsure whether it matches,
+keep it. Do not drop items just because a soft attribute (like color) isn't
+mentioned in the title at all and can't be confirmed either way - only drop
+when the title/category actively contradicts the request. Never re-check
+the hard constraints (price/category/size/stock) yourself - those were
+already applied exactly; judge only the soft/semantic match.
+
+Output ONLY a JSON object: {"keep_sku_ids": [string]} listing the sku_ids
+to keep, in the same order given.
+"""
+
+_RELEVANCE_SCHEMA = {
+    "type": "object",
+    "properties": {"keep_sku_ids": {"type": "array", "items": {"type": "string"}}},
+    "required": ["keep_sku_ids"],
+    "additionalProperties": False,
+}
+
+
+def filter_relevant_sku_ids(
+    soft_query_text: str, hard_constraints: dict, candidates: list[dict]
+) -> list[str]:
+    """Best-effort semantic relevance filter over reranker results. Callers
+    should treat LLMError as non-fatal and keep the unfiltered candidates."""
+
+    payload = _chat_completion(
+        _RELEVANCE_SYSTEM_PROMPT,
+        {
+            "soft_query_text": soft_query_text,
+            "hard_constraints": hard_constraints,
+            "candidates": candidates,
+        },
+        _RELEVANCE_SCHEMA,
+    )
+    keep = payload.get("keep_sku_ids")
+    if not isinstance(keep, list) or not all(isinstance(sku_id, str) for sku_id in keep):
+        raise LLMError("RELEVANCE_SCHEMA_INVALID")
+    return keep
 
 
 def summarize_comparison(comparison: Comparison) -> str:
