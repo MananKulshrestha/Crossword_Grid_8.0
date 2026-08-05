@@ -84,6 +84,9 @@ DB_PORT = int(os.environ.get("FLIPKART_DB_PORT", "3307"))
 DB_USER = os.environ.get("FLIPKART_DB_USER", "flipkart_user")
 DB_PASSWORD = os.environ.get("FLIPKART_DB_PASSWORD", "flipkart_pass")
 DB_NAME = os.environ.get("FLIPKART_DB_NAME", "flipkart")
+DB_CONNECT_TIMEOUT = int(os.environ.get("FLIPKART_DB_CONNECT_TIMEOUT_SECONDS", "5"))
+DB_READ_TIMEOUT = int(os.environ.get("FLIPKART_DB_READ_TIMEOUT_SECONDS", "5"))
+DB_WRITE_TIMEOUT = int(os.environ.get("FLIPKART_DB_WRITE_TIMEOUT_SECONDS", "5"))
 DATABASE_CART_CATALOG_VERSION = "flipkart_v1"
 
 
@@ -113,9 +116,9 @@ def database_cart_readiness(catalog_version: str) -> str | None:
             user=DB_USER,
             password=DB_PASSWORD,
             database=DB_NAME,
-            connect_timeout=1,
-            read_timeout=1,
-            write_timeout=1,
+            connect_timeout=DB_CONNECT_TIMEOUT,
+            read_timeout=DB_READ_TIMEOUT,
+            write_timeout=DB_WRITE_TIMEOUT,
             cursorclass=pymysql.cursors.DictCursor,
         )
         with conn.cursor() as cursor:

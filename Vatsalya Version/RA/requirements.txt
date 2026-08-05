@@ -1,0 +1,13 @@
+lightrag-hku
+flask
+ollama
+openai
+python-dotenv
+sentence-transformers
+einops
+PyMySQL
+pytest
+rank_bm25
+qdrant-client
+requests
+tqdm
