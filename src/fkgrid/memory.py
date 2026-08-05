@@ -30,11 +30,30 @@ def get_session(session_id: str) -> SessionState | None:
         return _sessions.get(session_id)
 
 
-def append_turn(session_id: str, role: Role, content: str) -> None:
+def append_turn(
+    session_id: str,
+    role: Role,
+    content: str,
+    *,
+    language_code: str = "en-IN",
+    canonical_content: str | None = None,
+) -> None:
     with _lock:
         state = _sessions[session_id]
-        state.chat_history.append(ChatTurn(role=role, content=content))
+        state.chat_history.append(
+            ChatTurn(
+                role=role,
+                content=content,
+                language_code=language_code,
+                canonical_content=canonical_content,
+            )
+        )
         state.chat_history = state.chat_history[-_MAX_HISTORY_TURNS:]
+
+
+def set_language(session_id: str, language_code: str) -> None:
+    with _lock:
+        _sessions[session_id].language_code = language_code
 
 
 def set_last_results(session_id: str, entries: list[SearchEntry], reranker_request) -> None:

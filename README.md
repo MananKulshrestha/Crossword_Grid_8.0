@@ -203,3 +203,28 @@ comparison, availability, and cart language while asking Whisper to return
 only the shopper's spoken words. Configure it with the `FKGRID_SPEECH_*`
 values in `.env.example`; set `FKGRID_SPEECH_MODE=disabled` to hide the
 provider path while keeping text chat available.
+
+## Multilingual chat and generated speech
+
+Set `FKGRID_SARVAM_API_KEY` in the process environment to enable Sarvam's
+language boundary. Each incoming text turn is detected with Sarvam, translated
+to English for intent extraction and catalog search, and stored with its
+source BCP-47 language code. Generated assistant prose is translated back to
+that language before it is returned in `TurnResult.message`; the session also
+exposes its latest `language_code`. English text continues without a Sarvam
+call when the key is not configured, while non-English text fails explicitly
+instead of being guessed.
+
+The FastAPI endpoint `POST /v1/speech/synthesize` accepts the generated text
+and its `language_code`, calls Sarvam Bulbul, and returns decoded `audio/wav`
+bytes. Example request:
+
+```json
+{
+  "text": "यह आपके लिए सबसे अच्छा विकल्प है।",
+  "language_code": "hi-IN"
+}
+```
+
+Configure the optional provider settings with `FKGRID_SARVAM_*` values in
+`.env.example`. Keys are never stored in this repository.

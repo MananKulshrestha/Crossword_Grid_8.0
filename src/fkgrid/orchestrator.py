@@ -38,18 +38,94 @@ from .contracts import (
     UpdateCartRequest,
 )
 from .llm import LLMError
+from .sarvam import (
+    ENGLISH_LANGUAGE_CODE,
+    SarvamClient,
+    SarvamError,
+    TranslationResult,
+    default_client,
+    is_english_language,
+    is_probably_english,
+)
 
 
 class _Tracer:
     def __init__(self) -> None:
         self.steps: list[TraceStep] = []
+        self.language_code = ENGLISH_LANGUAGE_CODE
+        self.sarvam_client: SarvamClient | None = None
 
     def record(self, stage: str, input_: dict, output: dict, ok: bool = True) -> None:
         self.steps.append(TraceStep(stage=stage, input=input_, output=output, ok=ok))
 
+    def localize(self, text: str, *, strict: bool = False) -> str:
+        if not text or is_english_language(self.language_code):
+            return text
+        if self.sarvam_client is None:
+            return text
+        try:
+            return self.sarvam_client.translate(
+                text,
+                source_language_code=ENGLISH_LANGUAGE_CODE,
+                target_language_code=self.language_code,
+            ).text
+        except SarvamError:
+            # A provider failure must not leak an exception or credentials in
+            # a trace. The caller still receives the safe error code. A
+            # successful non-English turn uses strict mode so English is
+            # never silently returned as the localized answer.
+            if strict:
+                raise
+            return text
+
 
 def _error(tracer: _Tracer, message: str, code: str) -> TurnResult:
-    return TurnResult(status=TurnStatus.ERROR, message=message, error_code=code, trace=tracer.steps)
+    return TurnResult(
+        status=TurnStatus.ERROR,
+        message=tracer.localize(message),
+        language_code=tracer.language_code,
+        error_code=code,
+        trace=tracer.steps,
+    )
+
+
+def _translate_input(message: str, client: SarvamClient | None) -> TranslationResult:
+    if client is None:
+        if not is_probably_english(message):
+            raise SarvamError("SARVAM_API_KEY_REQUIRED")
+        return TranslationResult(
+            text=message.strip(),
+            source_language_code=ENGLISH_LANGUAGE_CODE,
+            target_language_code=ENGLISH_LANGUAGE_CODE,
+        )
+    return client.translate(
+        message,
+        source_language_code="auto",
+        target_language_code=ENGLISH_LANGUAGE_CODE,
+    )
+
+
+def _localize_result(tracer: _Tracer, result: TurnResult) -> TurnResult:
+    """Translate generated prose while leaving catalog facts untouched."""
+
+    if is_english_language(tracer.language_code):
+        result.language_code = tracer.language_code
+        return result
+    result.message = tracer.localize(result.message, strict=True)
+    for followup in result.followups:
+        followup.label = tracer.localize(followup.label, strict=True)
+    if result.comparison is not None and result.comparison.summary:
+        result.comparison.summary = tracer.localize(result.comparison.summary, strict=True)
+    if result.multi_product_result is not None:
+        if result.multi_product_result.analysis_summary:
+            result.multi_product_result.analysis_summary = tracer.localize(
+                result.multi_product_result.analysis_summary,
+                strict=True,
+            )
+        for recommendation in result.multi_product_result.recommendations:
+            recommendation.rationale = tracer.localize(recommendation.rationale, strict=True)
+    result.language_code = tracer.language_code
+    return result
 
 
 class BundleIntentError(ValueError):
@@ -201,45 +277,107 @@ def _resolve_entry(
     return None
 
 
-def handle_turn(request: TurnRequest) -> TurnResult:
+def handle_turn(
+    request: TurnRequest,
+    *,
+    sarvam_client: SarvamClient | None = None,
+) -> TurnResult:
     tracer = _Tracer()
+
+    client = default_client() if sarvam_client is None else sarvam_client
+    try:
+        translated_input = _translate_input(request.message, client)
+    except SarvamError as exc:
+        tracer.record(
+            "sarvam_translate_input",
+            {"text_length": len(request.message), "source_language_code": "auto"},
+            {"error": exc.code},
+            ok=False,
+        )
+        return _error(
+            tracer,
+            "This language is temporarily unavailable. Please try again in English.",
+            exc.code,
+        )
+
+    tracer.sarvam_client = client
+    tracer.language_code = translated_input.source_language_code
+    tracer.record(
+        "sarvam_translate_input",
+        {"text_length": len(request.message), "source_language_code": "auto"},
+        {
+            "source_language_code": translated_input.source_language_code,
+            "target_language_code": translated_input.target_language_code,
+            "translated": translated_input.text != request.message.strip(),
+        },
+    )
 
     session = memory.get_session(request.session_id)
     if session is None:
         session = memory.create_session(request.session_id)
 
-    memory.append_turn(request.session_id, Role.USER, request.message)
+    memory.set_language(request.session_id, translated_input.source_language_code)
+    memory.append_turn(
+        request.session_id,
+        Role.USER,
+        request.message,
+        language_code=translated_input.source_language_code,
+        canonical_content=translated_input.text,
+    )
+    session = memory.get_session(request.session_id)
 
-    history_in = {"message": request.message, "history_len": len(session.chat_history)}
+    history_in = {
+        "message": translated_input.text,
+        "language_code": translated_input.source_language_code,
+        "history_len": len(session.chat_history),
+    }
     try:
-        extraction = llm.extract_query(request.message, session.chat_history)
+        extraction = llm.extract_query(translated_input.text, session.chat_history)
     except LLMError as exc:
         tracer.record("query_extractor", history_in, {"error": str(exc)}, ok=False)
         return _error(tracer, "Could not interpret the message.", str(exc))
     tracer.record("query_extractor", history_in, extraction.model_dump(mode="json"))
 
     if extraction.action == Action.CHITCHAT:
+        canonical_message = extraction.reply or "Hi! How can I help you shop today?"
         result = TurnResult(
             status=TurnStatus.OK,
-            message=extraction.reply or "Hi! How can I help you shop today?",
+            message=canonical_message,
+            language_code=tracer.language_code,
             action=Action.CHITCHAT,
         )
         session = memory.get_session(request.session_id)
         result.followups = followups.build(result, session)
         tracer.record("followups", {"action": Action.CHITCHAT.value},
                        {"followups": [f.model_dump(mode="json") for f in result.followups]})
-        memory.append_turn(request.session_id, Role.ASSISTANT, result.message)
+        try:
+            result = _localize_result(tracer, result)
+        except SarvamError as exc:
+            tracer.record(
+                "sarvam_translate_output",
+                {"source_language_code": ENGLISH_LANGUAGE_CODE},
+                {"error": exc.code},
+                ok=False,
+            )
+            return _error(tracer, "Could not translate the response.", exc.code)
+        memory.append_turn(
+            request.session_id,
+            Role.ASSISTANT,
+            result.message,
+            language_code=tracer.language_code,
+            canonical_content=canonical_message,
+        )
         result.trace = tracer.steps
         return result
 
     enhance_in = {
-        "message": request.message,
+        "message": translated_input.text,
         "extraction": extraction.model_dump(mode="json"),
         "prior_reranker_request": (
             session.last_reranker_request.model_dump(mode="json") if session.last_reranker_request else None
         ),
     }
-    reranker_request = enhancer.build_reranker_request(request.message, extraction, session)
+    reranker_request = enhancer.build_reranker_request(translated_input.text, extraction, session)
     tracer.record("query_enhancer", enhance_in, reranker_request.model_dump(mode="json"))
 
     action = extraction.action
@@ -483,6 +621,23 @@ def handle_turn(request: TurnRequest) -> TurnResult:
     session = memory.get_session(request.session_id)
     result.followups = followups.build(result, session)
     tracer.record("followups", {"action": action.value}, {"followups": [f.model_dump(mode="json") for f in result.followups]})
-    memory.append_turn(request.session_id, Role.ASSISTANT, result.message)
+    canonical_message = result.message
+    try:
+        result = _localize_result(tracer, result)
+    except SarvamError as exc:
+        tracer.record(
+            "sarvam_translate_output",
+            {"source_language_code": ENGLISH_LANGUAGE_CODE},
+            {"error": exc.code},
+            ok=False,
+        )
+        return _error(tracer, "Could not translate the response.", exc.code)
+    memory.append_turn(
+        request.session_id,
+        Role.ASSISTANT,
+        result.message,
+        language_code=tracer.language_code,
+        canonical_content=canonical_message,
+    )
     result.trace = tracer.steps
     return result

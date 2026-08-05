@@ -31,6 +31,10 @@ class Role(str, Enum):
 class ChatTurn(BaseModel):
     role: Role
     content: str
+    language_code: str = "en-IN"
+    # English text used for the internal extractor/retrieval path. The
+    # user-facing content remains in the language the shopper used.
+    canonical_content: str | None = None
     created_at: datetime = Field(default_factory=_now)
 
 
@@ -267,6 +271,7 @@ class FollowUpSuggestion(BaseModel):
 
 class SessionState(BaseModel):
     session_id: str
+    language_code: str = "en-IN"
     chat_history: list[ChatTurn] = Field(default_factory=list)
     last_results: list[SearchEntry] = Field(default_factory=list)
     last_reranker_request: RerankerRequest | None = None
@@ -280,7 +285,7 @@ class SessionState(BaseModel):
 
 class TurnRequest(BaseModel):
     session_id: str
-    message: str
+    message: str = Field(min_length=1, max_length=2_000)
 
 
 class TurnStatus(str, Enum):
@@ -300,6 +305,7 @@ class TraceStep(BaseModel):
 class TurnResult(BaseModel):
     status: TurnStatus
     message: str
+    language_code: str = "en-IN"
     action: Action | None = None
     search_result: SearchResult | None = None
     multi_product_result: MultiProductResult | None = None

@@ -137,7 +137,13 @@ def _chat_completion(system_prompt: str, user_payload: dict, json_schema: dict) 
 
 
 def extract_query(message: str, chat_history: list[ChatTurn]) -> QueryExtraction:
-    recent = [{"role": turn.role.value, "content": turn.content} for turn in chat_history[-10:]]
+    recent = [
+        {
+            "role": turn.role.value,
+            "content": turn.canonical_content or turn.content,
+        }
+        for turn in chat_history[-10:]
+    ]
     payload = _chat_completion(
         _EXTRACTION_SYSTEM_PROMPT,
         {"message": message, "history": recent},
