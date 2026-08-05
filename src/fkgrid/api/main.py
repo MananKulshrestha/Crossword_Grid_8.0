@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import unicodedata
 import uuid
 from typing import Literal
@@ -9,6 +10,7 @@ from typing import Literal
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.encoders import jsonable_encoder
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
@@ -716,6 +718,21 @@ def create_app(runtime: ApiRuntime | None = None) -> FastAPI:
             "orchestrator. Free-text turns use the configured Gemma 4 26B "
             "adapter by default; typed actions retain their model-free paths."
         ),
+    )
+    cors_origins = [
+        origin.strip()
+        for origin in os.environ.get(
+            "FKGRID_CORS_ORIGINS",
+            "http://127.0.0.1:5173,http://localhost:5173",
+        ).split(",")
+        if origin.strip()
+    ]
+    application.add_middleware(
+        CORSMiddleware,
+        allow_origins=cors_origins,
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
     )
     application.state.runtime = api_runtime
 
