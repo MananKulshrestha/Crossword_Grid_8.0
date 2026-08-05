@@ -8,6 +8,45 @@ research-provider, Qdrant, LightRAG, and Graph RAG owners finish their adapters.
 
 ## What is implemented
 
+Search supports two backend modes. The easy testing toggle is
+`FKGRID_FAST_MODE=false` (the default); set it to `true` to bypass the existing
+RunPod reranker flow. Fast mode branches after intent extraction and
+deterministic query enhancement, then uses only read-only SQL hard filters,
+in-process BM25 over the existing product title and description columns, and
+deterministic ranking. It does not call RunPod for retrieval, create
+embeddings, rerank, or change database objects/data. The fast response
+includes `search_mode: "fast"` and per-entry `bm25_score`.
+
+The branch also supports a shared-budget bundle intent. When extraction sets
+`multi_product_budget.enabled` for a request such as “computer, mouse, and
+keyboard for 10,000 rupees total”, the orchestrator skips the normal search
+mode decision and uses the fast path only. It applies the shared budget as a
+hard per-candidate ceiling, retrieves and deterministically ranks up to
+`FKGRID_BUNDLE_CANDIDATE_CAP` candidates per item, then sends those candidates
+to Gemma for 2 or 3 complete sets. The server recomputes every returned total
+from canonical SQL rows and rejects unknown, incomplete, duplicate, or
+over-budget model selections. The default cap is 25, so three item types send
+at most 75 products to Gemma. Deterministic top-25 selection is used so tests
+and repeated requests are reproducible.
+
+The catalog stores INR paise. INR bundle budgets are emitted as
+`total_budget_paise`; a non-INR amount remains explicit in the intent and is
+rejected unless its conversion is configured. For a USD test amount, set an
+explicit local conversion such as `$env:FKGRID_BUNDLE_USD_TO_INR = "85"` before
+starting the backend. This conversion is configuration, not a live FX lookup.
+
+For PowerShell testing:
+
+```powershell
+$env:FKGRID_FAST_MODE = "true"
+$env:PYTHONPATH = "src"
+uvicorn fkgrid.api:app --host 127.0.0.1 --port 8000
+```
+
+Set `$env:FKGRID_FAST_MODE = "false"` and restart the backend to return to
+normal mode. `FKGRID_SEARCH_MODE=normal|fast` remains supported only as a
+fallback when `FKGRID_FAST_MODE` is not set.
+
 - strict Pydantic contracts for the turn state machine, compatibility tuple,
   model requests/responses, intent/delta output, evidence, exact product
   bindings, cart operations, research claims, suggestions, traces, and terminal

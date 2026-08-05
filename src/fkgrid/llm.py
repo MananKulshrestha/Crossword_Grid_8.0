@@ -16,10 +16,10 @@ import json
 import urllib.error
 import urllib.request
 
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from .config import LLMConfig, load_llm_config
-from .contracts import ChatTurn, Comparison, QueryExtraction
+from .contracts import ChatTurn, Comparison, MultiProductCandidateGroup, QueryExtraction
 
 
 @functools.lru_cache(maxsize=1)
@@ -37,6 +37,7 @@ recent conversation, then output ONLY a JSON object matching this schema:
   "clear_constraints": [string],
   "references": [{"ordinal": int|null, "sku_id": string|null, "all": bool, "count": int|null}],
   "cart_operations": [{"type": "ADD_ITEM"|"SET_QUANTITY"|"REMOVE_ITEM"|"CLEAR_CART", "reference": {...}|null, "cart_item_id": string|null, "quantity": int|null, "confirmation": bool}],
+  "multi_product_budget": {"enabled": bool, "item_queries": [string], "total_budget_paise": int|null, "budget_amount": number|null, "budget_currency": string|null},
   "reply": string|null
 }
 
@@ -62,6 +63,14 @@ RULES
   an exact product code even if never shown before; "all": true for
   "all of them"/"everything" (one reference covers every result); "count": N
   for "the first N" (one reference covers the first N, don't enumerate).
+
+- multi_product_budget: set enabled=true only when the shopper asks for two
+  or more different product types with one shared total budget. Put one
+  concise required product query per type in item_queries. For INR, put the
+  amount in total_budget_paise. For another currency such as USD, preserve
+  the amount and currency in budget_amount/budget_currency and leave
+  total_budget_paise null; never invent an exchange rate. Keep generic
+  constraints empty unless the shopper also states a separate exact filter.
 
 EXAMPLES (previous soft_query_text in parens where relevant)
 
@@ -138,6 +147,77 @@ def extract_query(message: str, chat_history: list[ChatTurn]) -> QueryExtraction
         return QueryExtraction.model_validate(payload)
     except ValidationError as exc:
         raise LLMError("EXTRACTION_SCHEMA_INVALID") from exc
+
+
+class BundleRecommendationDraft(BaseModel):
+    selections: dict[str, str]
+    rationale: str
+
+
+class BundleAnalysisDraft(BaseModel):
+    recommendations: list[BundleRecommendationDraft]
+    summary: str
+
+
+_BUNDLE_ANALYSIS_SYSTEM_PROMPT = """\
+You are a grounded shopping bundle analyst. Choose the best 2 or 3 complete
+sets from the supplied candidate products. Each set must select exactly one
+candidate for every required item query, must stay within the shared budget,
+and must use only the supplied sku_id values. Compare the supplied prices,
+ratings, availability, titles, descriptions, and variant labels. The
+catalogue rows are authoritative: do not invent specifications or IDs.
+Return only this JSON shape:
+{
+  "recommendations": [
+    {"selections": {"item query": "sku_id"}, "rationale": "short explanation"}
+  ],
+  "summary": "short overall explanation"
+}
+Return exactly 2 or 3 recommendations. Do not include totals; the server
+computes totals from the canonical catalogue rows.
+"""
+
+
+def analyze_multi_product_sets(
+    candidate_groups: list[MultiProductCandidateGroup], budget_paise: int
+) -> BundleAnalysisDraft:
+    payload = {
+        "budget_paise": budget_paise,
+        "candidate_groups": [group.model_dump(mode="json") for group in candidate_groups],
+    }
+    parsed = _chat_completion(
+        _BUNDLE_ANALYSIS_SYSTEM_PROMPT,
+        payload,
+        BundleAnalysisDraft.model_json_schema(),
+    )
+    try:
+        draft = BundleAnalysisDraft.model_validate(parsed)
+    except ValidationError as exc:
+        raise LLMError("BUNDLE_ANALYSIS_SCHEMA_INVALID") from exc
+
+    if len(draft.recommendations) not in (2, 3):
+        raise LLMError("BUNDLE_ANALYSIS_COUNT_INVALID")
+
+    expected_queries = [group.item_query for group in candidate_groups]
+    candidate_by_query = {
+        group.item_query: {entry.sku_id: entry for entry in group.candidates}
+        for group in candidate_groups
+    }
+    for recommendation in draft.recommendations:
+        if set(recommendation.selections) != set(expected_queries):
+            raise LLMError("BUNDLE_ANALYSIS_ITEMS_INVALID")
+        selected_skus = list(recommendation.selections.values())
+        if len(set(selected_skus)) != len(selected_skus):
+            raise LLMError("BUNDLE_ANALYSIS_DUPLICATE_SKU")
+        total = 0
+        for item_query in expected_queries:
+            entry = candidate_by_query[item_query].get(recommendation.selections[item_query])
+            if entry is None or entry.price_paise is None:
+                raise LLMError("BUNDLE_ANALYSIS_CANDIDATE_INVALID")
+            total += entry.price_paise
+        if total > budget_paise:
+            raise LLMError("BUNDLE_ANALYSIS_OVER_BUDGET")
+    return draft
 
 
 _SUMMARY_SYSTEM_PROMPT = """\

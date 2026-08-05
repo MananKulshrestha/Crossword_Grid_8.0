@@ -90,6 +90,18 @@ class CartOperationDraft(BaseModel):
     offer_id: str | None = None
 
 
+class MultiProductBudgetIntent(BaseModel):
+    """Explicit extraction signal for a shared-budget product bundle."""
+
+    enabled: bool = False
+    item_queries: list[str] = Field(default_factory=list)
+    # INR inputs are normalized by the extractor to paise. Other currencies
+    # remain explicit and are never silently converted by the workflow.
+    total_budget_paise: int | None = None
+    budget_amount: float | None = None
+    budget_currency: str | None = None
+
+
 class QueryExtraction(BaseModel):
     action: Action
     query_terms: list[str] = Field(default_factory=list)
@@ -100,6 +112,7 @@ class QueryExtraction(BaseModel):
     clear_constraints: list[str] = Field(default_factory=list)
     references: list[Reference] = Field(default_factory=list)
     cart_operations: list[CartOperationDraft] = Field(default_factory=list)
+    multi_product_budget: MultiProductBudgetIntent = Field(default_factory=MultiProductBudgetIntent)
     # Only populated when action is CHITCHAT - the extractor's direct reply
     # to a non-shopping message (greeting, thanks, small talk). Ignored for
     # every other action.
@@ -124,6 +137,8 @@ class SearchEntry(BaseModel):
     product_id: str
     offer_id: str
     title: str
+    description: str | None = None
+    variant_label: str | None = None
     brand: str | None = None
     category: str | None = None
     price_paise: int | None = None
@@ -131,16 +146,39 @@ class SearchEntry(BaseModel):
     availability_status: str | None = None
     quantity: int | None = None
     rerank_score: float | None = None
+    bm25_score: float | None = None
 
 
 class SearchResult(BaseModel):
     entries: list[SearchEntry] = Field(default_factory=list)
     result_set_id: str | None = None
+    search_mode: Literal["normal", "fast"] = "normal"
     # Every sku_id the reranker returned, split by whether MySQL actually
     # has it. hallucinated_sku_ids exist only in the reranker's output, not
     # the catalog - the CLI prints these in red.
     verified_sku_ids: list[str] = Field(default_factory=list)
     hallucinated_sku_ids: list[str] = Field(default_factory=list)
+
+
+class MultiProductCandidateGroup(BaseModel):
+    item_query: str
+    candidates: list[SearchEntry] = Field(default_factory=list)
+
+
+class MultiProductRecommendation(BaseModel):
+    set_id: str
+    items: list[SearchEntry] = Field(default_factory=list)
+    total_price_paise: int
+    rationale: str
+
+
+class MultiProductResult(BaseModel):
+    budget_paise: int
+    item_queries: list[str] = Field(default_factory=list)
+    candidate_groups: list[MultiProductCandidateGroup] = Field(default_factory=list)
+    recommendations: list[MultiProductRecommendation] = Field(default_factory=list)
+    analysis_summary: str | None = None
+    search_mode: Literal["fast"] = "fast"
 
 
 class ProductDetails(BaseModel):
@@ -264,6 +302,7 @@ class TurnResult(BaseModel):
     message: str
     action: Action | None = None
     search_result: SearchResult | None = None
+    multi_product_result: MultiProductResult | None = None
     product_details: ProductDetails | None = None
     comparison: Comparison | None = None
     availability: Availability | None = None

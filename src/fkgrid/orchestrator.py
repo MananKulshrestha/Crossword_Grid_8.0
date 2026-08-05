@@ -18,11 +18,16 @@ from __future__ import annotations
 
 import uuid
 
-from . import catalog, cart, enhancer, followups, llm, memory
+from . import cart, catalog, enhancer, followups, llm, memory
 from .catalog import CatalogError, RerankerError
+from .config import ConfigError, load_multi_product_config, load_search_mode
 from .contracts import (
     Action,
     CartOperationDraft,
+    MultiProductBudgetIntent,
+    MultiProductCandidateGroup,
+    MultiProductRecommendation,
+    MultiProductResult,
     Reference,
     Role,
     SearchEntry,
@@ -45,6 +50,83 @@ class _Tracer:
 
 def _error(tracer: _Tracer, message: str, code: str) -> TurnResult:
     return TurnResult(status=TurnStatus.ERROR, message=message, error_code=code, trace=tracer.steps)
+
+
+class BundleIntentError(ValueError):
+    """Raised when a shared-budget intent cannot be safely executed."""
+
+
+def _bundle_budget_paise(intent: MultiProductBudgetIntent, usd_to_inr: float | None) -> int:
+    if intent.total_budget_paise is not None:
+        if intent.total_budget_paise <= 0:
+            raise BundleIntentError("BUNDLE_BUDGET_INVALID")
+        currency = (intent.budget_currency or "INR").strip().upper()
+        if currency not in {"INR", "₹", "RUPEE", "RUPEES"}:
+            raise BundleIntentError("BUNDLE_CURRENCY_MISMATCH")
+        return intent.total_budget_paise
+
+    if intent.budget_amount is None or intent.budget_amount <= 0:
+        raise BundleIntentError("BUNDLE_BUDGET_MISSING")
+    currency = (intent.budget_currency or "INR").strip().upper()
+    if currency in {"INR", "₹", "RUPEE", "RUPEES"}:
+        return round(intent.budget_amount * 100)
+    if currency in {"USD", "$", "DOLLAR", "DOLLARS"} and usd_to_inr is not None:
+        return round(intent.budget_amount * usd_to_inr * 100)
+    raise BundleIntentError("BUNDLE_CURRENCY_UNSUPPORTED")
+
+
+def _normalise_bundle_items(intent: MultiProductBudgetIntent, max_item_types: int) -> list[str]:
+    items: list[str] = []
+    seen: set[str] = set()
+    for raw_item in intent.item_queries:
+        item = " ".join(raw_item.split()).strip()
+        if item and item.casefold() not in seen:
+            seen.add(item.casefold())
+            items.append(item)
+    if len(items) < 2:
+        raise BundleIntentError("BUNDLE_ITEMS_INVALID")
+    if len(items) > max_item_types:
+        raise BundleIntentError("BUNDLE_TOO_MANY_ITEM_TYPES")
+    return items
+
+
+def _materialise_bundle_result(
+    candidate_groups: list[MultiProductCandidateGroup],
+    draft: llm.BundleAnalysisDraft,
+    item_queries: list[str],
+    budget_paise: int,
+) -> MultiProductResult:
+    entries_by_item = {
+        group.item_query: {entry.sku_id: entry for entry in group.candidates}
+        for group in candidate_groups
+    }
+    recommendations: list[MultiProductRecommendation] = []
+    for index, draft_recommendation in enumerate(draft.recommendations, start=1):
+        items: list[SearchEntry] = []
+        total = 0
+        for item_query in item_queries:
+            entry = entries_by_item[item_query].get(draft_recommendation.selections[item_query])
+            if entry is None or entry.price_paise is None:
+                raise LLMError("BUNDLE_ANALYSIS_CANDIDATE_INVALID")
+            items.append(entry)
+            total += entry.price_paise
+        if total > budget_paise:
+            raise LLMError("BUNDLE_ANALYSIS_OVER_BUDGET")
+        recommendations.append(
+            MultiProductRecommendation(
+                set_id=f"bundle-{index}",
+                items=items,
+                total_price_paise=total,
+                rationale=draft_recommendation.rationale,
+            )
+        )
+    return MultiProductResult(
+        budget_paise=budget_paise,
+        item_queries=item_queries,
+        candidate_groups=candidate_groups,
+        recommendations=recommendations,
+        analysis_summary=draft.summary,
+    )
 
 
 def _from_last_results(reference: Reference | None, last_results: list[SearchEntry]) -> SearchEntry | None:
@@ -162,18 +244,102 @@ def handle_turn(request: TurnRequest) -> TurnResult:
 
     action = extraction.action
 
-    if action in (Action.SEARCH, Action.REFINE):
+    if extraction.multi_product_budget.enabled:
         try:
-            search_result = catalog.search(reranker_request)
+            bundle_config = load_multi_product_config()
+            item_queries = _normalise_bundle_items(
+                extraction.multi_product_budget, bundle_config.max_item_types
+            )
+            budget_paise = _bundle_budget_paise(
+                extraction.multi_product_budget, bundle_config.usd_to_inr
+            )
+            candidate_groups = catalog.fast_multi_product_candidates(
+                item_queries=item_queries,
+                budget_paise=budget_paise,
+                candidate_cap_per_item=bundle_config.candidate_cap_per_item,
+                hard_constraints=reranker_request.hard_constraints,
+            )
+            tracer.record(
+                "multi_product_fast_candidates",
+                {
+                    "item_queries": item_queries,
+                    "budget_paise": budget_paise,
+                    "candidate_cap_per_item": bundle_config.candidate_cap_per_item,
+                },
+                {
+                    "candidate_counts": [len(group.candidates) for group in candidate_groups],
+                    "candidate_groups": [group.model_dump(mode="json") for group in candidate_groups],
+                    "search_mode": "fast",
+                },
+            )
+            draft = llm.analyze_multi_product_sets(candidate_groups, budget_paise)
+            tracer.record(
+                "multi_product_gemma_analysis",
+                {"budget_paise": budget_paise, "item_queries": item_queries},
+                draft.model_dump(mode="json"),
+            )
+            multi_product_result = _materialise_bundle_result(
+                candidate_groups, draft, item_queries, budget_paise
+            )
+        except BundleIntentError as exc:
+            tracer.record(
+                "multi_product_budget",
+                extraction.multi_product_budget.model_dump(mode="json"),
+                {"error": str(exc)},
+                ok=False,
+            )
+            return _error(tracer, "The shared bundle budget or item list is invalid.", str(exc))
+        except ConfigError as exc:
+            tracer.record("multi_product_config", {}, {"error": str(exc)}, ok=False)
+            return _error(tracer, "The bundle workflow configuration is invalid.", str(exc))
+        except LLMError as exc:
+            tracer.record("multi_product_gemma_analysis", {}, {"error": str(exc)}, ok=False)
+            return _error(
+                tracer,
+                "The bundle analysis service returned an unusable result.",
+                str(exc),
+            )
+        except CatalogError as exc:
+            tracer.record("multi_product_fast_candidates", {}, {"error": str(exc)}, ok=False)
+            return _error(tracer, "The catalog is unavailable for bundle search.", str(exc))
+
+        result = TurnResult(
+            status=TurnStatus.OK,
+            message="Here are the best complete sets within your shared budget.",
+            action=action,
+            multi_product_result=multi_product_result,
+        )
+
+    elif action in (Action.SEARCH, Action.REFINE):
+        try:
+            search_mode = load_search_mode()
+            if search_mode == "fast":
+                search_result = catalog.fast_search(reranker_request)
+                tracer.record(
+                    "fast_sql_bm25_search",
+                    reranker_request.model_dump(mode="json"),
+                    search_result.model_dump(mode="json"),
+                )
+            else:
+                search_result = catalog.search(reranker_request)
+                tracer.record(
+                    "reranker_search",
+                    reranker_request.model_dump(mode="json"),
+                    search_result.model_dump(mode="json"),
+                )
         except RerankerError as exc:
             tracer.record("reranker_search", reranker_request.model_dump(mode="json"), {"error": str(exc)}, ok=False)
             return _error(tracer, "The search service is unavailable.", str(exc))
         except CatalogError as exc:
-            tracer.record("reranker_search", reranker_request.model_dump(mode="json"), {"error": str(exc)}, ok=False)
+            tracer.record("catalog_search", reranker_request.model_dump(mode="json"), {"error": str(exc)}, ok=False)
             return _error(tracer, "The catalog is unavailable.", str(exc))
-        tracer.record("reranker_search", reranker_request.model_dump(mode="json"), search_result.model_dump(mode="json"))
+        except ConfigError as exc:
+            tracer.record("search_mode", {}, {"error": str(exc)}, ok=False)
+            return _error(tracer, "Search mode configuration is invalid.", str(exc))
 
-        if search_result.entries:
+        # The relevance LLM is part of the existing normal reranker flow.
+        # Fast mode remains retrieval-only after extraction and BM25 ranking.
+        if search_mode == "normal" and search_result.entries:
             candidates = [
                 {
                     "sku_id": entry.sku_id,
@@ -205,7 +371,6 @@ def handle_turn(request: TurnRequest) -> TurnResult:
                     {"error": str(exc)},
                     ok=False,
                 )
-
         # Every sku_id the reranker returned, checked against MySQL directly -
         # a dedicated stage so it's obvious in the trace/CLI which ones were
         # real catalog rows and which were reranker hallucinations.

@@ -30,8 +30,67 @@ class LLMConfig:
     timeout_s: float
 
 
+@dataclass(frozen=True)
+class MultiProductConfig:
+    candidate_cap_per_item: int
+    max_item_types: int
+    usd_to_inr: float | None
+
+
 class ConfigError(RuntimeError):
     """Raised when required configuration is missing. No silent defaults for secrets."""
+
+
+def load_search_mode() -> str:
+    """Return the shopper search mode without changing any external state.
+
+    ``FKGRID_FAST_MODE`` is the easy testing toggle and takes precedence when
+    set: true selects the read-only SQL-hard-filter/BM25 path and false keeps
+    the existing RunPod reranker path. ``FKGRID_SEARCH_MODE`` remains a
+    backwards-compatible fallback when the boolean toggle is unset.
+    """
+
+    fast_flag = os.environ.get("FKGRID_FAST_MODE")
+    if fast_flag is not None:
+        normalized_flag = fast_flag.strip().lower()
+        if normalized_flag in {"1", "true", "yes", "on"}:
+            return "fast"
+        if normalized_flag in {"0", "false", "no", "off"}:
+            return "normal"
+        raise ConfigError("FKGRID_FAST_MODE must be a boolean value")
+
+    configured = os.environ.get("FKGRID_SEARCH_MODE", "normal")
+    mode = configured.strip().lower()
+    if mode not in {"normal", "fast"}:
+        raise ConfigError("FKGRID_SEARCH_MODE must be 'normal' or 'fast'")
+    return mode
+
+
+def load_multi_product_config() -> MultiProductConfig:
+    """Load bounded, server-owned limits for the shared-budget workflow."""
+
+    try:
+        candidate_cap = int(os.environ.get("FKGRID_BUNDLE_CANDIDATE_CAP", "25"))
+        max_item_types = int(os.environ.get("FKGRID_BUNDLE_MAX_ITEM_TYPES", "3"))
+    except ValueError as exc:
+        raise ConfigError("Bundle candidate limits must be integers") from exc
+    if candidate_cap < 1:
+        raise ConfigError("FKGRID_BUNDLE_CANDIDATE_CAP must be positive")
+    if max_item_types < 2:
+        raise ConfigError("FKGRID_BUNDLE_MAX_ITEM_TYPES must be at least 2")
+
+    configured_rate = os.environ.get("FKGRID_BUNDLE_USD_TO_INR")
+    try:
+        usd_to_inr = float(configured_rate) if configured_rate else None
+    except ValueError as exc:
+        raise ConfigError("FKGRID_BUNDLE_USD_TO_INR must be a number") from exc
+    if usd_to_inr is not None and usd_to_inr <= 0:
+        raise ConfigError("FKGRID_BUNDLE_USD_TO_INR must be positive")
+    return MultiProductConfig(
+        candidate_cap_per_item=candidate_cap,
+        max_item_types=max_item_types,
+        usd_to_inr=usd_to_inr,
+    )
 
 
 def load_mysql_config() -> MySQLConfig:
