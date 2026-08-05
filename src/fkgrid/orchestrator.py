@@ -122,6 +122,20 @@ def handle_turn(request: TurnRequest) -> TurnResult:
         return _error(tracer, "Could not interpret the message.", str(exc))
     tracer.record("query_extractor", history_in, extraction.model_dump(mode="json"))
 
+    if extraction.action == Action.CHITCHAT:
+        result = TurnResult(
+            status=TurnStatus.OK,
+            message=extraction.reply or "Hi! How can I help you shop today?",
+            action=Action.CHITCHAT,
+        )
+        session = memory.get_session(request.session_id)
+        result.followups = followups.build(result, session)
+        tracer.record("followups", {"action": Action.CHITCHAT.value},
+                       {"followups": [f.model_dump(mode="json") for f in result.followups]})
+        memory.append_turn(request.session_id, Role.ASSISTANT, result.message)
+        result.trace = tracer.steps
+        return result
+
     enhance_in = {
         "message": request.message,
         "extraction": extraction.model_dump(mode="json"),

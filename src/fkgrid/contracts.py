@@ -40,6 +40,7 @@ class ChatTurn(BaseModel):
 
 
 class Action(str, Enum):
+    CHITCHAT = "CHITCHAT"
     SEARCH = "SEARCH"
     REFINE = "REFINE"
     PRODUCT_DETAILS = "PRODUCT_DETAILS"
@@ -87,6 +88,10 @@ class QueryExtraction(BaseModel):
     constraints: list[Constraint] = Field(default_factory=list)
     references: list[Reference] = Field(default_factory=list)
     cart_operations: list[CartOperationDraft] = Field(default_factory=list)
+    # Only populated when action is CHITCHAT - the extractor's direct reply
+    # to a non-shopping message (greeting, thanks, small talk). Ignored for
+    # every other action.
+    reply: str | None = None
 
 
 class RerankerRequest(BaseModel):

@@ -12,6 +12,21 @@ from __future__ import annotations
 from .contracts import Action, QueryExtraction, RerankerRequest, SessionState
 
 _DEFAULT_TOP_N = 10
+_PRICE_FIELDS = {"max_price", "min_price"}
+
+
+def _coerce_constraint_value(field: str, value: object) -> int | float | str | bool | None:
+    """The reranker expects max_price/min_price as a plain paise integer.
+    A misbehaving extractor call could still hand back a string like
+    "10,000" - reject rather than send something that 400s the whole turn."""
+
+    if field not in _PRICE_FIELDS:
+        return value
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return value
+    return None
 
 
 def build_reranker_request(
@@ -23,9 +38,21 @@ def build_reranker_request(
         hard_constraints.update(session_state.last_reranker_request.hard_constraints)
 
     for constraint in extraction.constraints:
-        hard_constraints[constraint.field] = constraint.value
+        value = _coerce_constraint_value(constraint.field, constraint.value)
+        if value is None and constraint.field in _PRICE_FIELDS:
+            continue
+        hard_constraints[constraint.field] = value
 
-    soft_query_text = " ".join(extraction.query_terms).strip() or message
+    new_query_text = " ".join(extraction.query_terms).strip()
+    if new_query_text:
+        soft_query_text = new_query_text
+    elif extraction.action == Action.REFINE and session_state.last_reranker_request is not None:
+        # A REFINE turn narrowing an existing search ("price under 5000")
+        # carries no new query terms - keep searching for the same product,
+        # don't let the refine sentence itself become the soft query.
+        soft_query_text = session_state.last_reranker_request.soft_query_text
+    else:
+        soft_query_text = message
 
     return RerankerRequest(
         soft_query_text=soft_query_text,
