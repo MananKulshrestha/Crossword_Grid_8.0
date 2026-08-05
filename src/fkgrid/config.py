@@ -37,16 +37,22 @@ class ConfigError(RuntimeError):
 def load_search_mode() -> str:
     """Return the shopper search mode without changing any external state.
 
-    ``normal`` preserves the existing RunPod reranker path. ``fast`` is the
-    read-only SQL-hard-filter/BM25 path. The boolean alias is accepted for
-    local deployments that want a simple feature flag; the explicit mode wins
-    when both variables are present.
+    ``FKGRID_FAST_MODE`` is the easy testing toggle and takes precedence when
+    set: true selects the read-only SQL-hard-filter/BM25 path and false keeps
+    the existing RunPod reranker path. ``FKGRID_SEARCH_MODE`` remains a
+    backwards-compatible fallback when the boolean toggle is unset.
     """
 
-    configured = os.environ.get("FKGRID_SEARCH_MODE")
-    if configured is None:
-        fast_flag = os.environ.get("FKGRID_FAST_MODE", "false").strip().lower()
-        configured = "fast" if fast_flag in {"1", "true", "yes", "on"} else "normal"
+    fast_flag = os.environ.get("FKGRID_FAST_MODE")
+    if fast_flag is not None:
+        normalized_flag = fast_flag.strip().lower()
+        if normalized_flag in {"1", "true", "yes", "on"}:
+            return "fast"
+        if normalized_flag in {"0", "false", "no", "off"}:
+            return "normal"
+        raise ConfigError("FKGRID_FAST_MODE must be a boolean value")
+
+    configured = os.environ.get("FKGRID_SEARCH_MODE", "normal")
     mode = configured.strip().lower()
     if mode not in {"normal", "fast"}:
         raise ConfigError("FKGRID_SEARCH_MODE must be 'normal' or 'fast'")

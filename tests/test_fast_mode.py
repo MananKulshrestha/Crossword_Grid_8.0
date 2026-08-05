@@ -1,11 +1,29 @@
 from __future__ import annotations
 
+import os
 from contextlib import contextmanager
 from unittest.mock import patch
 
 from fkgrid import catalog
+from fkgrid.config import ConfigError, load_search_mode
 from fkgrid.contracts import Action, QueryExtraction, RerankerRequest, SearchEntry, SearchResult, TurnRequest
 from fkgrid.orchestrator import handle_turn
+
+
+def test_boolean_fast_mode_toggle_is_easy_and_takes_precedence() -> None:
+    with patch.dict(os.environ, {"FKGRID_FAST_MODE": "true", "FKGRID_SEARCH_MODE": "normal"}):
+        assert load_search_mode() == "fast"
+    with patch.dict(os.environ, {"FKGRID_FAST_MODE": "false", "FKGRID_SEARCH_MODE": "fast"}):
+        assert load_search_mode() == "normal"
+    with patch.dict(os.environ, {"FKGRID_SEARCH_MODE": "fast"}, clear=True):
+        assert load_search_mode() == "fast"
+    with patch.dict(os.environ, {"FKGRID_FAST_MODE": "maybe"}, clear=True):
+        try:
+            load_search_mode()
+        except ConfigError as exc:
+            assert "FKGRID_FAST_MODE" in str(exc)
+        else:
+            raise AssertionError("invalid boolean toggle was accepted")
 
 
 def _row(sku_id: str, title: str, *, price: int, rating: float | None = None) -> dict:

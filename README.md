@@ -8,13 +8,26 @@ research-provider, Qdrant, LightRAG, and Graph RAG owners finish their adapters.
 
 ## What is implemented
 
-Search supports two backend modes. `FKGRID_SEARCH_MODE=normal` (the default)
-keeps the existing RunPod reranker flow. `FKGRID_SEARCH_MODE=fast` branches
-after intent extraction and deterministic query enhancement, then uses only
-read-only SQL hard filters, in-process BM25 over the existing product title and
-description columns, and deterministic ranking. It does not call RunPod for
-retrieval, create embeddings, rerank, or change database objects/data. The
-fast response includes `search_mode: "fast"` and per-entry `bm25_score`.
+Search supports two backend modes. The easy testing toggle is
+`FKGRID_FAST_MODE=false` (the default); set it to `true` to bypass the existing
+RunPod reranker flow. Fast mode branches after intent extraction and
+deterministic query enhancement, then uses only read-only SQL hard filters,
+in-process BM25 over the existing product title and description columns, and
+deterministic ranking. It does not call RunPod for retrieval, create
+embeddings, rerank, or change database objects/data. The fast response
+includes `search_mode: "fast"` and per-entry `bm25_score`.
+
+For PowerShell testing:
+
+```powershell
+$env:FKGRID_FAST_MODE = "true"
+$env:PYTHONPATH = "src"
+uvicorn fkgrid.api:app --host 127.0.0.1 --port 8000
+```
+
+Set `$env:FKGRID_FAST_MODE = "false"` and restart the backend to return to
+normal mode. `FKGRID_SEARCH_MODE=normal|fast` remains supported only as a
+fallback when `FKGRID_FAST_MODE` is not set.
 
 - strict Pydantic contracts for the turn state machine, compatibility tuple,
   model requests/responses, intent/delta output, evidence, exact product
