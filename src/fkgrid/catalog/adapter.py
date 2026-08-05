@@ -265,8 +265,19 @@ def _hard_constraints_to_ra(
             ra["max_price"] = float(values[0])
         elif field_id == "price" and operator in _PRICE_MIN_OPERATORS and values:
             min_price = float(values[0])
-        elif field_id in {"category", "taxonomy_node_id"} and values:
+        elif field_id == "category" and values:
             ra["category"] = str(values[0])
+        # NOTE: taxonomy_node_id deliberately does NOT map to RA's `category`
+        # here. Confirmed live against the deployed RA + real DB (2026-08-05):
+        # query_lexicon.py's deterministic category inference sets
+        # taxonomy_node_id to leaf-level values like "shirts", but RA's
+        # sql_filter.py does an *exact* match against product_metadata.category,
+        # whose real values are broad top-level strings like "Clothing" --
+        # sending taxonomy_node_id there silently zeroed every category-scoped
+        # search (verified: category="shirts" -> 0 results, category="Clothing"
+        # -> 3 results, for the same query). Falling through to `dropped` below
+        # surfaces this as a warning instead of a silent false negative, and
+        # still lets BM25/semantic ranking surface relevant items by text alone.
         elif field_id == "size" and values:
             ra["size"] = str(values[0])
         elif field_id in {"stock", "availability"} and values:
