@@ -84,6 +84,7 @@ DB_PORT = int(os.environ.get("FLIPKART_DB_PORT", "3307"))
 DB_USER = os.environ.get("FLIPKART_DB_USER", "flipkart_user")
 DB_PASSWORD = os.environ.get("FLIPKART_DB_PASSWORD", "flipkart_pass")
 DB_NAME = os.environ.get("FLIPKART_DB_NAME", "flipkart")
+DATABASE_CART_CATALOG_VERSION = "flipkart_v1"
 
 
 def _connect() -> pymysql.connections.Connection:
@@ -91,6 +92,52 @@ def _connect() -> pymysql.connections.Connection:
         host=DB_HOST, port=DB_PORT, user=DB_USER, password=DB_PASSWORD,
         database=DB_NAME, cursorclass=pymysql.cursors.DictCursor,
     )
+
+
+def database_cart_readiness(catalog_version: str) -> str | None:
+    """Return a safe readiness code for database cart mode.
+
+    This runs at runtime construction/readiness time, never on a shopper turn.
+    The catalog-version check is intentionally first so the current fixture
+    catalog cannot report a misleading database-ready state or open a network
+    connection that cannot serve its bindings.
+    """
+
+    if catalog_version != DATABASE_CART_CATALOG_VERSION:
+        return "CART_CATALOG_VERSION_MISMATCH"
+    conn = None
+    try:
+        conn = pymysql.connect(
+            host=DB_HOST,
+            port=DB_PORT,
+            user=DB_USER,
+            password=DB_PASSWORD,
+            database=DB_NAME,
+            connect_timeout=1,
+            read_timeout=1,
+            write_timeout=1,
+            cursorclass=pymysql.cursors.DictCursor,
+        )
+        with conn.cursor() as cursor:
+            for table in ("offers", "carts", "cart_items", "cart_operation_events"):
+                cursor.execute(f"SELECT 1 FROM {table} LIMIT 0")
+            cursor.execute(
+                "SELECT 1 FROM offers WHERE catalog_version = %s AND status = 'ACTIVE' LIMIT 1",
+                (catalog_version,),
+            )
+            if cursor.fetchone() is None:
+                return "CART_CATALOG_VERSION_NOT_FOUND"
+    except Exception:
+        return "CART_DATABASE_UNAVAILABLE"
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                # Readiness must report a safe code, not fail application startup,
+                # when a provider connection is already broken during cleanup.
+                pass
+    return None
 
 
 def _now() -> datetime:

@@ -48,6 +48,25 @@ DB_PASSWORD = os.environ.get("FLIPKART_DB_PASSWORD", "flipkart_pass")
 DB_NAME = os.environ.get("FLIPKART_DB_NAME", "flipkart")
 
 
+def _database_available() -> bool:
+    try:
+        connection = pymysql.connect(
+            host=DB_HOST,
+            port=DB_PORT,
+            user=DB_USER,
+            password=DB_PASSWORD,
+            database=DB_NAME,
+            connect_timeout=1,
+        )
+    except Exception:
+        return False
+    connection.close()
+    return True
+
+
+DATABASE_AVAILABLE = _database_available()
+
+
 def _connect():
     return pymysql.connect(
         host=DB_HOST, port=DB_PORT, user=DB_USER, password=DB_PASSWORD,
@@ -125,6 +144,7 @@ def _provider(session_id: str, state_version: int):
     return lambda: snapshot
 
 
+@unittest.skipUnless(DATABASE_AVAILABLE, "requires the configured MySQL cart database")
 class DatabaseCartAdapterShowCartTests(unittest.TestCase):
     def test_show_cart_returns_empty_snapshot_for_session_with_no_cart_row(self) -> None:
         session_id = f"session_{uuid.uuid4().hex}"
@@ -205,6 +225,7 @@ class DatabaseCartAdapterShowCartTests(unittest.TestCase):
         self.assertEqual(snapshot.cart_version, 0)
 
 
+@unittest.skipUnless(DATABASE_AVAILABLE, "requires the configured MySQL cart database")
 class DatabaseCartAdapterUpdateCartTests(unittest.TestCase):
     def setUp(self) -> None:
         self.session_id = f"session_{uuid.uuid4().hex}"
@@ -502,6 +523,7 @@ class DatabaseCartAdapterUpdateCartTests(unittest.TestCase):
         self.assertEqual(result.warnings, ["OFFER_UNAVAILABLE"])
 
 
+@unittest.skipUnless(DATABASE_AVAILABLE, "requires the configured MySQL cart database")
 class DatabaseCartAdapterQuantityOperationTests(unittest.TestCase):
     def setUp(self) -> None:
         self.session_id = f"session_{uuid.uuid4().hex}"
@@ -681,6 +703,7 @@ class DatabaseCartAdapterQuantityOperationTests(unittest.TestCase):
         self.assertEqual(result.warnings, ["CART_ITEM_NOT_FOUND"])
 
 
+@unittest.skipUnless(DATABASE_AVAILABLE, "requires the configured MySQL cart database")
 class DatabaseCartAdapterRemoveItemTests(unittest.TestCase):
     def setUp(self) -> None:
         self.session_id = f"session_{uuid.uuid4().hex}"
@@ -777,6 +800,7 @@ class DatabaseCartAdapterRemoveItemTests(unittest.TestCase):
         self.assertEqual(second.warnings, ["CART_ITEM_NOT_FOUND"])
 
 
+@unittest.skipUnless(DATABASE_AVAILABLE, "requires the configured MySQL cart database")
 class DatabaseCartAdapterUndoLastRemovalTests(unittest.TestCase):
     def setUp(self) -> None:
         self.session_id = f"session_{uuid.uuid4().hex}"
@@ -987,6 +1011,7 @@ class DatabaseCartAdapterUndoLastRemovalTests(unittest.TestCase):
         self.assertEqual(snapshot.items, [])
 
 
+@unittest.skipUnless(DATABASE_AVAILABLE, "requires the configured MySQL cart database")
 class DatabaseCartAdapterClearCartTests(unittest.TestCase):
     def setUp(self) -> None:
         self.session_id = f"session_{uuid.uuid4().hex}"
@@ -1130,6 +1155,7 @@ class DatabaseCartAdapterClearCartTests(unittest.TestCase):
         self.assertEqual([i.cart_item_id for i in undo_result.cart.items], [item_a])
 
 
+@unittest.skipUnless(DATABASE_AVAILABLE, "requires the configured MySQL cart database")
 class DatabaseCartAdapterIdempotencyTests(unittest.TestCase):
     def setUp(self) -> None:
         self.session_id = f"session_{uuid.uuid4().hex}"
