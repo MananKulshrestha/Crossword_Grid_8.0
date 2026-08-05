@@ -53,7 +53,12 @@ from fkgrid.api.catalog import (
     build_catalog_entries,
     fixture_facets,
 )
-from fkgrid.cart.adapter import DatabaseCartAdapter, database_cart_readiness
+from fkgrid.cart.adapter import (
+    DATABASE_CART_CATALOG_VERSION,
+    DatabaseCartAdapter,
+    database_cart_readiness,
+)
+from fkgrid.catalog import RetrievalCatalogAdapter
 from fkgrid.speech import (
     DEFAULT_SPEECH_MODEL_ALIAS,
     DeepInfraWhisperAdapter,
@@ -70,12 +75,24 @@ DEFAULT_SPEECH_DEADLINE_MS = 8_000
 DEFAULT_SPEECH_LANGUAGE = "en"
 
 
-def demo_compatibility(model_alias: str) -> CompatibilityTuple:
-    """Return the compatibility tuple for the current synthetic fixture."""
+def demo_compatibility(
+    model_alias: str, *, catalog_version: str = "catalog-fixture-v1"
+) -> CompatibilityTuple:
+    """Return the compatibility tuple for the current runtime.
+
+    ``catalog_version`` defaults to the synthetic fixture's own value.
+    ``ApiRuntime`` overrides it to ``DATABASE_CART_CATALOG_VERSION``
+    ("flipkart_v1") when ``catalog_mode="retrieval"``, so every session's
+    QueryState/TurnSnapshot/DeterministicCatalog-compatibility check is
+    pinned to the same value RetrievalCatalogAdapter's real search results
+    and DatabaseCartAdapter's readiness check both use -- this is what
+    actually fixes the long-documented catalog_version mismatch, not just
+    the retrieval adapter existing.
+    """
 
     return CompatibilityTuple(
         contract_schema_version="agentic-contracts-v1",
-        catalog_version="catalog-fixture-v1",
+        catalog_version=catalog_version,
         index_version="index-fixture-v1",
         taxonomy_version="taxonomy-fixture-v1",
         category_schema_version="schema-fixture-v1",
@@ -169,23 +186,33 @@ class ApiRuntime:
         speech_language: str = DEFAULT_SPEECH_LANGUAGE,
         speech_error: str | None = None,
         cart_mode: str = "fixture",
+        catalog_mode: str = "fixture",
     ) -> None:
         self.gateway = gateway
         # "fixture": FixtureCartPort, the existing in-memory demo cart (default,
         # zero setup). "database": DatabaseCartAdapter (Track 6), a real
         # MySQL-backed cart -- requires flipkart-mysql running and reachable.
-        # Caveat: self.tooling.shopper_catalog below still returns synthetic
-        # fixture products under catalog_version="catalog-fixture-v1"; the real
-        # cart validates against catalog_version="flipkart_v1". Until Track 2's
-        # real retrieval subsystem is wired into shopper_catalog too, enabling
-        # "database" mode here means every ADD_ITEM from a live search result
-        # will be REJECTED OFFER_UNAVAILABLE, since the bindings never match --
-        # see tests/test_cart_orchestrator_integration.py for what does prove
-        # out correctly today (a session seeded with real catalog bindings
-        # directly, bypassing the fixture search path).
+        # Pair this with catalog_mode="retrieval" (below) -- otherwise search
+        # results still come from the synthetic fixture under
+        # catalog_version="catalog-fixture-v1" while the real cart validates
+        # against "flipkart_v1", and every ADD_ITEM from a live search result
+        # is REJECTED OFFER_UNAVAILABLE since the bindings never match. See
+        # tests/test_cart_orchestrator_integration.py for what proves out
+        # correctly regardless (a session seeded with real catalog bindings
+        # directly, bypassing the search path entirely).
         if cart_mode not in {"fixture", "database"}:
             raise ValueError("FKGRID_CART_MODE_INVALID")
         self.cart_mode = cart_mode
+        # "fixture": CatalogSearchPortAdapter/DeterministicCatalog, the
+        # synthetic 600-record catalog (default). "retrieval": RetrievalCatalogAdapter
+        # (catalog/adapter.py) -- calls RA's real /api/search over HTTP and
+        # resolves product_id/offer_id/catalog_version via a live MySQL join,
+        # so every field this adapter returns is read fresh from `offers`
+        # rather than hardcoded. This is what makes cart_mode="database"
+        # actually usable end-to-end; see the cart_mode comment above.
+        if catalog_mode not in {"fixture", "retrieval"}:
+            raise ValueError("FKGRID_CATALOG_MODE_INVALID")
+        self.catalog_mode = catalog_mode
         self.model_mode = model_mode
         self.model_alias = model_alias
         self.protocol = protocol
@@ -216,11 +243,24 @@ class ApiRuntime:
                 demo_compatibility(model_alias), catalog_size, catalog_seed
             )
         )
-        self.catalog_version = (
-            self.catalog_entries[0].binding.catalog_version
-            if self.catalog_entries
-            else "catalog-fixture-v1"
-        )
+        if self.catalog_mode == "retrieval":
+            # Real search results carry whatever catalog_version is actually
+            # live in `offers` (see catalog/adapter.py's module docstring) --
+            # today that is always DATABASE_CART_CATALOG_VERSION. Pinning
+            # session/tooling compatibility to the same constant here is what
+            # keeps ReferenceResolverPortAdapter's stale-compatibility check
+            # (tools/catalog.py's resolve_reference) from rejecting every
+            # "the first one" follow-up against a real search result, and
+            # what lets database_cart_readiness below actually pass instead
+            # of permanently reporting a version mismatch.
+            self.catalog_version = DATABASE_CART_CATALOG_VERSION
+        else:
+            self.catalog_version = (
+                self.catalog_entries[0].binding.catalog_version
+                if self.catalog_entries
+                else "catalog-fixture-v1"
+            )
+        self.compatibility = demo_compatibility(model_alias, catalog_version=self.catalog_version)
         self.cart_error = (
             database_cart_readiness(self.catalog_version)
             if self.cart_mode == "database"
@@ -229,8 +269,12 @@ class ApiRuntime:
         self.cart_ready = self.cart_error is None
         self.tooling: RuntimeTooling = build_runtime_tooling(
             self.catalog_entries,
-            demo_compatibility(model_alias),
+            self.compatibility,
         )
+        # Built regardless of catalog_mode -- construction is cheap (just
+        # reads env-var defaults) and only makes real HTTP/MySQL calls once
+        # actually used, so there's no cost to having it ready.
+        self.retrieval_catalog = RetrievalCatalogAdapter()
         self._sessions: dict[str, ManagedSession] = {}
         self._sessions_lock = threading.RLock()
 
@@ -263,6 +307,9 @@ class ApiRuntime:
         cart_mode = values.get("FKGRID_CART_MODE", "fixture").casefold()
         if cart_mode not in {"fixture", "database"}:
             raise ValueError("FKGRID_CART_MODE_INVALID")
+        catalog_mode = values.get("FKGRID_CATALOG_MODE", "fixture").casefold()
+        if catalog_mode not in {"fixture", "retrieval"}:
+            raise ValueError("FKGRID_CATALOG_MODE_INVALID")
         speech_mode = values.get("FKGRID_SPEECH_MODE", "live").casefold()
         if speech_mode not in {"live", "disabled"}:
             raise ValueError("FKGRID_SPEECH_MODE_INVALID")
@@ -320,6 +367,7 @@ class ApiRuntime:
                 speech_language=speech_language,
                 speech_error=speech_error,
                 cart_mode=cart_mode,
+                catalog_mode=catalog_mode,
             )
 
         provider_values = dict(values)
@@ -348,6 +396,7 @@ class ApiRuntime:
                 speech_language=speech_language,
                 speech_error=speech_error,
                 cart_mode=cart_mode,
+                catalog_mode=catalog_mode,
             )
         return cls(
             gateway=gateway,
@@ -362,6 +411,7 @@ class ApiRuntime:
             speech_language=speech_language,
             speech_error=speech_error,
             cart_mode=cart_mode,
+            catalog_mode=catalog_mode,
         )
 
     @property
@@ -372,7 +422,7 @@ class ApiRuntime:
         session_id = session_id or f"session_{uuid.uuid4().hex}"
         if session_id.strip() != session_id:
             raise ValueError("SESSION_ID_WHITESPACE")
-        compatibility = demo_compatibility(self.model_alias)
+        compatibility = self.compatibility
         state = QueryState(
             state_version=0,
             catalog_version=compatibility.catalog_version,
@@ -404,11 +454,22 @@ class ApiRuntime:
                 legacy_catalog,
                 session_snapshot_provider=lambda: session_state.snapshot,
             )
+        # "retrieval": the real RA-backed adapter (catalog/adapter.py), whose
+        # results carry catalog_version=DATABASE_CART_CATALOG_VERSION, matching
+        # self.compatibility above. recovery/references stay on
+        # self.tooling (DeterministicCatalog) regardless -- both are pure
+        # functions of the *previous turn's own* acknowledged_entries/result,
+        # not of the fixture's stored records, so they work unchanged against
+        # real search results too (see tools/catalog.py's resolve_reference
+        # and tools/recovery.py's assess()).
+        catalog_port = (
+            self.retrieval_catalog if self.catalog_mode == "retrieval" else self.tooling.shopper_catalog
+        )
         orchestrator = TurnOrchestrator(
             state=session_state,
             enhancer=DeterministicEnhancer(clock, ids),
             gateway=self.gateway,
-            catalog=self.tooling.shopper_catalog,
+            catalog=catalog_port,
             recovery=self.tooling.recovery,
             references=self.tooling.references,
             cart=cart_port,
