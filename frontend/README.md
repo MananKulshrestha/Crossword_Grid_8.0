@@ -1,50 +1,31 @@
-# FK GRiD Frontend
+# GridKart frontend
 
-This is the Vite and React frontend for the FK GRiD shopping assistant.
-
-## Requirements
-
-- Node.js 20 or later
-- npm
-- The FK GRiD API running locally when using the shopping assistant
+React/Vite wrapper for the existing `fkgrid` FastAPI application. It does not contain catalog fixtures or duplicate shopping logic. All search, product, comparison, availability, and cart responses come from the existing session/turn API.
 
 ## Run locally
 
-From this directory:
+From the repository root, start the backend:
 
 ```bash
+./run_server.sh
+```
+
+In another terminal:
+
+```bash
+cd frontend
 npm install
-cp .env.example .env.local
 npm run dev
 ```
 
-Vite prints the local URL after it starts, usually `http://localhost:5173`.
+Open `http://127.0.0.1:5173`. Vite proxies `/api` to `http://127.0.0.1:8000`, avoiding any backend CORS change.
 
-The default API URL is `http://127.0.0.1:8000`. To use a different API, set
-`VITE_API_BASE_URL` in `.env.local`:
+For a separately hosted frontend, set `VITE_API_BASE_URL` to the reachable API base URL before building. The backend must then allow the frontend origin at the deployment layer.
 
-```dotenv
-VITE_API_BASE_URL=http://127.0.0.1:8000
-```
+## API mapping
 
-## Start the API
+- `POST /v1/sessions` creates a conversation.
+- `POST /v1/sessions/{session_id}/turns` sends every user request through the existing orchestrator.
+- Structured `search_result`, `product_details`, `comparison`, `availability`, and `cart` fields are rendered directly.
 
-In a second terminal, from the repository root, start the backend API:
-
-```bash
-PYTHONPATH=src FKGRID_MODEL_MODE=fake uvicorn fkgrid.api.main:app --host 127.0.0.1 --port 8000
-```
-
-Use `FKGRID_MODEL_MODE=live` and configure the provider environment variables
-described in the repository README when connecting to the live model.
-
-## Other commands
-
-```bash
-npm run build
-npm run lint
-npm run preview
-```
-
-`npm run build` creates a production bundle in `dist/`. `npm run preview`
-serves that bundle locally after a build.
+The backend currently supplies no product image URL, original price, discount, review count, or delivery estimate. The UI intentionally does not fabricate these fields.
