@@ -1,0 +1,709 @@
+==============================================================================
+Context (hard/soft) tracking evaluation
+Run at: 2026-08-05T23:56:48.971983+00:00
+Conversations: 50
+==============================================================================
+
+[1/50] c000-a (search -> add_price -> add_size)
+  Turn 1: "blue running shoes"
+    expected: hard={}  soft='blue running shoes'
+    actual:   hard={}  soft='blue running shoes'  (action=SEARCH)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 2: "budget is 500 rs"
+    expected: hard={'max_price': 500}  soft='blue running shoes'
+    actual:   hard={'max_price': 500}  soft='blue running shoes'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 3: "size M please"
+    expected: hard={'max_price': 500, 'size': 'M'}  soft='blue running shoes'
+    actual:   hard={'max_price': 500, 'size': 'M'}  soft='blue running shoes'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  -> conversation score: 100%
+
+[2/50] c000-b (search -> add_size -> clear_size_add_stock)
+  Turn 1: "blue running shoes"
+    expected: hard={}  soft='blue running shoes'
+    actual:   hard={}  soft='blue running shoes'  (action=SEARCH)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 2: "size L only"
+    expected: hard={'size': 'L'}  soft='blue running shoes'
+    actual:   hard={'size': 'L'}  soft='blue running shoes'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 3: "any size is fine, just show what's in stock"
+    expected: hard={'stock_status': 'in_stock'}  soft='blue running shoes'
+    actual:   hard={'stock_status': 'in stock'}  soft='blue running shoes'  (action=REFINE)
+    hard_score=0.00  soft_score=1.00  -> PARTIAL, turn score = 50%
+  -> conversation score: 83%
+
+[3/50] c001-b (search -> add_size -> clear_size_add_stock)
+  Turn 1: "red silk saree"
+    expected: hard={}  soft='red silk saree'
+    actual:   hard={}  soft='red silk saree'  (action=SEARCH)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 2: "size XL only"
+    expected: hard={'size': 'XL'}  soft='red silk saree'
+    actual:   hard={'size': 'XL'}  soft='red silk saree'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 3: "any size is fine, just show what's in stock"
+    expected: hard={'stock_status': 'in_stock'}  soft='red silk saree'
+    actual:   hard={'stock_status': 'in stock'}  soft='red silk saree'  (action=REFINE)
+    hard_score=0.00  soft_score=1.00  -> PARTIAL, turn score = 50%
+  -> conversation score: 83%
+
+[4/50] c001-c (search -> add_brand(soft) -> add_price)
+  Turn 1: "red silk saree"
+    expected: hard={}  soft='red silk saree'
+    actual:   hard={}  soft='red silk saree'  (action=SEARCH)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 2: "only Adidas"
+    expected: hard={}  soft='red silk saree adidas'
+    actual:   hard={}  soft='red silk saree Adidas'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 3: "under 2000 rupees"
+    expected: hard={'max_price': 2000}  soft='red silk saree adidas'
+    actual:   hard={'max_price': 2000}  soft='red silk saree Adidas'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  -> conversation score: 100%
+
+[5/50] c002-c (search -> add_brand(soft) -> add_price)
+  Turn 1: "black leather wallet"
+    expected: hard={}  soft='black leather wallet'
+    actual:   hard={}  soft='black leather wallet'  (action=SEARCH)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 2: "only Samsung"
+    expected: hard={}  soft='black leather wallet samsung'
+    actual:   hard={}  soft='black leather wallet Samsung'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 3: "under 2500 rupees"
+    expected: hard={'max_price': 2500}  soft='black leather wallet samsung'
+    actual:   hard={'max_price': 2500}  soft='black leather wallet Samsung'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  -> conversation score: 100%
+
+[6/50] c002-d (search_with_price -> clear_price)
+  Turn 1: "black leather wallet under 5000 rs"
+    expected: hard={'max_price': 5000}  soft='black leather wallet'
+    actual:   hard={'max_price': 5000}  soft='black leather wallet'  (action=SEARCH)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 2: "actually forget the budget, show me everything"
+    expected: hard={}  soft='black leather wallet'
+    actual:   hard={}  soft='black leather wallet'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  -> conversation score: 100%
+
+[7/50] c003-d (search_with_price -> clear_price)
+  Turn 1: "wireless bluetooth headphones under 8000 rs"
+    expected: hard={'max_price': 8000}  soft='wireless bluetooth headphones'
+    actual:   hard={'max_price': 8000}  soft='wireless bluetooth headphones'  (action=SEARCH)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 2: "actually forget the budget, show me everything"
+    expected: hard={}  soft='wireless bluetooth headphones'
+    actual:   hard={}  soft='wireless bluetooth headphones'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  -> conversation score: 100%
+
+[8/50] c003-a (search -> add_price -> add_size)
+  Turn 1: "wireless bluetooth headphones"
+    expected: hard={}  soft='wireless bluetooth headphones'
+    actual:   hard={}  soft='wireless bluetooth headphones'  (action=SEARCH)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 2: "budget is 1500 rs"
+    expected: hard={'max_price': 1500}  soft='wireless bluetooth headphones'
+    actual:   hard={'max_price': 1500}  soft='wireless bluetooth headphones'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 3: "size 8 please"
+    expected: hard={'max_price': 1500, 'size': '8'}  soft='wireless bluetooth headphones'
+    actual:   hard={'max_price': 1500, 'size': '8'}  soft='wireless bluetooth headphones'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  -> conversation score: 100%
+
+[9/50] c004-a (search -> add_price -> add_size)
+  Turn 1: "green cotton kurta"
+    expected: hard={}  soft='green cotton kurta'
+    actual:   hard={}  soft='green cotton kurta'  (action=SEARCH)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 2: "budget is 2000 rs"
+    expected: hard={'max_price': 2000}  soft='green cotton kurta'
+    actual:   hard={'max_price': 2000}  soft='green cotton kurta'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 3: "size 9 please"
+    expected: hard={'max_price': 2000, 'size': '9'}  soft='green cotton kurta'
+    actual:   hard={'max_price': 2000, 'size': '9'}  soft='green cotton kurta'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  -> conversation score: 100%
+
+[10/50] c004-b (search -> add_size -> clear_size_add_stock)
+  Turn 1: "green cotton kurta"
+    expected: hard={}  soft='green cotton kurta'
+    actual:   hard={}  soft='green cotton kurta'  (action=SEARCH)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 2: "size 42 only"
+    expected: hard={'size': '42'}  soft='green cotton kurta'
+    actual:   hard={'size': '42'}  soft='green cotton kurta'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 3: "any size is fine, just show what's in stock"
+    expected: hard={'stock_status': 'in_stock'}  soft='green cotton kurta'
+    actual:   hard={'stock_status': 'in stock'}  soft='green cotton kurta'  (action=REFINE)
+    hard_score=0.00  soft_score=1.00  -> PARTIAL, turn score = 50%
+  -> conversation score: 83%
+
+[11/50] c005-b (search -> add_size -> clear_size_add_stock)
+  Turn 1: "stainless steel water bottle"
+    expected: hard={}  soft='stainless steel water bottle'
+    actual:   hard={}  soft='stainless steel water bottle'  (action=SEARCH)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 2: "size M only"
+    ERROR: LLM_TIMEOUT  -> 0%
+  Turn 3: "any size is fine, just show what's in stock"
+    expected: hard={'stock_status': 'in_stock'}  soft='stainless steel water bottle'
+    actual:   hard={'stock_status': 'in stock'}  soft='stainless steel water bottle'  (action=REFINE)
+    hard_score=0.00  soft_score=1.00  -> PARTIAL, turn score = 50%
+  -> conversation score: 50%
+
+[12/50] c005-c (search -> add_brand(soft) -> add_price)
+  Turn 1: "stainless steel water bottle"
+    expected: hard={}  soft='stainless steel water bottle'
+    actual:   hard={}  soft='stainless steel water bottle'  (action=SEARCH)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 2: "only Levi's"
+    expected: hard={}  soft="stainless steel water bottle levi's"
+    actual:   hard={}  soft="stainless steel water bottle Levi's"  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 3: "under 8000 rupees"
+    expected: hard={'max_price': 8000}  soft="stainless steel water bottle levi's"
+    actual:   hard={'max_price': 8000}  soft="stainless steel water bottle Levi's"  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  -> conversation score: 100%
+
+[13/50] c006-c (search -> add_brand(soft) -> add_price)
+  Turn 1: "gaming laptop"
+    expected: hard={}  soft='gaming laptop'
+    actual:   hard={}  soft='gaming laptop'  (action=SEARCH)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 2: "only Titan"
+    expected: hard={}  soft='gaming laptop titan'
+    actual:   hard={}  soft='gaming laptop Titan'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 3: "under 10000 rupees"
+    expected: hard={'max_price': 10000}  soft='gaming laptop titan'
+    actual:   hard={'max_price': 10000}  soft='gaming laptop Titan'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  -> conversation score: 100%
+
+[14/50] c006-d (search_with_price -> clear_price)
+  Turn 1: "gaming laptop under 25000 rs"
+    expected: hard={'max_price': 25000}  soft='gaming laptop'
+    actual:   hard={'max_price': 25000}  soft='gaming laptop'  (action=SEARCH)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 2: "actually forget the budget, show me everything"
+    expected: hard={}  soft='gaming laptop'
+    actual:   hard={}  soft='gaming laptop'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  -> conversation score: 100%
+
+[15/50] c007-d (search_with_price -> clear_price)
+  Turn 1: "white sneakers under 500 rs"
+    expected: hard={'max_price': 500}  soft='white sneakers'
+    actual:   hard={'max_price': 500}  soft='white sneakers'  (action=SEARCH)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 2: "actually forget the budget, show me everything"
+    expected: hard={}  soft='white sneakers'
+    actual:   hard={}  soft='white sneakers'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  -> conversation score: 100%
+
+[16/50] c007-a (search -> add_price -> add_size)
+  Turn 1: "white sneakers"
+    expected: hard={}  soft='white sneakers'
+    actual:   hard={}  soft='white sneakers'  (action=SEARCH)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 2: "budget is 5000 rs"
+    expected: hard={'max_price': 5000}  soft='white sneakers'
+    actual:   hard={'max_price': 5000}  soft='white sneakers'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 3: "size L please"
+    expected: hard={'max_price': 5000, 'size': 'L'}  soft='white sneakers'
+    actual:   hard={'max_price': 5000, 'size': 'L'}  soft='white sneakers'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  -> conversation score: 100%
+
+[17/50] c008-a (search -> add_price -> add_size)
+  Turn 1: "kids school backpack"
+    expected: hard={}  soft='kids school backpack'
+    actual:   hard={}  soft='kids school backpack'  (action=SEARCH)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 2: "budget is 8000 rs"
+    expected: hard={'max_price': 8000}  soft='kids school backpack'
+    actual:   hard={'max_price': 8000}  soft='kids school backpack'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 3: "size XL please"
+    expected: hard={'max_price': 8000, 'size': 'XL'}  soft='kids school backpack'
+    actual:   hard={'max_price': 8000, 'size': 'XL'}  soft='kids school backpack'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  -> conversation score: 100%
+
+[18/50] c008-b (search -> add_size -> clear_size_add_stock)
+  Turn 1: "kids school backpack"
+    expected: hard={}  soft='kids school backpack'
+    actual:   hard={}  soft='kids school backpack'  (action=SEARCH)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 2: "size 8 only"
+    expected: hard={'size': '8'}  soft='kids school backpack'
+    actual:   hard={'size': '8'}  soft='kids school backpack'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 3: "any size is fine, just show what's in stock"
+    expected: hard={'stock_status': 'in_stock'}  soft='kids school backpack'
+    actual:   hard={'stock_status': 'in stock'}  soft='kids school backpack'  (action=REFINE)
+    hard_score=0.00  soft_score=1.00  -> PARTIAL, turn score = 50%
+  -> conversation score: 83%
+
+[19/50] c009-b (search -> add_size -> clear_size_add_stock)
+  Turn 1: "formal shirt"
+    expected: hard={}  soft='formal shirt'
+    actual:   hard={}  soft='formal shirt'  (action=SEARCH)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 2: "size 9 only"
+    expected: hard={'size': '9'}  soft='formal shirt'
+    actual:   hard={'size': '9'}  soft='formal shirt'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 3: "any size is fine, just show what's in stock"
+    expected: hard={'stock_status': 'in_stock'}  soft='formal shirt'
+    actual:   hard={'stock_status': 'in stock'}  soft='formal shirt'  (action=REFINE)
+    hard_score=0.00  soft_score=1.00  -> PARTIAL, turn score = 50%
+  -> conversation score: 83%
+
+[20/50] c009-c (search -> add_brand(soft) -> add_price)
+  Turn 1: "formal shirt"
+    expected: hard={}  soft='formal shirt'
+    actual:   hard={}  soft='formal shirt'  (action=SEARCH)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 2: "only Reebok"
+    expected: hard={}  soft='formal shirt reebok'
+    actual:   hard={}  soft='formal shirt Reebok'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 3: "under 500 rupees"
+    expected: hard={'max_price': 500}  soft='formal shirt reebok'
+    actual:   hard={'max_price': 500}  soft='formal shirt Reebok'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  -> conversation score: 100%
+
+[21/50] c010-c (search -> add_brand(soft) -> add_price)
+  Turn 1: "yoga mat"
+    expected: hard={}  soft='yoga mat'
+    actual:   hard={}  soft='yoga mat'  (action=SEARCH)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 2: "only Nike"
+    expected: hard={}  soft='yoga mat nike'
+    actual:   hard={}  soft='yoga mat Nike'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 3: "under 800 rupees"
+    expected: hard={'max_price': 800}  soft='yoga mat nike'
+    actual:   hard={'max_price': 800}  soft='yoga mat Nike'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  -> conversation score: 100%
+
+[22/50] c010-d (search_with_price -> clear_price)
+  Turn 1: "yoga mat under 1500 rs"
+    expected: hard={'max_price': 1500}  soft='yoga mat'
+    actual:   hard={'max_price': 1500}  soft='yoga mat'  (action=SEARCH)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 2: "actually forget the budget, show me everything"
+    expected: hard={}  soft='yoga mat'
+    actual:   hard={}  soft='yoga mat'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  -> conversation score: 100%
+
+[23/50] c011-d (search_with_price -> clear_price)
+  Turn 1: "smart watch under 2000 rs"
+    expected: hard={'max_price': 2000}  soft='smart watch'
+    actual:   hard={'max_price': 2000}  soft='smart watch'  (action=SEARCH)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 2: "actually forget the budget, show me everything"
+    expected: hard={}  soft='smart watch'
+    actual:   hard={}  soft='smart watch'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  -> conversation score: 100%
+
+[24/50] c011-a (search -> add_price -> add_size)
+  Turn 1: "smart watch"
+    expected: hard={}  soft='smart watch'
+    actual:   hard={}  soft='smart watch'  (action=SEARCH)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 2: "budget is 25000 rs"
+    expected: hard={'max_price': 25000}  soft='smart watch'
+    actual:   hard={'max_price': 25000}  soft='smart watch'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 3: "size 42 please"
+    expected: hard={'max_price': 25000, 'size': '42'}  soft='smart watch'
+    actual:   hard={'max_price': 25000, 'size': '42'}  soft='smart watch'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  -> conversation score: 100%
+
+[25/50] c012-a (search -> add_price -> add_size)
+  Turn 1: "denim jacket"
+    expected: hard={}  soft='denim jacket'
+    actual:   hard={}  soft='denim jacket'  (action=SEARCH)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 2: "budget is 500 rs"
+    expected: hard={'max_price': 500}  soft='denim jacket'
+    actual:   hard={'max_price': 500}  soft='denim jacket'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 3: "size M please"
+    expected: hard={'max_price': 500, 'size': 'M'}  soft='denim jacket'
+    actual:   hard={'max_price': 500, 'size': 'M'}  soft='denim jacket'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  -> conversation score: 100%
+
+[26/50] c012-b (search -> add_size -> clear_size_add_stock)
+  Turn 1: "denim jacket"
+    expected: hard={}  soft='denim jacket'
+    actual:   hard={}  soft='denim jacket'  (action=SEARCH)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 2: "size L only"
+    expected: hard={'size': 'L'}  soft='denim jacket'
+    actual:   hard={'size': 'L'}  soft='denim jacket'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 3: "any size is fine, just show what's in stock"
+    expected: hard={'stock_status': 'in_stock'}  soft='denim jacket'
+    actual:   hard={'stock_status': 'in stock'}  soft='denim jacket'  (action=REFINE)
+    hard_score=0.00  soft_score=1.00  -> PARTIAL, turn score = 50%
+  -> conversation score: 83%
+
+[27/50] c013-b (search -> add_size -> clear_size_add_stock)
+  Turn 1: "office chair"
+    expected: hard={}  soft='office chair'
+    actual:   hard={}  soft='office chair'  (action=SEARCH)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 2: "size XL only"
+    expected: hard={'size': 'XL'}  soft='office chair'
+    actual:   hard={'size': 'XL'}  soft='office chair'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 3: "any size is fine, just show what's in stock"
+    expected: hard={'stock_status': 'in_stock'}  soft='office chair'
+    actual:   hard={'stock_status': 'in stock'}  soft='office chair'  (action=REFINE)
+    hard_score=0.00  soft_score=1.00  -> PARTIAL, turn score = 50%
+  -> conversation score: 83%
+
+[28/50] c013-c (search -> add_brand(soft) -> add_price)
+  Turn 1: "office chair"
+    ERROR: LLM_TIMEOUT  -> 0%
+  Turn 2: "only Puma"
+    expected: hard={}  soft='office chair puma'
+    actual:   hard={}  soft='Puma'  (action=REFINE)
+    hard_score=1.00  soft_score=0.33  -> PARTIAL, turn score = 67%
+  Turn 3: "under 2000 rupees"
+    expected: hard={'max_price': 2000}  soft='office chair puma'
+    actual:   hard={'max_price': 2000}  soft='Puma'  (action=REFINE)
+    hard_score=1.00  soft_score=0.33  -> PARTIAL, turn score = 67%
+  -> conversation score: 45%
+
+[29/50] c014-c (search -> add_brand(soft) -> add_price)
+  Turn 1: "electric kettle"
+    expected: hard={}  soft='electric kettle'
+    actual:   hard={}  soft='electric kettle'  (action=SEARCH)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 2: "only Sony"
+    expected: hard={}  soft='electric kettle sony'
+    actual:   hard={}  soft='electric kettle Sony'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 3: "under 2500 rupees"
+    expected: hard={'max_price': 2500}  soft='electric kettle sony'
+    actual:   hard={'max_price': 2500}  soft='electric kettle Sony'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  -> conversation score: 100%
+
+[30/50] c014-d (search_with_price -> clear_price)
+  Turn 1: "electric kettle under 5000 rs"
+    expected: hard={'max_price': 5000}  soft='electric kettle'
+    actual:   hard={'max_price': 5000}  soft='electric kettle'  (action=SEARCH)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 2: "actually forget the budget, show me everything"
+    expected: hard={}  soft='electric kettle'
+    actual:   hard={}  soft='electric kettle'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  -> conversation score: 100%
+
+[31/50] c015-d (search_with_price -> clear_price)
+  Turn 1: "sunglasses under 8000 rs"
+    expected: hard={'max_price': 8000}  soft='sunglasses'
+    actual:   hard={'max_price': 8000}  soft='sunglasses'  (action=SEARCH)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 2: "actually forget the budget, show me everything"
+    expected: hard={}  soft='sunglasses'
+    actual:   hard={}  soft='sunglasses'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  -> conversation score: 100%
+
+[32/50] c015-a (search -> add_price -> add_size)
+  Turn 1: "sunglasses"
+    expected: hard={}  soft='sunglasses'
+    actual:   hard={}  soft='sunglasses'  (action=SEARCH)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 2: "budget is 1500 rs"
+    expected: hard={'max_price': 1500}  soft='sunglasses'
+    actual:   hard={'max_price': 1500}  soft='sunglasses'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 3: "size 8 please"
+    expected: hard={'max_price': 1500, 'size': '8'}  soft='sunglasses'
+    actual:   hard={'max_price': 1500, 'size': '8'}  soft='sunglasses'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  -> conversation score: 100%
+
+[33/50] c016-a (search -> add_price -> add_size)
+  Turn 1: "running shorts"
+    expected: hard={}  soft='running shorts'
+    actual:   hard={}  soft='running shorts'  (action=SEARCH)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 2: "budget is 2000 rs"
+    expected: hard={'max_price': 2000}  soft='running shorts'
+    actual:   hard={'max_price': 2000}  soft='running shorts'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 3: "size 9 please"
+    expected: hard={'max_price': 2000, 'size': '9'}  soft='running shorts'
+    actual:   hard={'max_price': 2000, 'size': '9'}  soft='running shorts'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  -> conversation score: 100%
+
+[34/50] c016-b (search -> add_size -> clear_size_add_stock)
+  Turn 1: "running shorts"
+    expected: hard={}  soft='running shorts'
+    actual:   hard={}  soft='running shorts'  (action=SEARCH)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 2: "size 42 only"
+    expected: hard={'size': '42'}  soft='running shorts'
+    actual:   hard={'size': '42'}  soft='running shorts'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 3: "any size is fine, just show what's in stock"
+    expected: hard={'stock_status': 'in_stock'}  soft='running shorts'
+    actual:   hard={'stock_status': 'in stock'}  soft='running shorts'  (action=REFINE)
+    hard_score=0.00  soft_score=1.00  -> PARTIAL, turn score = 50%
+  -> conversation score: 83%
+
+[35/50] c017-b (search -> add_size -> clear_size_add_stock)
+  Turn 1: "bluetooth speaker"
+    expected: hard={}  soft='bluetooth speaker'
+    actual:   hard={}  soft='bluetooth speaker'  (action=SEARCH)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 2: "size M only"
+    expected: hard={'size': 'M'}  soft='bluetooth speaker'
+    actual:   hard={'size': 'M'}  soft='bluetooth speaker'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 3: "any size is fine, just show what's in stock"
+    expected: hard={'stock_status': 'in_stock'}  soft='bluetooth speaker'
+    actual:   hard={'stock_status': 'in stock'}  soft='bluetooth speaker'  (action=REFINE)
+    hard_score=0.00  soft_score=1.00  -> PARTIAL, turn score = 50%
+  -> conversation score: 83%
+
+[36/50] c017-c (search -> add_brand(soft) -> add_price)
+  Turn 1: "bluetooth speaker"
+    expected: hard={}  soft='bluetooth speaker'
+    actual:   hard={}  soft='bluetooth speaker'  (action=SEARCH)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 2: "only Boat"
+    expected: hard={}  soft='bluetooth speaker boat'
+    actual:   hard={}  soft='bluetooth speaker Boat'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 3: "under 8000 rupees"
+    expected: hard={'max_price': 8000}  soft='bluetooth speaker boat'
+    actual:   hard={'max_price': 8000}  soft='bluetooth speaker Boat'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  -> conversation score: 100%
+
+[37/50] c018-c (search -> add_brand(soft) -> add_price)
+  Turn 1: "leather belt"
+    expected: hard={}  soft='leather belt'
+    actual:   hard={}  soft='leather belt'  (action=SEARCH)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 2: "only Hp"
+    expected: hard={}  soft='leather belt hp'
+    actual:   hard={}  soft='leather belt Hp'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 3: "under 10000 rupees"
+    expected: hard={'max_price': 10000}  soft='leather belt hp'
+    actual:   hard={'max_price': 10000}  soft='leather belt Hp'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  -> conversation score: 100%
+
+[38/50] c018-d (search_with_price -> clear_price)
+  Turn 1: "leather belt under 25000 rs"
+    expected: hard={'max_price': 25000}  soft='leather belt'
+    actual:   hard={'max_price': 25000}  soft='leather belt'  (action=SEARCH)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 2: "actually forget the budget, show me everything"
+    expected: hard={}  soft='leather belt'
+    actual:   hard={}  soft='leather belt'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  -> conversation score: 100%
+
+[39/50] c019-d (search_with_price -> clear_price)
+  Turn 1: "baby stroller under 500 rs"
+    expected: hard={'max_price': 500}  soft='baby stroller'
+    actual:   hard={'max_price': 500}  soft='baby stroller'  (action=SEARCH)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 2: "actually forget the budget, show me everything"
+    ERROR: LLM_TIMEOUT  -> 0%
+  -> conversation score: 50%
+
+[40/50] c019-a (search -> add_price -> add_size)
+  Turn 1: "baby stroller"
+    expected: hard={}  soft='baby stroller'
+    actual:   hard={}  soft='baby stroller'  (action=SEARCH)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 2: "budget is 5000 rs"
+    expected: hard={'max_price': 5000}  soft='baby stroller'
+    actual:   hard={'max_price': 5000}  soft='baby stroller'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 3: "size L please"
+    expected: hard={'max_price': 5000, 'size': 'L'}  soft='baby stroller'
+    actual:   hard={'max_price': 5000, 'size': 'L'}  soft='baby stroller'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  -> conversation score: 100%
+
+[41/50] c020-a (search -> add_price -> add_size)
+  Turn 1: "cricket bat"
+    expected: hard={}  soft='cricket bat'
+    actual:   hard={}  soft='cricket bat'  (action=SEARCH)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 2: "budget is 8000 rs"
+    expected: hard={'max_price': 8000}  soft='cricket bat'
+    actual:   hard={'max_price': 8000}  soft='cricket bat'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 3: "size XL please"
+    expected: hard={'max_price': 8000, 'size': 'XL'}  soft='cricket bat'
+    actual:   hard={'max_price': 8000, 'size': 'XL'}  soft='cricket bat'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  -> conversation score: 100%
+
+[42/50] c020-b (search -> add_size -> clear_size_add_stock)
+  Turn 1: "cricket bat"
+    expected: hard={}  soft='cricket bat'
+    actual:   hard={}  soft='cricket bat'  (action=SEARCH)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 2: "size 8 only"
+    expected: hard={'size': '8'}  soft='cricket bat'
+    actual:   hard={'size': '8'}  soft='cricket bat'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 3: "any size is fine, just show what's in stock"
+    expected: hard={'stock_status': 'in_stock'}  soft='cricket bat'
+    actual:   hard={'stock_status': 'in stock'}  soft='cricket bat'  (action=REFINE)
+    hard_score=0.00  soft_score=1.00  -> PARTIAL, turn score = 50%
+  -> conversation score: 83%
+
+[43/50] c021-b (search -> add_size -> clear_size_add_stock)
+  Turn 1: "study table lamp"
+    expected: hard={}  soft='study table lamp'
+    actual:   hard={}  soft='study table lamp'  (action=SEARCH)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 2: "size 9 only"
+    expected: hard={'size': '9'}  soft='study table lamp'
+    actual:   hard={'size': '9'}  soft='study table lamp'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 3: "any size is fine, just show what's in stock"
+    expected: hard={'stock_status': 'in_stock'}  soft='study table lamp'
+    actual:   hard={'stock_status': 'in stock'}  soft='study table lamp'  (action=REFINE)
+    hard_score=0.00  soft_score=1.00  -> PARTIAL, turn score = 50%
+  -> conversation score: 83%
+
+[44/50] c021-c (search -> add_brand(soft) -> add_price)
+  Turn 1: "study table lamp"
+    expected: hard={}  soft='study table lamp'
+    actual:   hard={}  soft='study table lamp'  (action=SEARCH)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 2: "only Adidas"
+    expected: hard={}  soft='study table lamp adidas'
+    actual:   hard={}  soft='study table lamp Adidas'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 3: "under 500 rupees"
+    expected: hard={'max_price': 500}  soft='study table lamp adidas'
+    actual:   hard={'max_price': 500}  soft='study table lamp Adidas'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  -> conversation score: 100%
+
+[45/50] c022-c (search -> add_brand(soft) -> add_price)
+  Turn 1: "winter jacket"
+    expected: hard={}  soft='winter jacket'
+    actual:   hard={}  soft='winter jacket'  (action=SEARCH)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 2: "only Samsung"
+    expected: hard={}  soft='winter jacket samsung'
+    actual:   hard={}  soft='winter jacket Samsung'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 3: "under 800 rupees"
+    expected: hard={'max_price': 800}  soft='winter jacket samsung'
+    actual:   hard={'max_price': 800}  soft='winter jacket Samsung'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  -> conversation score: 100%
+
+[46/50] c022-d (search_with_price -> clear_price)
+  Turn 1: "winter jacket under 1500 rs"
+    expected: hard={'max_price': 1500}  soft='winter jacket'
+    actual:   hard={'max_price': 1500}  soft='winter jacket'  (action=SEARCH)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 2: "actually forget the budget, show me everything"
+    expected: hard={}  soft='winter jacket'
+    actual:   hard={}  soft='winter jacket'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  -> conversation score: 100%
+
+[47/50] c023-d (search_with_price -> clear_price)
+  Turn 1: "wireless mouse under 2000 rs"
+    expected: hard={'max_price': 2000}  soft='wireless mouse'
+    actual:   hard={'max_price': 2000}  soft='wireless mouse'  (action=SEARCH)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 2: "actually forget the budget, show me everything"
+    expected: hard={}  soft='wireless mouse'
+    actual:   hard={}  soft='wireless mouse'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  -> conversation score: 100%
+
+[48/50] c023-a (search -> add_price -> add_size)
+  Turn 1: "wireless mouse"
+    expected: hard={}  soft='wireless mouse'
+    actual:   hard={}  soft='wireless mouse'  (action=SEARCH)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 2: "budget is 25000 rs"
+    expected: hard={'max_price': 25000}  soft='wireless mouse'
+    actual:   hard={'max_price': 25000}  soft='wireless mouse'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 3: "size 42 please"
+    expected: hard={'max_price': 25000, 'size': '42'}  soft='wireless mouse'
+    actual:   hard={'max_price': 25000, 'size': '42'}  soft='wireless mouse'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  -> conversation score: 100%
+
+[49/50] c024-a (search -> add_price -> add_size)
+  Turn 1: "flip flops"
+    expected: hard={}  soft='flip flops'
+    actual:   hard={}  soft='flip flops'  (action=SEARCH)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 2: "budget is 500 rs"
+    expected: hard={'max_price': 500}  soft='flip flops'
+    actual:   hard={'max_price': 500}  soft='flip flops'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 3: "size M please"
+    expected: hard={'max_price': 500, 'size': 'M'}  soft='flip flops'
+    actual:   hard={'max_price': 500, 'size': 'M'}  soft='flip flops'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  -> conversation score: 100%
+
+[50/50] c024-b (search -> add_size -> clear_size_add_stock)
+  Turn 1: "flip flops"
+    expected: hard={}  soft='flip flops'
+    actual:   hard={}  soft='flip flops'  (action=SEARCH)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 2: "size L only"
+    expected: hard={'size': 'L'}  soft='flip flops'
+    actual:   hard={'size': 'L'}  soft='flip flops'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 3: "any size is fine, just show what's in stock"
+    expected: hard={'stock_status': 'in_stock'}  soft='flip flops'
+    actual:   hard={'stock_status': 'in stock'}  soft='flip flops'  (action=REFINE)
+    hard_score=0.00  soft_score=1.00  -> PARTIAL, turn score = 50%
+  -> conversation score: 83%
+
+==============================================================================
+OVERALL: 50 conversations, 138 turns
+  Mean turn score:         92.6%
+  Mean conversation score: 92.8%
+  Turns scored 100%:       120/138 (87.0%)
+
+==============================================================================

@@ -1,0 +1,43 @@
+==============================================================================
+Context (hard/soft) tracking evaluation
+Run at: 2026-08-05T23:56:06.457928+00:00
+Conversations: 2
+==============================================================================
+
+[1/2] c000-a (search -> add_price -> add_size)
+  Turn 1: "blue running shoes"
+    expected: hard={}  soft='blue running shoes'
+    actual:   hard={}  soft='blue running shoes'  (action=SEARCH)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 2: "budget is 500 rs"
+    expected: hard={'max_price': 500}  soft='blue running shoes'
+    actual:   hard={'max_price': 500}  soft='blue running shoes'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 3: "size M please"
+    expected: hard={'max_price': 500, 'size': 'M'}  soft='blue running shoes'
+    actual:   hard={'max_price': 500, 'size': 'M'}  soft='blue running shoes'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  -> conversation score: 100%
+
+[2/2] c000-b (search -> add_size -> clear_size_add_stock)
+  Turn 1: "blue running shoes"
+    expected: hard={}  soft='blue running shoes'
+    actual:   hard={}  soft='blue running shoes'  (action=SEARCH)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 2: "size L only"
+    expected: hard={'size': 'L'}  soft='blue running shoes'
+    actual:   hard={'size': 'L'}  soft='blue running shoes'  (action=REFINE)
+    hard_score=1.00  soft_score=1.00  -> CORRECT, turn score = 100%
+  Turn 3: "any size is fine, just show what's in stock"
+    expected: hard={'stock_status': 'in_stock'}  soft='blue running shoes'
+    actual:   hard={'stock_status': 'in stock'}  soft='blue running shoes'  (action=REFINE)
+    hard_score=0.00  soft_score=1.00  -> PARTIAL, turn score = 50%
+  -> conversation score: 83%
+
+==============================================================================
+OVERALL: 2 conversations, 6 turns
+  Mean turn score:         91.7%
+  Mean conversation score: 91.5%
+  Turns scored 100%:       5/6 (83.3%)
+
+==============================================================================

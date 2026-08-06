@@ -1,0 +1,1328 @@
+{
+  "generated_at": "2026-08-05T23:16:23.562878+00:00",
+  "top_n": 10,
+  "reranker_endpoint": "https://dk82n1hdtxfqmf-8002.proxy.runpod.net/api/search",
+  "overall": {
+    "num_queries": 30,
+    "num_errors": 0,
+    "ndcg@1": 0.7666666666666667,
+    "ndcg@3": 0.794226772831437,
+    "ndcg@5": 0.7953320929043516,
+    "hallucination_rate_by_query": 0.0,
+    "hallucination_rate_by_sku": 0.0,
+    "total_sku_ids_returned": 292,
+    "total_sku_ids_hallucinated": 0
+  },
+  "by_tier": {
+    "1": {
+      "num_queries": 10,
+      "num_errors": 0,
+      "ndcg@1": 0.3,
+      "ndcg@3": 0.3826803184943109,
+      "ndcg@5": 0.3859962787130547,
+      "hallucination_rate": 0.0
+    },
+    "2": {
+      "num_queries": 10,
+      "num_errors": 0,
+      "ndcg@1": 1.0,
+      "ndcg@3": 1.0,
+      "ndcg@5": 1.0,
+      "hallucination_rate": 0.0
+    },
+    "3": {
+      "num_queries": 10,
+      "num_errors": 0,
+      "ndcg@1": 1.0,
+      "ndcg@3": 1.0,
+      "ndcg@5": 1.0,
+      "hallucination_rate": 0.0
+    }
+  },
+  "per_query": [
+    {
+      "query_id": "t1-footwear-blue",
+      "tier": 1,
+      "soft_query_text": "blue running shoes",
+      "hard_constraints": {
+        "category": "Footwear",
+        "max_price": 1500,
+        "stock_status": "in_stock"
+      },
+      "ground_truth_size": 12,
+      "returned_sku_ids": [
+        "SHOEJ5YSJMX2HXRF",
+        "SHOEG6FTDZRRUVDJ",
+        "SHOEHXEGYRZC2RK2",
+        "SHOEG8BM8ZFYGPTP",
+        "SHOEGWYAGF5VNFDX",
+        "SHOEJWZBHYYEAG6E",
+        "SHOEH7622HVGTZUF",
+        "SHOEHGYNUNVJZYMZ",
+        "SHOEBP66SBGGU9ZY",
+        "SHOE38Z4XMXFASBV"
+      ],
+      "relevances": [
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0
+      ],
+      "ndcg": {
+        "1": 0.0,
+        "3": 0.2960819109658652,
+        "5": 0.21398626473452756
+      },
+      "hallucinated_sku_ids": [],
+      "hallucination_rate": 0.0,
+      "latency_s": 20.89,
+      "error": null
+    },
+    {
+      "query_id": "t1-jewellery-gold-necklace",
+      "tier": 1,
+      "soft_query_text": "gold necklace set",
+      "hard_constraints": {
+        "category": "Jewellery",
+        "max_price": 5000,
+        "stock_status": "in_stock"
+      },
+      "ground_truth_size": 162,
+      "returned_sku_ids": [
+        "JWSDZFFRCYKJHBY3",
+        "JWSEE3MYZ2QZ4QHG",
+        "JWSDYGMDJABKCA95",
+        "JWSDWBPPTKXXY7MR",
+        "JWSE6S33EQRZMDTW",
+        "JWSDWBPP8EHPKB5V",
+        "JWSDYQ3RTGG8N7HD",
+        "JWSE47VASY9S8ZNR",
+        "JWSDZCHGUTXYUGZD",
+        "JWSEBWSRZDBMWWPR"
+      ],
+      "relevances": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "ndcg": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0
+      },
+      "hallucinated_sku_ids": [],
+      "hallucination_rate": 0.0,
+      "latency_s": 32.31,
+      "error": null
+    },
+    {
+      "query_id": "t1-watches-black",
+      "tier": 1,
+      "soft_query_text": "black analog watch",
+      "hard_constraints": {
+        "category": "Watches",
+        "max_price": 3000,
+        "stock_status": "in_stock"
+      },
+      "ground_truth_size": 12,
+      "returned_sku_ids": [
+        "WATE3NWH5FZWAMDA",
+        "WATE9MVXX3DZ5UKD",
+        "WATEHXGUDDHGN6ZZ",
+        "WATEDZ9FUHPEQQZF",
+        "WATEBG8FGBPUPKCV",
+        "WATEAGN9N869ZYKV",
+        "WATDG4KP445AV5XC",
+        "WATE9MVXHMTCFZSP",
+        "WATE26J7ZMQDQGZN",
+        "WATDGNATHYWSGVE8"
+      ],
+      "relevances": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        0,
+        0,
+        0,
+        0
+      ],
+      "ndcg": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0
+      },
+      "hallucinated_sku_ids": [],
+      "hallucination_rate": 0.0,
+      "latency_s": 28.05,
+      "error": null
+    },
+    {
+      "query_id": "t1-mobiles-cover",
+      "tier": 1,
+      "soft_query_text": "mobile phone back cover",
+      "hard_constraints": {
+        "category": "Mobiles & Accessories",
+        "max_price": 500,
+        "stock_status": "in_stock"
+      },
+      "ground_truth_size": 37,
+      "returned_sku_ids": [
+        "MBPEJMV5GAY9SZX5",
+        "ACCEHZF95ZRCKACD",
+        "ACCEDUUFVGNTC7ZW",
+        "ACCEDTNRVGAGRCWF",
+        "ACCEB7D4GWPD79ZG"
+      ],
+      "relevances": [
+        0,
+        0,
+        1,
+        0,
+        1
+      ],
+      "ndcg": {
+        "1": 0.0,
+        "3": 0.23463936301137822,
+        "5": 0.30078518014914984
+      },
+      "hallucinated_sku_ids": [],
+      "hallucination_rate": 0.0,
+      "latency_s": 4.36,
+      "error": null
+    },
+    {
+      "query_id": "t1-kitchen-steel",
+      "tier": 1,
+      "soft_query_text": "steel kitchen storage set",
+      "hard_constraints": {
+        "category": "Kitchen & Dining",
+        "max_price": 1000,
+        "stock_status": "in_stock"
+      },
+      "ground_truth_size": 16,
+      "returned_sku_ids": [
+        "CRLEJ6B76SJP8ZVG",
+        "PTPE4JYSR95ADP6S",
+        "KTSEGYZQASMGG6SD",
+        "GRTE8KFBQ8RGDNT7",
+        "KRKE9F9SRBFDZSPE",
+        "FRKEGVUNGC6RCBAZ",
+        "KRKE4HB7QWZSWCDH",
+        "KHKEJTJFZTWHQQGU",
+        "PACEDFZPHQUZ9HET",
+        "BRTEJMMTQZHCY7KH"
+      ],
+      "relevances": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1,
+        1,
+        0,
+        0
+      ],
+      "ndcg": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.27727342735504823
+      },
+      "hallucinated_sku_ids": [],
+      "hallucination_rate": 0.0,
+      "latency_s": 13.32,
+      "error": null
+    },
+    {
+      "query_id": "t1-beauty-lipstick",
+      "tier": 1,
+      "soft_query_text": "matte lipstick shade",
+      "hard_constraints": {
+        "category": "Beauty and Personal Care",
+        "max_price": 500,
+        "stock_status": "in_stock"
+      },
+      "ground_truth_size": 13,
+      "returned_sku_ids": [
+        "CBKEJ3ANRFJUM4TM",
+        "LSKE26U5F87S8GWH",
+        "LSKE36A69ZNY64DG",
+        "LSKE9HQNUZMHBSDJ",
+        "LPBEJGFEZNV23SVG",
+        "LSKE9RHN77N3YEHJ",
+        "LSKE6FWHDDWY7J5T",
+        "CBKEHRSHVFGZ7FVQ",
+        "CBKEHRSMWYB3HVNP",
+        "LSKEEGNSMPN7C8BE"
+      ],
+      "relevances": [
+        1,
+        1,
+        1,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "ndcg": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 0.7227265726449519
+      },
+      "hallucinated_sku_ids": [],
+      "hallucination_rate": 0.0,
+      "latency_s": 6.62,
+      "error": null
+    },
+    {
+      "query_id": "t1-bags-black",
+      "tier": 1,
+      "soft_query_text": "black leather wallet",
+      "hard_constraints": {
+        "category": "Bags, Wallets & Belts",
+        "max_price": 2000,
+        "stock_status": "in_stock"
+      },
+      "ground_truth_size": 12,
+      "returned_sku_ids": [
+        "PPSE2JF4KZJWG5JX",
+        "TDHEGVZKK3SXYZSC",
+        "TDHEGVZKDUDKTUTG",
+        "TDHEGVZKCPPGJ6UU",
+        "BELEG68SBMZFFN5Z",
+        "CHDEJMNV3HGZFCYN",
+        "CLTEGE4SGRTVHXAW",
+        "HMBEJCX8VBJG7HHM",
+        "SLBEJTAH7YJDFZ3Y"
+      ],
+      "relevances": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        1
+      ],
+      "ndcg": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.13120507751234178
+      },
+      "hallucinated_sku_ids": [],
+      "hallucination_rate": 0.0,
+      "latency_s": 7.2,
+      "error": null
+    },
+    {
+      "query_id": "t1-clothing-blue-shirt",
+      "tier": 1,
+      "soft_query_text": "blue casual shirt",
+      "hard_constraints": {
+        "category": "Clothing",
+        "max_price": 1000,
+        "stock_status": "in_stock"
+      },
+      "ground_truth_size": 34,
+      "returned_sku_ids": [
+        "SHTEB9BVH2S3XYCY",
+        "SHTE9JWCMNR8ECDC",
+        "SHTE9XBFQDE4HPGF",
+        "SHTEA48RZYZRRGH3",
+        "SHTEA48RTJTHZY4Q",
+        "SHTEFEVDJKHMCFRC",
+        "SHTE3Z53YPFMUXUW",
+        "SHTEAGGFBZGZMFCF",
+        "SHTEAGYJJADEZAW4",
+        "SHTE9CR9YDFH23NM"
+      ],
+      "relevances": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "ndcg": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.0
+      },
+      "hallucinated_sku_ids": [],
+      "hallucination_rate": 0.0,
+      "latency_s": 29.38,
+      "error": null
+    },
+    {
+      "query_id": "t1-homedecor-wall",
+      "tier": 1,
+      "soft_query_text": "wall hanging home decor",
+      "hard_constraints": {
+        "category": "Home Decor & Festive Needs",
+        "max_price": 1000,
+        "stock_status": "in_stock"
+      },
+      "ground_truth_size": 147,
+      "returned_sku_ids": [
+        "SHIECRX5GAVFAKJ7",
+        "STIE34TGNPF6MC8K",
+        "PHFEG8HFYXFTK6JA",
+        "PHFEG8H2AGDSAHBU",
+        "PHFEG8HFHPE6ZXZ5",
+        "SHIEHG6PEJXGWHNK",
+        "SHIE9J6PFGP9DZAH",
+        "WCKEDVH6WZBMEKHN",
+        "SHIEDJR9RF8WTDZZ",
+        "WCKEDV2AHU7T2K2Y"
+      ],
+      "relevances": [
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        0,
+        1
+      ],
+      "ndcg": {
+        "1": 0.0,
+        "3": 0.2960819109658652,
+        "5": 0.21398626473452756
+      },
+      "hallucinated_sku_ids": [],
+      "hallucination_rate": 0.0,
+      "latency_s": 25.57,
+      "error": null
+    },
+    {
+      "query_id": "t1-computers-mouse",
+      "tier": 1,
+      "soft_query_text": "wireless computer mouse",
+      "hard_constraints": {
+        "category": "Computers",
+        "max_price": 2000,
+        "stock_status": "in_stock"
+      },
+      "ground_truth_size": 35,
+      "returned_sku_ids": [
+        "ACCEGCAVVG6GQ8P5",
+        "LACEGF4MC3ZZGGHE",
+        "LACEGEZAFNV6YHHF",
+        "LACEGEZDFYZYZQ7B",
+        "LACEGEZDSQ5JKX2G",
+        "CLKEGH4ADYDTQFHE",
+        "ACCEGG7KUYJWDUUG",
+        "LACEGF4PBHRZVQZZ",
+        "LACEGF4ZFZYP5WHG",
+        "LACEGEZDGRYHKZWT"
+      ],
+      "relevances": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        0,
+        1,
+        1,
+        1,
+        1
+      ],
+      "ndcg": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0
+      },
+      "hallucinated_sku_ids": [],
+      "hallucination_rate": 0.0,
+      "latency_s": 20.7,
+      "error": null
+    },
+    {
+      "query_id": "t2-footwear",
+      "tier": 2,
+      "soft_query_text": "comfortable shoes under budget",
+      "hard_constraints": {
+        "category": "Footwear",
+        "max_price": 1500,
+        "stock_status": "in_stock"
+      },
+      "ground_truth_size": 791,
+      "returned_sku_ids": [
+        "SHOE4QFHZWCZGCMB",
+        "SHOEJ5YSJMX2HXRF",
+        "SHOEJBV86XSWMZ78",
+        "SHODZ9AKGHEYPWGT",
+        "SHOEEHAFN6MDYZZK",
+        "SHOE84EAMMT8WBW9",
+        "SHOEHZMMPFYUGBGD",
+        "SHOECEHRSPNUVTHH",
+        "SHODZDFBUZVTNZUH",
+        "SHOEGHKABZ66JWWC"
+      ],
+      "relevances": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "ndcg": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0
+      },
+      "hallucinated_sku_ids": [],
+      "hallucination_rate": 0.0,
+      "latency_s": 9.76,
+      "error": null
+    },
+    {
+      "query_id": "t2-jewellery",
+      "tier": 2,
+      "soft_query_text": "nice jewellery gift idea",
+      "hard_constraints": {
+        "category": "Jewellery",
+        "max_price": 5000,
+        "stock_status": "in_stock"
+      },
+      "ground_truth_size": 2406,
+      "returned_sku_ids": [
+        "RNGE9B79AGXBZW2F",
+        "RNGE9B79FYSAQS2M",
+        "BBAEBMNFGRF6U49M",
+        "BBAEBJGBGZU4ERXZ",
+        "BBAEBK8KHEAXFCDT",
+        "BBAE76FZ6E2ZERN7",
+        "NKCECARBX85NCE3P",
+        "NKCE8QPPWEAFYVPP",
+        "BBAE8WCSGZAKUH4F",
+        "NKCEGG487BXDYHGW"
+      ],
+      "relevances": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "ndcg": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0
+      },
+      "hallucinated_sku_ids": [],
+      "hallucination_rate": 0.0,
+      "latency_s": 16.03,
+      "error": null
+    },
+    {
+      "query_id": "t2-watches",
+      "tier": 2,
+      "soft_query_text": "affordable wrist watch",
+      "hard_constraints": {
+        "category": "Watches",
+        "max_price": 3000,
+        "stock_status": "in_stock"
+      },
+      "ground_truth_size": 422,
+      "returned_sku_ids": [
+        "WATEYAP3K2QQQWDH",
+        "WATEDZ9FUHPEQQZF",
+        "WATEBGPF2YN8ZRHN",
+        "WATEEGTHCNRZFZ5Y",
+        "WATDDXF3D4SGXCW8",
+        "WATEHYJS3XNCZUSE",
+        "WATECFFVGFZPAD3D",
+        "WATE7QKBJMGNXQRQ",
+        "WATEHYHPZSDEGFBT",
+        "WATEHYJBSKK8HHKC"
+      ],
+      "relevances": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "ndcg": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0
+      },
+      "hallucinated_sku_ids": [],
+      "hallucination_rate": 0.0,
+      "latency_s": 17.55,
+      "error": null
+    },
+    {
+      "query_id": "t2-mobiles",
+      "tier": 2,
+      "soft_query_text": "cheap mobile accessory",
+      "hard_constraints": {
+        "category": "Mobiles & Accessories",
+        "max_price": 500,
+        "stock_status": "in_stock"
+      },
+      "ground_truth_size": 276,
+      "returned_sku_ids": [
+        "OTAEG356HUUGPCTU",
+        "OTAEG356AVUHKYHG",
+        "ACCEBWRHKPQCGJNF",
+        "ACCEHZF95ZRCKACD",
+        "ACCED55XRZT9N2HH",
+        "ACCEDTNRVGAGRCWF",
+        "ACCEGWTYBXCTU25E",
+        "ACCEGUYANPHVDGNK",
+        "ACCEGUY9BNMCFZ8P",
+        "ACCEGUY72CYWXAEW"
+      ],
+      "relevances": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "ndcg": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0
+      },
+      "hallucinated_sku_ids": [],
+      "hallucination_rate": 0.0,
+      "latency_s": 5.0,
+      "error": null
+    },
+    {
+      "query_id": "t2-kitchen",
+      "tier": 2,
+      "soft_query_text": "budget kitchen essentials",
+      "hard_constraints": {
+        "category": "Kitchen & Dining",
+        "max_price": 1000,
+        "stock_status": "in_stock"
+      },
+      "ground_truth_size": 497,
+      "returned_sku_ids": [
+        "PTPEANCHERBBXQSW",
+        "CRLEJ6B76SJP8ZVG",
+        "PTPE7R2F5GVPTERA",
+        "PTPE4JYSR95ADP6S",
+        "PACEC9Y274RMYH8J",
+        "PACEBDFU4SN2D5SA",
+        "KRKE4HB7QWZSWCDH",
+        "KTSEGYZQASMGG6SD",
+        "GRTE8KFBQ8RGDNT7",
+        "KRKE9F9SRBFDZSPE"
+      ],
+      "relevances": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "ndcg": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0
+      },
+      "hallucinated_sku_ids": [],
+      "hallucination_rate": 0.0,
+      "latency_s": 4.81,
+      "error": null
+    },
+    {
+      "query_id": "t2-beauty",
+      "tier": 2,
+      "soft_query_text": "cheap makeup product",
+      "hard_constraints": {
+        "category": "Beauty and Personal Care",
+        "max_price": 500,
+        "stock_status": "in_stock"
+      },
+      "ground_truth_size": 452,
+      "returned_sku_ids": [
+        "BLUEGZCARCHECHRW",
+        "CBKEAHJXYMKYBFJC",
+        "VANED79Z5THRWD3K",
+        "BAREGTPMGGH6MB8V",
+        "LSKE5U4JKDMDSVF5",
+        "LSKE36A69ZNY64DG",
+        "LSKE26U5F87S8GWH",
+        "CBKEJ3ANRFJUM4TM"
+      ],
+      "relevances": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "ndcg": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0
+      },
+      "hallucinated_sku_ids": [],
+      "hallucination_rate": 0.0,
+      "latency_s": 6.59,
+      "error": null
+    },
+    {
+      "query_id": "t2-bags",
+      "tier": 2,
+      "soft_query_text": "stylish bag on a budget",
+      "hard_constraints": {
+        "category": "Bags, Wallets & Belts",
+        "max_price": 2000,
+        "stock_status": "in_stock"
+      },
+      "ground_truth_size": 215,
+      "returned_sku_ids": [
+        "HMBEJCMHKH4CGC7C",
+        "HMBEJCMH78VJF3M8",
+        "HMBEJCMHHYWQZKYF",
+        "HMBEJCMHTNACPYR2",
+        "HMBEJCMHXNY6SVVY",
+        "HMBEGCVEZUBUWPTW",
+        "HMBDQRTG6HB6WE99",
+        "HMBEAU8PHXXEG3UB",
+        "HMBEJAFEXGBXZSQT",
+        "SLBEG68TKWYVGNKT"
+      ],
+      "relevances": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "ndcg": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0
+      },
+      "hallucinated_sku_ids": [],
+      "hallucination_rate": 0.0,
+      "latency_s": 26.96,
+      "error": null
+    },
+    {
+      "query_id": "t2-clothing",
+      "tier": 2,
+      "soft_query_text": "trendy clothing item",
+      "hard_constraints": {
+        "category": "Clothing",
+        "max_price": 1000,
+        "stock_status": "in_stock"
+      },
+      "ground_truth_size": 4567,
+      "returned_sku_ids": [
+        "SHTE6Q3KZ8TABHGN",
+        "BRAE4MU4JHPNSKZS",
+        "SWSEDHHRZCEEAU8U",
+        "SWTECFFWWQ5BDTMP",
+        "TOPE4VR5AVGTDWF5",
+        "TOPEBHJAN6UCMYVK",
+        "SHTEC87HZVHXPGKS",
+        "TSHE2MEYXTHGZWE9",
+        "KTAEAZPFCRT3BADP",
+        "BRAE5RWPQAHEHQDM"
+      ],
+      "relevances": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "ndcg": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0
+      },
+      "hallucinated_sku_ids": [],
+      "hallucination_rate": 0.0,
+      "latency_s": 21.72,
+      "error": null
+    },
+    {
+      "query_id": "t2-homedecor",
+      "tier": 2,
+      "soft_query_text": "nice home decor piece",
+      "hard_constraints": {
+        "category": "Home Decor & Festive Needs",
+        "max_price": 1000,
+        "stock_status": "in_stock"
+      },
+      "ground_truth_size": 554,
+      "returned_sku_ids": [
+        "WCKEDVH6WZBMEKHN",
+        "WCKEDV2AHU7T2K2Y",
+        "SHIEAVD8TGQQYYKW",
+        "SHIEAREZZWVXUBQT",
+        "SHIECKYBVDJ7FBSG",
+        "SHIE7DFN2AGNFUUS",
+        "SHIE8QA8RSGHCEYY",
+        "SHIEAU6YY2FY4XXX",
+        "SHIE7DFN7FEZEQJE",
+        "VASEJQQHDBMQZ4PK"
+      ],
+      "relevances": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "ndcg": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0
+      },
+      "hallucinated_sku_ids": [],
+      "hallucination_rate": 0.0,
+      "latency_s": 18.13,
+      "error": null
+    },
+    {
+      "query_id": "t2-computers",
+      "tier": 2,
+      "soft_query_text": "budget computer accessory",
+      "hard_constraints": {
+        "category": "Computers",
+        "max_price": 2000,
+        "stock_status": "in_stock"
+      },
+      "ground_truth_size": 381,
+      "returned_sku_ids": [
+        "USGEDZEKBZKVYEZC",
+        "USGE5BVUJY4DCCZF",
+        "ACCDWRBGW9XNZDGP",
+        "CLKEGH4ADYDTQFHE",
+        "ACCDX3K2FTG9TNPZ",
+        "USGEB59MTEDYZGZH",
+        "ACCDXFFDW2X8MRFF",
+        "USGEDEACJFWG9HX9",
+        "USGECHVGUHTZHTE9",
+        "USGEEF3QTHWQ73HZ"
+      ],
+      "relevances": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "ndcg": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0
+      },
+      "hallucinated_sku_ids": [],
+      "hallucination_rate": 0.0,
+      "latency_s": 14.72,
+      "error": null
+    },
+    {
+      "query_id": "t3-footwear",
+      "tier": 3,
+      "soft_query_text": "shoes",
+      "hard_constraints": {
+        "category": "Footwear"
+      },
+      "ground_truth_size": 1231,
+      "returned_sku_ids": [
+        "SHOEDM6ESQGUFT8F",
+        "SHOEDZZYZYGXGQZZ",
+        "SHOEJ5YSJMX2HXRF",
+        "SHOEDZZYXSYCQB7E",
+        "SHOEDZZEHQZCRHES",
+        "SHOEE5N4X6Q6MAUG",
+        "SHOE63SEYDFSBSZG",
+        "SHOEHDF4PSUGJXAQ",
+        "SHOE7ZK8M2Q4EJYD",
+        "SHOECJTWAVQ3J745"
+      ],
+      "relevances": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "ndcg": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0
+      },
+      "hallucinated_sku_ids": [],
+      "hallucination_rate": 0.0,
+      "latency_s": 20.31,
+      "error": null
+    },
+    {
+      "query_id": "t3-jewellery",
+      "tier": 3,
+      "soft_query_text": "jewellery",
+      "hard_constraints": {
+        "category": "Jewellery"
+      },
+      "ground_truth_size": 3531,
+      "returned_sku_ids": [
+        "RNGE9B79FYSAQS2M",
+        "RNGE9B79AGXBZW2F",
+        "ERGEJNWWBJZFQCW9",
+        "BBAEHWDDQZRB8BY3",
+        "BBAEAEZDYZUX63UR",
+        "NKCE9PYYGDUEHZGH",
+        "NKCEANMPATURDMHV",
+        "NKCEANMPCSWGRBH5",
+        "NKCEANMPAQHUMWWJ",
+        "NKCEANMPGJAZ7BHE"
+      ],
+      "relevances": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "ndcg": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0
+      },
+      "hallucinated_sku_ids": [],
+      "hallucination_rate": 0.0,
+      "latency_s": 24.37,
+      "error": null
+    },
+    {
+      "query_id": "t3-watches",
+      "tier": 3,
+      "soft_query_text": "watch",
+      "hard_constraints": {
+        "category": "Watches"
+      },
+      "ground_truth_size": 530,
+      "returned_sku_ids": [
+        "WATE6S3AHZXW9GPK",
+        "WATE6S3AMDGT5PVG",
+        "WATE6NVSM2KFHF2R",
+        "WATDZ2ZQGWW4QGNK",
+        "WATDZ2ZQGUATCWJT",
+        "WATDZ2ZQTQVJYHZ4",
+        "WATDNJVHHKXKVRGF",
+        "WATDNA7SWQ4ECPVS",
+        "WATD9H76PTHAUCHY",
+        "WATDZ2ZQWKH2ERZ9"
+      ],
+      "relevances": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "ndcg": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0
+      },
+      "hallucinated_sku_ids": [],
+      "hallucination_rate": 0.0,
+      "latency_s": 19.36,
+      "error": null
+    },
+    {
+      "query_id": "t3-mobiles",
+      "tier": 3,
+      "soft_query_text": "mobile accessory",
+      "hard_constraints": {
+        "category": "Mobiles & Accessories"
+      },
+      "ground_truth_size": 1099,
+      "returned_sku_ids": [
+        "OTAEG356AVUHKYHG",
+        "OTAEG356HUUGPCTU",
+        "ACCEASSUYWK9GAWX",
+        "ACCEBWRHKPQCGJNF",
+        "ACCEHZF95ZRCKACD",
+        "ACCEGH6SQEPM7FDE",
+        "MOHEGYZJDMGUJQYB",
+        "ACCEGH6SSPNXVMWQ",
+        "ACCEGNT92ZHV8UK9",
+        "ACCEGWTYBXCTU25E"
+      ],
+      "relevances": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "ndcg": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0
+      },
+      "hallucinated_sku_ids": [],
+      "hallucination_rate": 0.0,
+      "latency_s": 12.69,
+      "error": null
+    },
+    {
+      "query_id": "t3-kitchen",
+      "tier": 3,
+      "soft_query_text": "kitchen item",
+      "hard_constraints": {
+        "category": "Kitchen & Dining"
+      },
+      "ground_truth_size": 647,
+      "returned_sku_ids": [
+        "PTPECA2QYCZH8MBV",
+        "CRLEJ6B76SJP8ZVG",
+        "KISEJ7WDQY499TQE",
+        "PTPEANCHERBBXQSW",
+        "MUGEBFGY49MKHHRT",
+        "PRCEGHNC9C8MGPVK",
+        "PTPEB98UCDYJ2MTE",
+        "CNTEJVGGPSZRZDFH",
+        "PTPE4JYSR95ADP6S",
+        "PRCEGJCJDPQ2YVYY"
+      ],
+      "relevances": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "ndcg": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0
+      },
+      "hallucinated_sku_ids": [],
+      "hallucination_rate": 0.0,
+      "latency_s": 15.66,
+      "error": null
+    },
+    {
+      "query_id": "t3-beauty",
+      "tier": 3,
+      "soft_query_text": "beauty product",
+      "hard_constraints": {
+        "category": "Beauty and Personal Care"
+      },
+      "ground_truth_size": 710,
+      "returned_sku_ids": [
+        "CBKEAHJXUF3XZVC2",
+        "CBKEA9HYUXZEYXAH",
+        "CBKEAHJXYZ5EHUFX",
+        "CBKEAHJXYGJHFCBT",
+        "CBKEBFJXQJZDCUPB",
+        "CBKEAHJXYMKYBFJC",
+        "CBKEAHJXG8EJYDY6",
+        "CBKEBFJXCJQ7KEWK",
+        "CBKE9HPG9PECGHCV",
+        "DEOEGAKKGZKKGQYK"
+      ],
+      "relevances": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "ndcg": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0
+      },
+      "hallucinated_sku_ids": [],
+      "hallucination_rate": 0.0,
+      "latency_s": 17.59,
+      "error": null
+    },
+    {
+      "query_id": "t3-bags",
+      "tier": 3,
+      "soft_query_text": "bag",
+      "hard_constraints": {
+        "category": "Bags, Wallets & Belts"
+      },
+      "ground_truth_size": 276,
+      "returned_sku_ids": [
+        "HMBEJKHKC7YSHUTB",
+        "HMBEGF7PN8ZJ9PQ9",
+        "HMBEJAFGM3ECD9B4",
+        "HMBEJ9Q25FGHAPHZ",
+        "HMBEJ9Q389KGGV9M",
+        "HMBEJKMFTZKGMBEG",
+        "HMBEJKHYMFZKTZJ4",
+        "STCEGDYJFPZYFGSZ",
+        "STCEGDYGEY3JCWHE",
+        "BAGEEDYFGZHGQAVS"
+      ],
+      "relevances": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "ndcg": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0
+      },
+      "hallucinated_sku_ids": [],
+      "hallucination_rate": 0.0,
+      "latency_s": 24.59,
+      "error": null
+    },
+    {
+      "query_id": "t3-clothing",
+      "tier": 3,
+      "soft_query_text": "clothing",
+      "hard_constraints": {
+        "category": "Clothing"
+      },
+      "ground_truth_size": 6221,
+      "returned_sku_ids": [
+        "TSHE8ZJ4MGKSCYSD",
+        "TOPEBKPFZSBVQMNT",
+        "KRTEAX83ZSGWJP5G",
+        "TOPEDWWYTHRAADB3",
+        "SHTEBSMJGW2XZMMN",
+        "TKPECMHB4F3FGXHZ",
+        "TSHECJAYTY4YDUGT",
+        "TSHE9BGGE85KBETR",
+        "TOPED9T33BGVTQZS",
+        "TOPEDAFGWRUNR7XC"
+      ],
+      "relevances": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "ndcg": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0
+      },
+      "hallucinated_sku_ids": [],
+      "hallucination_rate": 0.0,
+      "latency_s": 24.72,
+      "error": null
+    },
+    {
+      "query_id": "t3-homedecor",
+      "tier": 3,
+      "soft_query_text": "home decor",
+      "hard_constraints": {
+        "category": "Home Decor & Festive Needs"
+      },
+      "ground_truth_size": 929,
+      "returned_sku_ids": [
+        "SHIEBZB4NSHCQTXA",
+        "SHIEAU6YY2FY4XXX",
+        "SHIE7DFN2AGNFUUS",
+        "WCKEDV2AHU7T2K2Y",
+        "WCKEDVH6ZYWJ2QCH",
+        "WCKEDVH6WZBMEKHN",
+        "STIE34TGNPF6MC8K",
+        "SHIEAREZZWVXUBQT",
+        "SHIED9QZH7GZUGSK",
+        "SHIE9J6P8QHDZWXF"
+      ],
+      "relevances": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "ndcg": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0
+      },
+      "hallucinated_sku_ids": [],
+      "hallucination_rate": 0.0,
+      "latency_s": 20.65,
+      "error": null
+    },
+    {
+      "query_id": "t3-computers",
+      "tier": 3,
+      "soft_query_text": "computer",
+      "hard_constraints": {
+        "category": "Computers"
+      },
+      "ground_truth_size": 577,
+      "returned_sku_ids": [
+        "USGEEYH64QRHY7GN",
+        "USGEEYH623AYXGYW",
+        "CLKEGH4ADYDTQFHE",
+        "ACCDX3K2FTG9TNPZ",
+        "ACCDWRBGW9XNZDGP",
+        "COMEAZ94HWYQTZHZ",
+        "COMEAZ945RHFFGUS",
+        "PSREFBQM8V7GVCGX",
+        "ACCEJHEKWCGVMTHH",
+        "PSREG6VQUVDHV98Q"
+      ],
+      "relevances": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "ndcg": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0
+      },
+      "hallucinated_sku_ids": [],
+      "hallucination_rate": 0.0,
+      "latency_s": 14.56,
+      "error": null
+    }
+  ]
+}

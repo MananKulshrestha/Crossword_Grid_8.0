@@ -1,0 +1,1433 @@
+[
+  {
+    "conversation_id": "c000-a",
+    "pattern": "search -> add_price -> add_size",
+    "turns": [
+      {
+        "user": "blue running shoes",
+        "expected": {
+          "hard": {},
+          "soft": "blue running shoes"
+        }
+      },
+      {
+        "user": "budget is 500 rs",
+        "expected": {
+          "hard": {
+            "max_price": 500
+          },
+          "soft": "blue running shoes"
+        }
+      },
+      {
+        "user": "size M please",
+        "expected": {
+          "hard": {
+            "max_price": 500,
+            "size": "M"
+          },
+          "soft": "blue running shoes"
+        }
+      }
+    ]
+  },
+  {
+    "conversation_id": "c000-b",
+    "pattern": "search -> add_size -> clear_size_add_stock",
+    "turns": [
+      {
+        "user": "blue running shoes",
+        "expected": {
+          "hard": {},
+          "soft": "blue running shoes"
+        }
+      },
+      {
+        "user": "size L only",
+        "expected": {
+          "hard": {
+            "size": "L"
+          },
+          "soft": "blue running shoes"
+        }
+      },
+      {
+        "user": "any size is fine, just show what's in stock",
+        "expected": {
+          "hard": {
+            "stock_status": "in_stock"
+          },
+          "soft": "blue running shoes"
+        }
+      }
+    ]
+  },
+  {
+    "conversation_id": "c001-b",
+    "pattern": "search -> add_size -> clear_size_add_stock",
+    "turns": [
+      {
+        "user": "red silk saree",
+        "expected": {
+          "hard": {},
+          "soft": "red silk saree"
+        }
+      },
+      {
+        "user": "size XL only",
+        "expected": {
+          "hard": {
+            "size": "XL"
+          },
+          "soft": "red silk saree"
+        }
+      },
+      {
+        "user": "any size is fine, just show what's in stock",
+        "expected": {
+          "hard": {
+            "stock_status": "in_stock"
+          },
+          "soft": "red silk saree"
+        }
+      }
+    ]
+  },
+  {
+    "conversation_id": "c001-c",
+    "pattern": "search -> add_brand(soft) -> add_price",
+    "turns": [
+      {
+        "user": "red silk saree",
+        "expected": {
+          "hard": {},
+          "soft": "red silk saree"
+        }
+      },
+      {
+        "user": "only Adidas",
+        "expected": {
+          "hard": {},
+          "soft": "red silk saree adidas"
+        }
+      },
+      {
+        "user": "under 2000 rupees",
+        "expected": {
+          "hard": {
+            "max_price": 2000
+          },
+          "soft": "red silk saree adidas"
+        }
+      }
+    ]
+  },
+  {
+    "conversation_id": "c002-c",
+    "pattern": "search -> add_brand(soft) -> add_price",
+    "turns": [
+      {
+        "user": "black leather wallet",
+        "expected": {
+          "hard": {},
+          "soft": "black leather wallet"
+        }
+      },
+      {
+        "user": "only Samsung",
+        "expected": {
+          "hard": {},
+          "soft": "black leather wallet samsung"
+        }
+      },
+      {
+        "user": "under 2500 rupees",
+        "expected": {
+          "hard": {
+            "max_price": 2500
+          },
+          "soft": "black leather wallet samsung"
+        }
+      }
+    ]
+  },
+  {
+    "conversation_id": "c002-d",
+    "pattern": "search_with_price -> clear_price",
+    "turns": [
+      {
+        "user": "black leather wallet under 5000 rs",
+        "expected": {
+          "hard": {
+            "max_price": 5000
+          },
+          "soft": "black leather wallet"
+        }
+      },
+      {
+        "user": "actually forget the budget, show me everything",
+        "expected": {
+          "hard": {},
+          "soft": "black leather wallet"
+        }
+      }
+    ]
+  },
+  {
+    "conversation_id": "c003-d",
+    "pattern": "search_with_price -> clear_price",
+    "turns": [
+      {
+        "user": "wireless bluetooth headphones under 8000 rs",
+        "expected": {
+          "hard": {
+            "max_price": 8000
+          },
+          "soft": "wireless bluetooth headphones"
+        }
+      },
+      {
+        "user": "actually forget the budget, show me everything",
+        "expected": {
+          "hard": {},
+          "soft": "wireless bluetooth headphones"
+        }
+      }
+    ]
+  },
+  {
+    "conversation_id": "c003-a",
+    "pattern": "search -> add_price -> add_size",
+    "turns": [
+      {
+        "user": "wireless bluetooth headphones",
+        "expected": {
+          "hard": {},
+          "soft": "wireless bluetooth headphones"
+        }
+      },
+      {
+        "user": "budget is 1500 rs",
+        "expected": {
+          "hard": {
+            "max_price": 1500
+          },
+          "soft": "wireless bluetooth headphones"
+        }
+      },
+      {
+        "user": "size 8 please",
+        "expected": {
+          "hard": {
+            "max_price": 1500,
+            "size": "8"
+          },
+          "soft": "wireless bluetooth headphones"
+        }
+      }
+    ]
+  },
+  {
+    "conversation_id": "c004-a",
+    "pattern": "search -> add_price -> add_size",
+    "turns": [
+      {
+        "user": "green cotton kurta",
+        "expected": {
+          "hard": {},
+          "soft": "green cotton kurta"
+        }
+      },
+      {
+        "user": "budget is 2000 rs",
+        "expected": {
+          "hard": {
+            "max_price": 2000
+          },
+          "soft": "green cotton kurta"
+        }
+      },
+      {
+        "user": "size 9 please",
+        "expected": {
+          "hard": {
+            "max_price": 2000,
+            "size": "9"
+          },
+          "soft": "green cotton kurta"
+        }
+      }
+    ]
+  },
+  {
+    "conversation_id": "c004-b",
+    "pattern": "search -> add_size -> clear_size_add_stock",
+    "turns": [
+      {
+        "user": "green cotton kurta",
+        "expected": {
+          "hard": {},
+          "soft": "green cotton kurta"
+        }
+      },
+      {
+        "user": "size 42 only",
+        "expected": {
+          "hard": {
+            "size": "42"
+          },
+          "soft": "green cotton kurta"
+        }
+      },
+      {
+        "user": "any size is fine, just show what's in stock",
+        "expected": {
+          "hard": {
+            "stock_status": "in_stock"
+          },
+          "soft": "green cotton kurta"
+        }
+      }
+    ]
+  },
+  {
+    "conversation_id": "c005-b",
+    "pattern": "search -> add_size -> clear_size_add_stock",
+    "turns": [
+      {
+        "user": "stainless steel water bottle",
+        "expected": {
+          "hard": {},
+          "soft": "stainless steel water bottle"
+        }
+      },
+      {
+        "user": "size M only",
+        "expected": {
+          "hard": {
+            "size": "M"
+          },
+          "soft": "stainless steel water bottle"
+        }
+      },
+      {
+        "user": "any size is fine, just show what's in stock",
+        "expected": {
+          "hard": {
+            "stock_status": "in_stock"
+          },
+          "soft": "stainless steel water bottle"
+        }
+      }
+    ]
+  },
+  {
+    "conversation_id": "c005-c",
+    "pattern": "search -> add_brand(soft) -> add_price",
+    "turns": [
+      {
+        "user": "stainless steel water bottle",
+        "expected": {
+          "hard": {},
+          "soft": "stainless steel water bottle"
+        }
+      },
+      {
+        "user": "only Levi's",
+        "expected": {
+          "hard": {},
+          "soft": "stainless steel water bottle levi's"
+        }
+      },
+      {
+        "user": "under 8000 rupees",
+        "expected": {
+          "hard": {
+            "max_price": 8000
+          },
+          "soft": "stainless steel water bottle levi's"
+        }
+      }
+    ]
+  },
+  {
+    "conversation_id": "c006-c",
+    "pattern": "search -> add_brand(soft) -> add_price",
+    "turns": [
+      {
+        "user": "gaming laptop",
+        "expected": {
+          "hard": {},
+          "soft": "gaming laptop"
+        }
+      },
+      {
+        "user": "only Titan",
+        "expected": {
+          "hard": {},
+          "soft": "gaming laptop titan"
+        }
+      },
+      {
+        "user": "under 10000 rupees",
+        "expected": {
+          "hard": {
+            "max_price": 10000
+          },
+          "soft": "gaming laptop titan"
+        }
+      }
+    ]
+  },
+  {
+    "conversation_id": "c006-d",
+    "pattern": "search_with_price -> clear_price",
+    "turns": [
+      {
+        "user": "gaming laptop under 25000 rs",
+        "expected": {
+          "hard": {
+            "max_price": 25000
+          },
+          "soft": "gaming laptop"
+        }
+      },
+      {
+        "user": "actually forget the budget, show me everything",
+        "expected": {
+          "hard": {},
+          "soft": "gaming laptop"
+        }
+      }
+    ]
+  },
+  {
+    "conversation_id": "c007-d",
+    "pattern": "search_with_price -> clear_price",
+    "turns": [
+      {
+        "user": "white sneakers under 500 rs",
+        "expected": {
+          "hard": {
+            "max_price": 500
+          },
+          "soft": "white sneakers"
+        }
+      },
+      {
+        "user": "actually forget the budget, show me everything",
+        "expected": {
+          "hard": {},
+          "soft": "white sneakers"
+        }
+      }
+    ]
+  },
+  {
+    "conversation_id": "c007-a",
+    "pattern": "search -> add_price -> add_size",
+    "turns": [
+      {
+        "user": "white sneakers",
+        "expected": {
+          "hard": {},
+          "soft": "white sneakers"
+        }
+      },
+      {
+        "user": "budget is 5000 rs",
+        "expected": {
+          "hard": {
+            "max_price": 5000
+          },
+          "soft": "white sneakers"
+        }
+      },
+      {
+        "user": "size L please",
+        "expected": {
+          "hard": {
+            "max_price": 5000,
+            "size": "L"
+          },
+          "soft": "white sneakers"
+        }
+      }
+    ]
+  },
+  {
+    "conversation_id": "c008-a",
+    "pattern": "search -> add_price -> add_size",
+    "turns": [
+      {
+        "user": "kids school backpack",
+        "expected": {
+          "hard": {},
+          "soft": "kids school backpack"
+        }
+      },
+      {
+        "user": "budget is 8000 rs",
+        "expected": {
+          "hard": {
+            "max_price": 8000
+          },
+          "soft": "kids school backpack"
+        }
+      },
+      {
+        "user": "size XL please",
+        "expected": {
+          "hard": {
+            "max_price": 8000,
+            "size": "XL"
+          },
+          "soft": "kids school backpack"
+        }
+      }
+    ]
+  },
+  {
+    "conversation_id": "c008-b",
+    "pattern": "search -> add_size -> clear_size_add_stock",
+    "turns": [
+      {
+        "user": "kids school backpack",
+        "expected": {
+          "hard": {},
+          "soft": "kids school backpack"
+        }
+      },
+      {
+        "user": "size 8 only",
+        "expected": {
+          "hard": {
+            "size": "8"
+          },
+          "soft": "kids school backpack"
+        }
+      },
+      {
+        "user": "any size is fine, just show what's in stock",
+        "expected": {
+          "hard": {
+            "stock_status": "in_stock"
+          },
+          "soft": "kids school backpack"
+        }
+      }
+    ]
+  },
+  {
+    "conversation_id": "c009-b",
+    "pattern": "search -> add_size -> clear_size_add_stock",
+    "turns": [
+      {
+        "user": "formal shirt",
+        "expected": {
+          "hard": {},
+          "soft": "formal shirt"
+        }
+      },
+      {
+        "user": "size 9 only",
+        "expected": {
+          "hard": {
+            "size": "9"
+          },
+          "soft": "formal shirt"
+        }
+      },
+      {
+        "user": "any size is fine, just show what's in stock",
+        "expected": {
+          "hard": {
+            "stock_status": "in_stock"
+          },
+          "soft": "formal shirt"
+        }
+      }
+    ]
+  },
+  {
+    "conversation_id": "c009-c",
+    "pattern": "search -> add_brand(soft) -> add_price",
+    "turns": [
+      {
+        "user": "formal shirt",
+        "expected": {
+          "hard": {},
+          "soft": "formal shirt"
+        }
+      },
+      {
+        "user": "only Reebok",
+        "expected": {
+          "hard": {},
+          "soft": "formal shirt reebok"
+        }
+      },
+      {
+        "user": "under 500 rupees",
+        "expected": {
+          "hard": {
+            "max_price": 500
+          },
+          "soft": "formal shirt reebok"
+        }
+      }
+    ]
+  },
+  {
+    "conversation_id": "c010-c",
+    "pattern": "search -> add_brand(soft) -> add_price",
+    "turns": [
+      {
+        "user": "yoga mat",
+        "expected": {
+          "hard": {},
+          "soft": "yoga mat"
+        }
+      },
+      {
+        "user": "only Nike",
+        "expected": {
+          "hard": {},
+          "soft": "yoga mat nike"
+        }
+      },
+      {
+        "user": "under 800 rupees",
+        "expected": {
+          "hard": {
+            "max_price": 800
+          },
+          "soft": "yoga mat nike"
+        }
+      }
+    ]
+  },
+  {
+    "conversation_id": "c010-d",
+    "pattern": "search_with_price -> clear_price",
+    "turns": [
+      {
+        "user": "yoga mat under 1500 rs",
+        "expected": {
+          "hard": {
+            "max_price": 1500
+          },
+          "soft": "yoga mat"
+        }
+      },
+      {
+        "user": "actually forget the budget, show me everything",
+        "expected": {
+          "hard": {},
+          "soft": "yoga mat"
+        }
+      }
+    ]
+  },
+  {
+    "conversation_id": "c011-d",
+    "pattern": "search_with_price -> clear_price",
+    "turns": [
+      {
+        "user": "smart watch under 2000 rs",
+        "expected": {
+          "hard": {
+            "max_price": 2000
+          },
+          "soft": "smart watch"
+        }
+      },
+      {
+        "user": "actually forget the budget, show me everything",
+        "expected": {
+          "hard": {},
+          "soft": "smart watch"
+        }
+      }
+    ]
+  },
+  {
+    "conversation_id": "c011-a",
+    "pattern": "search -> add_price -> add_size",
+    "turns": [
+      {
+        "user": "smart watch",
+        "expected": {
+          "hard": {},
+          "soft": "smart watch"
+        }
+      },
+      {
+        "user": "budget is 25000 rs",
+        "expected": {
+          "hard": {
+            "max_price": 25000
+          },
+          "soft": "smart watch"
+        }
+      },
+      {
+        "user": "size 42 please",
+        "expected": {
+          "hard": {
+            "max_price": 25000,
+            "size": "42"
+          },
+          "soft": "smart watch"
+        }
+      }
+    ]
+  },
+  {
+    "conversation_id": "c012-a",
+    "pattern": "search -> add_price -> add_size",
+    "turns": [
+      {
+        "user": "denim jacket",
+        "expected": {
+          "hard": {},
+          "soft": "denim jacket"
+        }
+      },
+      {
+        "user": "budget is 500 rs",
+        "expected": {
+          "hard": {
+            "max_price": 500
+          },
+          "soft": "denim jacket"
+        }
+      },
+      {
+        "user": "size M please",
+        "expected": {
+          "hard": {
+            "max_price": 500,
+            "size": "M"
+          },
+          "soft": "denim jacket"
+        }
+      }
+    ]
+  },
+  {
+    "conversation_id": "c012-b",
+    "pattern": "search -> add_size -> clear_size_add_stock",
+    "turns": [
+      {
+        "user": "denim jacket",
+        "expected": {
+          "hard": {},
+          "soft": "denim jacket"
+        }
+      },
+      {
+        "user": "size L only",
+        "expected": {
+          "hard": {
+            "size": "L"
+          },
+          "soft": "denim jacket"
+        }
+      },
+      {
+        "user": "any size is fine, just show what's in stock",
+        "expected": {
+          "hard": {
+            "stock_status": "in_stock"
+          },
+          "soft": "denim jacket"
+        }
+      }
+    ]
+  },
+  {
+    "conversation_id": "c013-b",
+    "pattern": "search -> add_size -> clear_size_add_stock",
+    "turns": [
+      {
+        "user": "office chair",
+        "expected": {
+          "hard": {},
+          "soft": "office chair"
+        }
+      },
+      {
+        "user": "size XL only",
+        "expected": {
+          "hard": {
+            "size": "XL"
+          },
+          "soft": "office chair"
+        }
+      },
+      {
+        "user": "any size is fine, just show what's in stock",
+        "expected": {
+          "hard": {
+            "stock_status": "in_stock"
+          },
+          "soft": "office chair"
+        }
+      }
+    ]
+  },
+  {
+    "conversation_id": "c013-c",
+    "pattern": "search -> add_brand(soft) -> add_price",
+    "turns": [
+      {
+        "user": "office chair",
+        "expected": {
+          "hard": {},
+          "soft": "office chair"
+        }
+      },
+      {
+        "user": "only Puma",
+        "expected": {
+          "hard": {},
+          "soft": "office chair puma"
+        }
+      },
+      {
+        "user": "under 2000 rupees",
+        "expected": {
+          "hard": {
+            "max_price": 2000
+          },
+          "soft": "office chair puma"
+        }
+      }
+    ]
+  },
+  {
+    "conversation_id": "c014-c",
+    "pattern": "search -> add_brand(soft) -> add_price",
+    "turns": [
+      {
+        "user": "electric kettle",
+        "expected": {
+          "hard": {},
+          "soft": "electric kettle"
+        }
+      },
+      {
+        "user": "only Sony",
+        "expected": {
+          "hard": {},
+          "soft": "electric kettle sony"
+        }
+      },
+      {
+        "user": "under 2500 rupees",
+        "expected": {
+          "hard": {
+            "max_price": 2500
+          },
+          "soft": "electric kettle sony"
+        }
+      }
+    ]
+  },
+  {
+    "conversation_id": "c014-d",
+    "pattern": "search_with_price -> clear_price",
+    "turns": [
+      {
+        "user": "electric kettle under 5000 rs",
+        "expected": {
+          "hard": {
+            "max_price": 5000
+          },
+          "soft": "electric kettle"
+        }
+      },
+      {
+        "user": "actually forget the budget, show me everything",
+        "expected": {
+          "hard": {},
+          "soft": "electric kettle"
+        }
+      }
+    ]
+  },
+  {
+    "conversation_id": "c015-d",
+    "pattern": "search_with_price -> clear_price",
+    "turns": [
+      {
+        "user": "sunglasses under 8000 rs",
+        "expected": {
+          "hard": {
+            "max_price": 8000
+          },
+          "soft": "sunglasses"
+        }
+      },
+      {
+        "user": "actually forget the budget, show me everything",
+        "expected": {
+          "hard": {},
+          "soft": "sunglasses"
+        }
+      }
+    ]
+  },
+  {
+    "conversation_id": "c015-a",
+    "pattern": "search -> add_price -> add_size",
+    "turns": [
+      {
+        "user": "sunglasses",
+        "expected": {
+          "hard": {},
+          "soft": "sunglasses"
+        }
+      },
+      {
+        "user": "budget is 1500 rs",
+        "expected": {
+          "hard": {
+            "max_price": 1500
+          },
+          "soft": "sunglasses"
+        }
+      },
+      {
+        "user": "size 8 please",
+        "expected": {
+          "hard": {
+            "max_price": 1500,
+            "size": "8"
+          },
+          "soft": "sunglasses"
+        }
+      }
+    ]
+  },
+  {
+    "conversation_id": "c016-a",
+    "pattern": "search -> add_price -> add_size",
+    "turns": [
+      {
+        "user": "running shorts",
+        "expected": {
+          "hard": {},
+          "soft": "running shorts"
+        }
+      },
+      {
+        "user": "budget is 2000 rs",
+        "expected": {
+          "hard": {
+            "max_price": 2000
+          },
+          "soft": "running shorts"
+        }
+      },
+      {
+        "user": "size 9 please",
+        "expected": {
+          "hard": {
+            "max_price": 2000,
+            "size": "9"
+          },
+          "soft": "running shorts"
+        }
+      }
+    ]
+  },
+  {
+    "conversation_id": "c016-b",
+    "pattern": "search -> add_size -> clear_size_add_stock",
+    "turns": [
+      {
+        "user": "running shorts",
+        "expected": {
+          "hard": {},
+          "soft": "running shorts"
+        }
+      },
+      {
+        "user": "size 42 only",
+        "expected": {
+          "hard": {
+            "size": "42"
+          },
+          "soft": "running shorts"
+        }
+      },
+      {
+        "user": "any size is fine, just show what's in stock",
+        "expected": {
+          "hard": {
+            "stock_status": "in_stock"
+          },
+          "soft": "running shorts"
+        }
+      }
+    ]
+  },
+  {
+    "conversation_id": "c017-b",
+    "pattern": "search -> add_size -> clear_size_add_stock",
+    "turns": [
+      {
+        "user": "bluetooth speaker",
+        "expected": {
+          "hard": {},
+          "soft": "bluetooth speaker"
+        }
+      },
+      {
+        "user": "size M only",
+        "expected": {
+          "hard": {
+            "size": "M"
+          },
+          "soft": "bluetooth speaker"
+        }
+      },
+      {
+        "user": "any size is fine, just show what's in stock",
+        "expected": {
+          "hard": {
+            "stock_status": "in_stock"
+          },
+          "soft": "bluetooth speaker"
+        }
+      }
+    ]
+  },
+  {
+    "conversation_id": "c017-c",
+    "pattern": "search -> add_brand(soft) -> add_price",
+    "turns": [
+      {
+        "user": "bluetooth speaker",
+        "expected": {
+          "hard": {},
+          "soft": "bluetooth speaker"
+        }
+      },
+      {
+        "user": "only Boat",
+        "expected": {
+          "hard": {},
+          "soft": "bluetooth speaker boat"
+        }
+      },
+      {
+        "user": "under 8000 rupees",
+        "expected": {
+          "hard": {
+            "max_price": 8000
+          },
+          "soft": "bluetooth speaker boat"
+        }
+      }
+    ]
+  },
+  {
+    "conversation_id": "c018-c",
+    "pattern": "search -> add_brand(soft) -> add_price",
+    "turns": [
+      {
+        "user": "leather belt",
+        "expected": {
+          "hard": {},
+          "soft": "leather belt"
+        }
+      },
+      {
+        "user": "only Hp",
+        "expected": {
+          "hard": {},
+          "soft": "leather belt hp"
+        }
+      },
+      {
+        "user": "under 10000 rupees",
+        "expected": {
+          "hard": {
+            "max_price": 10000
+          },
+          "soft": "leather belt hp"
+        }
+      }
+    ]
+  },
+  {
+    "conversation_id": "c018-d",
+    "pattern": "search_with_price -> clear_price",
+    "turns": [
+      {
+        "user": "leather belt under 25000 rs",
+        "expected": {
+          "hard": {
+            "max_price": 25000
+          },
+          "soft": "leather belt"
+        }
+      },
+      {
+        "user": "actually forget the budget, show me everything",
+        "expected": {
+          "hard": {},
+          "soft": "leather belt"
+        }
+      }
+    ]
+  },
+  {
+    "conversation_id": "c019-d",
+    "pattern": "search_with_price -> clear_price",
+    "turns": [
+      {
+        "user": "baby stroller under 500 rs",
+        "expected": {
+          "hard": {
+            "max_price": 500
+          },
+          "soft": "baby stroller"
+        }
+      },
+      {
+        "user": "actually forget the budget, show me everything",
+        "expected": {
+          "hard": {},
+          "soft": "baby stroller"
+        }
+      }
+    ]
+  },
+  {
+    "conversation_id": "c019-a",
+    "pattern": "search -> add_price -> add_size",
+    "turns": [
+      {
+        "user": "baby stroller",
+        "expected": {
+          "hard": {},
+          "soft": "baby stroller"
+        }
+      },
+      {
+        "user": "budget is 5000 rs",
+        "expected": {
+          "hard": {
+            "max_price": 5000
+          },
+          "soft": "baby stroller"
+        }
+      },
+      {
+        "user": "size L please",
+        "expected": {
+          "hard": {
+            "max_price": 5000,
+            "size": "L"
+          },
+          "soft": "baby stroller"
+        }
+      }
+    ]
+  },
+  {
+    "conversation_id": "c020-a",
+    "pattern": "search -> add_price -> add_size",
+    "turns": [
+      {
+        "user": "cricket bat",
+        "expected": {
+          "hard": {},
+          "soft": "cricket bat"
+        }
+      },
+      {
+        "user": "budget is 8000 rs",
+        "expected": {
+          "hard": {
+            "max_price": 8000
+          },
+          "soft": "cricket bat"
+        }
+      },
+      {
+        "user": "size XL please",
+        "expected": {
+          "hard": {
+            "max_price": 8000,
+            "size": "XL"
+          },
+          "soft": "cricket bat"
+        }
+      }
+    ]
+  },
+  {
+    "conversation_id": "c020-b",
+    "pattern": "search -> add_size -> clear_size_add_stock",
+    "turns": [
+      {
+        "user": "cricket bat",
+        "expected": {
+          "hard": {},
+          "soft": "cricket bat"
+        }
+      },
+      {
+        "user": "size 8 only",
+        "expected": {
+          "hard": {
+            "size": "8"
+          },
+          "soft": "cricket bat"
+        }
+      },
+      {
+        "user": "any size is fine, just show what's in stock",
+        "expected": {
+          "hard": {
+            "stock_status": "in_stock"
+          },
+          "soft": "cricket bat"
+        }
+      }
+    ]
+  },
+  {
+    "conversation_id": "c021-b",
+    "pattern": "search -> add_size -> clear_size_add_stock",
+    "turns": [
+      {
+        "user": "study table lamp",
+        "expected": {
+          "hard": {},
+          "soft": "study table lamp"
+        }
+      },
+      {
+        "user": "size 9 only",
+        "expected": {
+          "hard": {
+            "size": "9"
+          },
+          "soft": "study table lamp"
+        }
+      },
+      {
+        "user": "any size is fine, just show what's in stock",
+        "expected": {
+          "hard": {
+            "stock_status": "in_stock"
+          },
+          "soft": "study table lamp"
+        }
+      }
+    ]
+  },
+  {
+    "conversation_id": "c021-c",
+    "pattern": "search -> add_brand(soft) -> add_price",
+    "turns": [
+      {
+        "user": "study table lamp",
+        "expected": {
+          "hard": {},
+          "soft": "study table lamp"
+        }
+      },
+      {
+        "user": "only Adidas",
+        "expected": {
+          "hard": {},
+          "soft": "study table lamp adidas"
+        }
+      },
+      {
+        "user": "under 500 rupees",
+        "expected": {
+          "hard": {
+            "max_price": 500
+          },
+          "soft": "study table lamp adidas"
+        }
+      }
+    ]
+  },
+  {
+    "conversation_id": "c022-c",
+    "pattern": "search -> add_brand(soft) -> add_price",
+    "turns": [
+      {
+        "user": "winter jacket",
+        "expected": {
+          "hard": {},
+          "soft": "winter jacket"
+        }
+      },
+      {
+        "user": "only Samsung",
+        "expected": {
+          "hard": {},
+          "soft": "winter jacket samsung"
+        }
+      },
+      {
+        "user": "under 800 rupees",
+        "expected": {
+          "hard": {
+            "max_price": 800
+          },
+          "soft": "winter jacket samsung"
+        }
+      }
+    ]
+  },
+  {
+    "conversation_id": "c022-d",
+    "pattern": "search_with_price -> clear_price",
+    "turns": [
+      {
+        "user": "winter jacket under 1500 rs",
+        "expected": {
+          "hard": {
+            "max_price": 1500
+          },
+          "soft": "winter jacket"
+        }
+      },
+      {
+        "user": "actually forget the budget, show me everything",
+        "expected": {
+          "hard": {},
+          "soft": "winter jacket"
+        }
+      }
+    ]
+  },
+  {
+    "conversation_id": "c023-d",
+    "pattern": "search_with_price -> clear_price",
+    "turns": [
+      {
+        "user": "wireless mouse under 2000 rs",
+        "expected": {
+          "hard": {
+            "max_price": 2000
+          },
+          "soft": "wireless mouse"
+        }
+      },
+      {
+        "user": "actually forget the budget, show me everything",
+        "expected": {
+          "hard": {},
+          "soft": "wireless mouse"
+        }
+      }
+    ]
+  },
+  {
+    "conversation_id": "c023-a",
+    "pattern": "search -> add_price -> add_size",
+    "turns": [
+      {
+        "user": "wireless mouse",
+        "expected": {
+          "hard": {},
+          "soft": "wireless mouse"
+        }
+      },
+      {
+        "user": "budget is 25000 rs",
+        "expected": {
+          "hard": {
+            "max_price": 25000
+          },
+          "soft": "wireless mouse"
+        }
+      },
+      {
+        "user": "size 42 please",
+        "expected": {
+          "hard": {
+            "max_price": 25000,
+            "size": "42"
+          },
+          "soft": "wireless mouse"
+        }
+      }
+    ]
+  },
+  {
+    "conversation_id": "c024-a",
+    "pattern": "search -> add_price -> add_size",
+    "turns": [
+      {
+        "user": "flip flops",
+        "expected": {
+          "hard": {},
+          "soft": "flip flops"
+        }
+      },
+      {
+        "user": "budget is 500 rs",
+        "expected": {
+          "hard": {
+            "max_price": 500
+          },
+          "soft": "flip flops"
+        }
+      },
+      {
+        "user": "size M please",
+        "expected": {
+          "hard": {
+            "max_price": 500,
+            "size": "M"
+          },
+          "soft": "flip flops"
+        }
+      }
+    ]
+  },
+  {
+    "conversation_id": "c024-b",
+    "pattern": "search -> add_size -> clear_size_add_stock",
+    "turns": [
+      {
+        "user": "flip flops",
+        "expected": {
+          "hard": {},
+          "soft": "flip flops"
+        }
+      },
+      {
+        "user": "size L only",
+        "expected": {
+          "hard": {
+            "size": "L"
+          },
+          "soft": "flip flops"
+        }
+      },
+      {
+        "user": "any size is fine, just show what's in stock",
+        "expected": {
+          "hard": {
+            "stock_status": "in_stock"
+          },
+          "soft": "flip flops"
+        }
+      }
+    ]
+  }
+]

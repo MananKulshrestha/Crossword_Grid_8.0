@@ -1,0 +1,134 @@
+{
+  "generated_at": "2026-08-05T23:56:41.813624+00:00",
+  "overall": {
+    "num_conversations": 2,
+    "num_turns": 6,
+    "mean_turn_score": 91.7,
+    "mean_conversation_score": 91.5,
+    "turns_scored_100": 5
+  },
+  "conversations": [
+    {
+      "conversation_id": "c000-a",
+      "pattern": "search -> add_price -> add_size",
+      "turns": [
+        {
+          "user": "blue running shoes",
+          "expected": {
+            "hard": {},
+            "soft": "blue running shoes"
+          },
+          "actual": {
+            "action": "SEARCH",
+            "hard": {},
+            "soft": "blue running shoes"
+          },
+          "hard_score": 1.0,
+          "soft_score": 1.0,
+          "turn_score": 100
+        },
+        {
+          "user": "budget is 500 rs",
+          "expected": {
+            "hard": {
+              "max_price": 500
+            },
+            "soft": "blue running shoes"
+          },
+          "actual": {
+            "action": "REFINE",
+            "hard": {
+              "max_price": 500
+            },
+            "soft": "blue running shoes"
+          },
+          "hard_score": 1.0,
+          "soft_score": 1.0,
+          "turn_score": 100
+        },
+        {
+          "user": "size M please",
+          "expected": {
+            "hard": {
+              "max_price": 500,
+              "size": "M"
+            },
+            "soft": "blue running shoes"
+          },
+          "actual": {
+            "action": "REFINE",
+            "hard": {
+              "max_price": 500,
+              "size": "M"
+            },
+            "soft": "blue running shoes"
+          },
+          "hard_score": 1.0,
+          "soft_score": 1.0,
+          "turn_score": 100
+        }
+      ],
+      "conversation_score": 100
+    },
+    {
+      "conversation_id": "c000-b",
+      "pattern": "search -> add_size -> clear_size_add_stock",
+      "turns": [
+        {
+          "user": "blue running shoes",
+          "expected": {
+            "hard": {},
+            "soft": "blue running shoes"
+          },
+          "actual": {
+            "action": "SEARCH",
+            "hard": {},
+            "soft": "blue running shoes"
+          },
+          "hard_score": 1.0,
+          "soft_score": 1.0,
+          "turn_score": 100
+        },
+        {
+          "user": "size L only",
+          "expected": {
+            "hard": {
+              "size": "L"
+            },
+            "soft": "blue running shoes"
+          },
+          "actual": {
+            "action": "REFINE",
+            "hard": {
+              "size": "L"
+            },
+            "soft": "blue running shoes"
+          },
+          "hard_score": 1.0,
+          "soft_score": 1.0,
+          "turn_score": 100
+        },
+        {
+          "user": "any size is fine, just show what's in stock",
+          "expected": {
+            "hard": {
+              "stock_status": "in_stock"
+            },
+            "soft": "blue running shoes"
+          },
+          "actual": {
+            "action": "REFINE",
+            "hard": {
+              "stock_status": "in stock"
+            },
+            "soft": "blue running shoes"
+          },
+          "hard_score": 0.0,
+          "soft_score": 1.0,
+          "turn_score": 50
+        }
+      ],
+      "conversation_score": 83
+    }
+  ]
+}
