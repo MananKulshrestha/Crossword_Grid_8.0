@@ -6,6 +6,10 @@ import {
 } from "lucide-react";
 import { ApiError, createSession, sendTurn } from "./api";
 import type { CartSnapshot, ChatMessage, Comparison, SearchEntry, TurnResult } from "./types";
+import { TranscriptReview } from "./voice/TranscriptReview";
+import { VoiceButton } from "./voice/VoiceButton";
+import { VoiceStatus } from "./voice/VoiceStatus";
+import { useVoiceInput } from "./voice/useVoiceInput";
 
 const STARTERS = [
   "Show me highly rated smartphones under 20000",
@@ -83,6 +87,7 @@ export default function App() {
   const [contextOpen, setContextOpen] = useState(true);
   const [cart, setCart] = useState<CartSnapshot | null>(null);
   const [lastProducts, setLastProducts] = useState<SearchEntry[]>([]);
+  const [voiceDraft, setVoiceDraft] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
 
   async function startSession() {
@@ -119,7 +124,22 @@ export default function App() {
     } finally { setBusy(false); }
   }
 
+  const voice = useVoiceInput(
+    async (text) => {
+      await submit(text);
+    },
+    (text) => {
+      setVoiceDraft(text);
+    },
+  );
+
   function onSubmit(event: FormEvent) { event.preventDefault(); void submit(query); }
+  function submitVoiceReview() {
+    const clean = voiceDraft.trim();
+    if (!clean || busy) return;
+    voice.resetReview();
+    void submit(clean);
+  }
   const title = messages.find((message) => message.role === "user")?.content || "New shopping session";
 
   return <div className="app-shell">
@@ -150,7 +170,37 @@ export default function App() {
           {error && <div className="error-banner"><span>{error}</span><button onClick={() => setError(null)}><X size={16} /></button></div>}
           <div ref={endRef} />
         </div>
-        <form className="composer" onSubmit={onSubmit}><div className="composer-inner"><textarea rows={1} value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); onSubmit(event); } }} placeholder={booting ? "Connecting to the shopping server…" : "Ask about products, compare items, or manage your cart…"} disabled={booting || busy || !sessionId} /><button type="submit" disabled={!query.trim() || booting || busy || !sessionId} aria-label="Send message"><Send size={18} /></button></div><small>Responses use live backend and SQL catalog data · Session {sessionId ? sessionId.slice(0, 8) : "not connected"}</small></form>
+        <form className="composer" onSubmit={onSubmit}>
+          <div className="composer-inner">
+            <textarea rows={1} value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); onSubmit(event); } }} placeholder={booting ? "Connecting to the shopping server…" : "Ask about products, compare items, or manage your cart…"} disabled={booting || busy || !sessionId} />
+            <VoiceButton
+              stage={voice.stage}
+              disabled={booting || busy || !sessionId || (!voice.browserSpeechSupported && !voice.pipelineConfigured)}
+              onClick={() => void voice.start()}
+            />
+            <button type="submit" disabled={!query.trim() || booting || busy || !sessionId} aria-label="Send message"><Send size={18} /></button>
+          </div>
+          <VoiceStatus
+            stage={voice.stage}
+            voiceError={voice.voiceError || (!voice.browserSpeechSupported && !voice.pipelineConfigured ? "Voice input needs either browser speech recognition or a configured VITE_VOICE_PIPELINE_URL." : null)}
+            voiceResult={voice.voiceResult}
+            onDismissError={voice.dismissError}
+          />
+          {voice.stage === "review" && voice.voiceResult && (
+            <TranscriptReview
+              voiceResult={voice.voiceResult}
+              value={voiceDraft}
+              onChange={setVoiceDraft}
+              onCancel={() => {
+                setVoiceDraft("");
+                voice.resetReview();
+              }}
+              onSubmit={submitVoiceReview}
+              disabled={busy}
+            />
+          )}
+          <small>Responses use live backend and SQL catalog data · Session {sessionId ? sessionId.slice(0, 8) : "not connected"}</small>
+        </form>
       </section>
       <aside className={`context-panel ${contextOpen ? "" : "closed"}`}>
         <div className="context-title"><span>Session context</span><button onClick={() => setContextOpen(false)}><X size={17} /></button></div>
