@@ -43,7 +43,13 @@ def _read_cart_snapshot(cursor, cart_id: str) -> CartSnapshot:
         return CartSnapshot(cart_version=0, item_count=0, total_quantity=0, subtotal_paise=0)
 
     cursor.execute(
-        "SELECT * FROM cart_items WHERE cart_id=%s AND status='ACTIVE' ORDER BY created_at",
+        """
+        SELECT ci.*, p.title AS product_title
+        FROM cart_items ci
+        LEFT JOIN products p ON p.product_id = ci.product_id AND p.catalog_version = ci.catalog_version
+        WHERE ci.cart_id=%s AND ci.status='ACTIVE'
+        ORDER BY ci.created_at
+        """,
         (cart_id,),
     )
     item_rows = cursor.fetchall()
@@ -53,7 +59,7 @@ def _read_cart_snapshot(cursor, cart_id: str) -> CartSnapshot:
             sku_id=row["sku_id"],
             product_id=row["product_id"],
             offer_id=row["offer_id"],
-            title=row.get("title") or row["sku_id"],
+            title=row.get("product_title") or row["sku_id"],
             quantity=row["quantity"],
             unit_price_paise=row["unit_price_paise"],
             line_subtotal_paise=row["line_subtotal_paise"],

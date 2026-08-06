@@ -13,6 +13,8 @@ import json
 import urllib.error
 import urllib.request
 
+from rank_bm25 import BM25Okapi
+
 from . import db
 from .config import RerankerConfig, load_reranker_config
 from .contracts import (
@@ -93,6 +95,7 @@ def _fetch_rows(sku_ids: list[str]) -> dict[str, dict]:
         return {}
     placeholders = ",".join(["%s"] * len(sku_ids))
     query = _ROW_QUERY.format(placeholders=placeholders)
+    print(f"[SQL] {query.strip()} -- params={sku_ids}")
     with db.connection() as conn:
         with conn.cursor() as cursor:
             cursor.execute(query, sku_ids)
@@ -113,6 +116,69 @@ def _entry_from_row(row: dict, rerank_score: float | None) -> SearchEntry:
         availability_status=row.get("availability_status"),
         quantity=row.get("quantity"),
         rerank_score=rerank_score,
+    )
+
+
+_CANDIDATE_QUERY = """
+SELECT
+    s.sku_id, s.product_id, o.offer_id,
+    p.title, p.brand_name, p.rating,
+    pm.category,
+    o.price_paise, o.availability_status, o.quantity
+FROM skus s
+JOIN offers o ON o.sku_id = s.sku_id AND o.catalog_version = s.catalog_version
+JOIN products p ON p.product_id = s.product_id AND p.catalog_version = s.catalog_version
+LEFT JOIN product_metadata pm ON pm.sku_id = s.sku_id
+{where}
+LIMIT 2000
+"""
+
+
+def search_fast(request: RerankerRequest) -> SearchResult:
+    """Fast path: skip the reranker HTTP call entirely. Pull candidates
+    straight from MySQL using hard_constraints as a WHERE clause, then rank
+    them locally with BM25 over title/brand/category against soft_query_text.
+    """
+    constraints = request.hard_constraints or {}
+    conditions: list[str] = []
+    params: list = []
+    if constraints.get("category"):
+        conditions.append("pm.category = %s")
+        params.append(constraints["category"])
+    if constraints.get("max_price") is not None:
+        conditions.append("o.price_paise <= %s")
+        params.append(int(float(constraints["max_price"]) * 100))
+    if constraints.get("stock_status"):
+        conditions.append("o.availability_status = %s")
+        params.append(constraints["stock_status"])
+    where_sql = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+    query = _CANDIDATE_QUERY.format(where=where_sql)
+    print(f"[SQL-FAST] {query.strip()} -- params={params}")
+    with db.connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
+
+    if not rows:
+        return SearchResult(entries=[], result_set_id=None, verified_sku_ids=[], hallucinated_sku_ids=[])
+
+    corpus = [
+        f"{row.get('title') or ''} {row.get('brand_name') or ''} {row.get('category') or ''}".lower().split()
+        for row in rows
+    ]
+    bm25 = BM25Okapi(corpus)
+    query_tokens = request.soft_query_text.lower().split()
+    scores = bm25.get_scores(query_tokens) if query_tokens else [0.0] * len(rows)
+
+    ranked = sorted(zip(rows, scores), key=lambda pair: pair[1], reverse=True)[: request.top_n]
+    entries = [_entry_from_row(row, float(score)) for row, score in ranked]
+    sku_ids = [entry.sku_id for entry in entries]
+
+    return SearchResult(
+        entries=entries,
+        result_set_id=f"bm25-{hash(tuple(sku_ids)) & 0xFFFFFFFF:08x}" if entries else None,
+        verified_sku_ids=sku_ids,
+        hallucinated_sku_ids=[],
     )
 
 

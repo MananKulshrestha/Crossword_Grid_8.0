@@ -1,16 +1,111 @@
-export type Action = "SEARCH" | "REFINE" | "PRODUCT_DETAILS" | "COMPARE" | "CHECK_AVAILABILITY" | "UPDATE_CART" | "SHOW_CART" | "RESEARCH_EXTERNAL" | "RESET_SEARCH" | "HELP";
-export interface Binding { product_id: string; sku_id: string; offer_id: string; catalog_version: string }
-export interface Fact { label: string; typed_value: unknown; status: "VERIFIED" | "UNKNOWN" | "NOT_MODELED" | "DERIVED"; as_of?: string }
-export interface Entry { result_entry_id: string; display_position: number; binding: Binding; title: string; facts: Fact[]; matched_criteria: string[]; unknown_criteria: string[] }
-export interface ActiveResultBinding { result_entry_id: string; display_position: number; binding: Binding; context_ref?: string | null }
-export interface CartItem { cart_item_id: string; binding: Binding; quantity: number; unit_price: { amount_paise: number }; line_subtotal: { amount_paise: number }; availability_status: string }
-export interface Cart { cart_id: string; cart_version: number; state_version: number; items: CartItem[]; item_count: number; total_quantity: number; subtotal: { amount_paise: number }; warnings: string[] }
-export interface Clarification { question: string; choice_ids: string[] }
-export interface Comparison { bindings: Binding[]; rows: { field_id: string; label: string; cells: { value: unknown; status: string }[] }[] }
-export interface ProductDetails { binding: Binding; title?: string; facts: Fact[]; variants: Binding[] }
-export interface ShopperResponse { response_id: string; action: Action; terminal_state: string; summary: string; facts: Fact[]; search_entries: Entry[]; result_set_id?: string; details?: ProductDetails; comparison?: Comparison; availability?: { availability_status: string; quantity?: number; as_of?: string; truth_status: string }; cart?: Cart; clarification?: Clarification; clarification_reason_code?: string; warnings: string[]; suggestions?: { suggestions: { suggestion_id: string; label: string; candidate: { action_type: Action; payload: Record<string, unknown> }; signed_action_token: string }[] } }
-export interface TurnResult { status: "COMPLETED" | "IN_PROGRESS" | "REJECTED"; http_status: number; response?: ShopperResponse; status_ref?: string }
-export interface ActiveResults { result_set_id?: string | null; items: Entry[] }
-export interface Session { session_id: string; state_version: number; cart_version: number; cart: Cart; acknowledged_result_set_id?: string | null; acknowledged_entries: ActiveResultBinding[]; query_state: { hard_constraints: { field_id: string; values: unknown[] }[]; soft_preferences: { field_id: string; values: unknown[] }[] }; model: { speech_configured: boolean; configured: boolean; cart_ready: boolean } }
-export interface CatalogPage { total: number; offset: number; limit: number; items: (Entry & { catalog_position: number })[] }
-export interface CatalogFacets { facets: Record<string, string[]> }
+// Mirrors src/fkgrid/contracts.py exactly. Keep in sync with the backend.
+
+export type Action =
+  | "CHITCHAT"
+  | "SEARCH"
+  | "REFINE"
+  | "PRODUCT_DETAILS"
+  | "COMPARE"
+  | "CHECK_AVAILABILITY"
+  | "SHOW_CART"
+  | "UPDATE_CART";
+
+export interface SearchEntry {
+  sku_id: string;
+  product_id: string;
+  offer_id: string;
+  title: string;
+  brand?: string | null;
+  category?: string | null;
+  price_paise?: number | null;
+  rating?: number | null;
+  availability_status?: string | null;
+  quantity?: number | null;
+  rerank_score?: number | null;
+}
+
+export interface SearchResult {
+  entries: SearchEntry[];
+  result_set_id?: string | null;
+  verified_sku_ids: string[];
+  hallucinated_sku_ids: string[];
+}
+
+export interface ProductDetails {
+  found: boolean;
+  entry?: SearchEntry | null;
+}
+
+export interface ComparisonCell {
+  sku_id: string;
+  value: unknown;
+}
+
+export interface ComparisonRow {
+  field: string;
+  cells: ComparisonCell[];
+}
+
+export interface Comparison {
+  rows: ComparisonRow[];
+  summary?: string | null;
+}
+
+export interface Availability {
+  found: boolean;
+  availability_status?: string | null;
+  quantity?: number | null;
+}
+
+export interface CartItem {
+  cart_item_id: string;
+  sku_id: string;
+  product_id: string;
+  offer_id: string;
+  title: string;
+  quantity: number;
+  unit_price_paise: number;
+  line_subtotal_paise: number;
+  availability_status: string;
+}
+
+export interface CartSnapshot {
+  cart_version: number;
+  item_count: number;
+  total_quantity: number;
+  subtotal_paise: number;
+  items: CartItem[];
+}
+
+export interface FollowUpSuggestion {
+  label: string;
+  action: Action;
+  params: Record<string, unknown>;
+}
+
+export type TurnStatus = "OK" | "ERROR";
+
+export interface TraceStep {
+  stage: string;
+  input: Record<string, unknown>;
+  output: Record<string, unknown>;
+  ok: boolean;
+}
+
+export interface TurnResult {
+  status: TurnStatus;
+  message: string;
+  action?: Action | null;
+  search_result?: SearchResult | null;
+  product_details?: ProductDetails | null;
+  comparison?: Comparison | null;
+  availability?: Availability | null;
+  cart?: CartSnapshot | null;
+  followups: FollowUpSuggestion[];
+  error_code?: string | null;
+  trace: TraceStep[];
+}
+
+export interface CreateSessionResponse {
+  session_id: string;
+}

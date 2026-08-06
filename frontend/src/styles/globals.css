@@ -4,14 +4,42 @@
 @tailwind utilities;
 
 @layer base {
-  * { @apply border-slate-200; }
-  body { @apply min-h-screen bg-[#f1f3f6] font-sans text-fk-ink antialiased; }
+  :root {
+    --background: 220 33% 98%;
+    --foreground: 220 39% 15%;
+    --card: 0 0% 100%;
+    --card-foreground: 220 39% 15%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 39% 15%;
+    --primary: 217 89% 55%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 220 20% 95%;
+    --secondary-foreground: 220 39% 15%;
+    --muted: 220 20% 95%;
+    --muted-foreground: 220 10% 45%;
+    --accent: 220 20% 93%;
+    --accent-foreground: 220 39% 15%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 220 16% 88%;
+    --input: 220 16% 88%;
+    --ring: 217 89% 55%;
+    --radius: 0.75rem;
+  }
+}
+
+@layer base {
+  * { @apply border-border; }
+  body { @apply min-h-screen bg-fk-mist font-sans text-foreground antialiased; }
   button, input, textarea { font: inherit; }
 }
 
 @layer components {
-  .page-shell { @apply mx-auto w-full max-w-[1440px] px-4 sm:px-6 lg:px-8; }
-  .surface { @apply rounded-xl border border-slate-200 bg-white shadow-card; }
-  .eyebrow { @apply text-xs font-bold uppercase tracking-[.12em] text-slate-500; }
-  .focus-ring { @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fk-blue focus-visible:ring-offset-2; }
+  .page-shell { @apply mx-auto w-full max-w-[1400px] px-4 sm:px-6 lg:px-8; }
+  .surface { @apply rounded-xl border border-border bg-card shadow-card; }
+  .eyebrow { @apply text-xs font-bold uppercase tracking-[.12em] text-muted-foreground; }
+  .focus-ring { @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2; }
 }
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { @apply rounded-full bg-slate-300; }

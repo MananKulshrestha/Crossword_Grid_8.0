@@ -243,6 +243,7 @@ class SessionState(BaseModel):
 class TurnRequest(BaseModel):
     session_id: str
     message: str
+    mode: Literal["fast", "deep"] = "deep"
 
 
 class TurnStatus(str, Enum):

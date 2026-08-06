@@ -163,17 +163,23 @@ def handle_turn(request: TurnRequest) -> TurnResult:
     action = extraction.action
 
     if action in (Action.SEARCH, Action.REFINE):
+        is_fast = request.mode == "fast"
+        stage_name = "bm25_search" if is_fast else "reranker_search"
         try:
-            search_result = catalog.search(reranker_request)
+            if is_fast:
+                fast_request = reranker_request.model_copy(update={"top_n": 20})
+                search_result = catalog.search_fast(fast_request)
+            else:
+                search_result = catalog.search(reranker_request)
         except RerankerError as exc:
-            tracer.record("reranker_search", reranker_request.model_dump(mode="json"), {"error": str(exc)}, ok=False)
+            tracer.record(stage_name, reranker_request.model_dump(mode="json"), {"error": str(exc)}, ok=False)
             return _error(tracer, "The search service is unavailable.", str(exc))
         except CatalogError as exc:
-            tracer.record("reranker_search", reranker_request.model_dump(mode="json"), {"error": str(exc)}, ok=False)
+            tracer.record(stage_name, reranker_request.model_dump(mode="json"), {"error": str(exc)}, ok=False)
             return _error(tracer, "The catalog is unavailable.", str(exc))
-        tracer.record("reranker_search", reranker_request.model_dump(mode="json"), search_result.model_dump(mode="json"))
+        tracer.record(stage_name, reranker_request.model_dump(mode="json"), search_result.model_dump(mode="json"))
 
-        if search_result.entries:
+        if search_result.entries and not is_fast:
             candidates = [
                 {
                     "sku_id": entry.sku_id,

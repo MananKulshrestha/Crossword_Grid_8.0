@@ -5,12 +5,20 @@ from __future__ import annotations
 import uuid
 
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from . import memory, orchestrator
 from .contracts import TurnRequest, TurnResult, TurnStatus
 
 app = FastAPI(title="fkgrid chat")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 class CreateSessionResponse(BaseModel):
@@ -19,6 +27,7 @@ class CreateSessionResponse(BaseModel):
 
 class TurnBody(BaseModel):
     message: str
+    mode: str = "deep"
 
 
 @app.get("/healthz")
@@ -45,7 +54,8 @@ def get_session(session_id: str):
 def post_turn(session_id: str, body: TurnBody) -> TurnResult:
     if memory.get_session(session_id) is None:
         raise HTTPException(status_code=404, detail="SESSION_NOT_FOUND")
-    request = TurnRequest(session_id=session_id, message=body.message)
+    mode = "fast" if body.mode == "fast" else "deep"
+    request = TurnRequest(session_id=session_id, message=body.message, mode=mode)
     result = orchestrator.handle_turn(request)
     if result.status == TurnStatus.ERROR:
         raise HTTPException(status_code=502, detail={"message": result.message, "error_code": result.error_code})
