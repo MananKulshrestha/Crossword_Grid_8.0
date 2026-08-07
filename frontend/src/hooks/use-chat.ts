@@ -73,6 +73,7 @@ export function useChat() {
         }
         indexEntries(turn.search_result?.entries);
         if (turn.product_details?.entry) indexEntries([turn.product_details.entry]);
+        if (turn.basket) indexEntries(turn.basket.slots.map((slot) => slot.entry));
         setMessages((prev) => [
           ...prev,
           { id: crypto.randomUUID(), role: "assistant", text: turn.message, turn },

@@ -48,6 +48,10 @@ class Action(str, Enum):
     CHECK_AVAILABILITY = "CHECK_AVAILABILITY"
     SHOW_CART = "SHOW_CART"
     UPDATE_CART = "UPDATE_CART"
+    # Constraint lane: N objects under one shared budget. Only ever produced
+    # by the constrain-mode pipeline in constraint.py, never by the query
+    # extractor - the extractor's prompt/schema is untouched by that lane.
+    CONSTRAINT_BASKET = "CONSTRAINT_BASKET"
 
 
 class Constraint(BaseModel):
@@ -173,6 +177,43 @@ class Availability(BaseModel):
 
 
 # --------------------------------------------------------------------------
+# Constraint basket (N objects, one shared budget)
+# --------------------------------------------------------------------------
+
+
+class BasketSlotSpec(BaseModel):
+    """One object the shopper asked for, as decomposed from the request."""
+
+    label: str
+    keywords: list[str] = Field(default_factory=list)
+    category: str | None = None
+
+
+class BasketSlot(BaseModel):
+    """A filled slot: the chosen product plus the runner-up it beat."""
+
+    label: str
+    entry: SearchEntry
+    # How many candidates the SQL fan-out returned for this slot, and the
+    # score of the best one - so the explanation can say what was traded away.
+    candidate_count: int = 0
+    best_available_score: float = 0.0
+    chosen_score: float = 0.0
+
+
+class Basket(BaseModel):
+    slots: list[BasketSlot] = Field(default_factory=list)
+    budget_paise: int | None = None
+    total_paise: int = 0
+    headroom_paise: int | None = None
+    # Sum of each slot's cheapest-to-beat naive pick - what "best of each"
+    # would have cost. Present so the UI can show why the optimiser mattered.
+    naive_total_paise: int | None = None
+    unfilled: list[str] = Field(default_factory=list)
+    explanation: str | None = None
+
+
+# --------------------------------------------------------------------------
 # Cart
 # --------------------------------------------------------------------------
 
@@ -243,7 +284,7 @@ class SessionState(BaseModel):
 class TurnRequest(BaseModel):
     session_id: str
     message: str
-    mode: Literal["fast", "deep"] = "deep"
+    mode: Literal["fast", "deep", "constrain"] = "deep"
 
 
 class TurnStatus(str, Enum):
@@ -269,6 +310,7 @@ class TurnResult(BaseModel):
     comparison: Comparison | None = None
     availability: Availability | None = None
     cart: CartSnapshot | None = None
+    basket: Basket | None = None
     followups: list[FollowUpSuggestion] = Field(default_factory=list)
     error_code: str | None = None
     trace: list[TraceStep] = Field(default_factory=list)

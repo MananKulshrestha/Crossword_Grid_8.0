@@ -1,4 +1,4 @@
-import { Rabbit, Telescope } from "lucide-react";
+import { Rabbit, Scale, Telescope } from "lucide-react";
 import type { SearchMode } from "@/api/chat";
 import { cn } from "@/lib/utils";
 
@@ -26,6 +26,17 @@ export function ModeToggle({ mode, onChange }: { mode: SearchMode; onChange: (mo
         )}
       >
         <Telescope size={13} /> Deep
+      </button>
+      <button
+        type="button"
+        onClick={() => onChange("constrain")}
+        title="Constrain: several items under one shared budget — decomposes the request, searches each item, then picks the best combination that fits"
+        className={cn(
+          "focus-ring flex items-center gap-1 rounded-full px-2.5 py-1 transition",
+          mode === "constrain" ? "bg-white text-fk-blue shadow-sm" : "text-white/80 hover:text-white",
+        )}
+      >
+        <Scale size={13} /> Constrain
       </button>
     </div>
   );

@@ -81,9 +81,9 @@ class LLMError(RuntimeError):
     """Raised on any LLM failure. The orchestrator must not fall back silently."""
 
 
-def _chat_completion(system_prompt: str, user_payload: dict, json_schema: dict) -> dict:
+def _chat_completion(system_prompt: str, user_payload: dict, json_schema: dict, model_alias: str | None = None) -> dict:
     body = {
-        "model": _config().model_alias,
+        "model": model_alias or _config().model_alias,
         "temperature": 0.0,
         "messages": [
             {"role": "system", "content": system_prompt},
@@ -206,6 +206,78 @@ def filter_relevant_sku_ids(
     if not isinstance(keep, list) or not all(isinstance(sku_id, str) for sku_id in keep):
         raise LLMError("RELEVANCE_SCHEMA_INVALID")
     return keep
+
+
+_DECOMPOSE_SYSTEM_PROMPT = """\
+You are a shopping request decomposer for a budget-basket solver. The shopper
+asks for SEVERAL distinct objects under ONE shared total budget, e.g. "I need
+a keyboard, a mouse and a monitor, all under Rs 15,000 total".
+
+Split the request into one entry per DISTINCT OBJECT, and pull out the shared
+total budget. Output ONLY a JSON object:
+
+{
+  "budget_rupees": number|null,
+  "items": [{"label": string, "keywords": [string], "category": string|null}]
+}
+
+RULES
+
+- One entry per object the shopper wants to end up owning. "a keyboard and a
+  mouse" is two entries; "a good gaming keyboard" is one.
+- "label": short human name for the object, lowercase ("mechanical keyboard").
+- "keywords": 1-5 search words for that object, INCLUDING any shared context
+  that applies to it (use case, brand, quality words). Never include the
+  budget, a price, or a currency word.
+- "category": ONLY a literal name from the allowed_categories list you are
+  given, or null if none of them clearly fits. Never invent a category.
+- "budget_rupees": the shared TOTAL budget in rupees as a plain number (no
+  commas, no currency symbol). "15k"/"15,000"/"Rs 15000" all -> 15000. Use
+  null only if the shopper gave no total budget at all. A per-item budget
+  ("each under 5000") is NOT the total - multiply by the item count.
+- If the shopper really only wants one object, return a single entry.
+
+Output strict JSON, no prose.
+"""
+
+_DECOMPOSE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "budget_rupees": {"type": ["number", "null"]},
+        "items": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "label": {"type": "string"},
+                    "keywords": {"type": "array", "items": {"type": "string"}},
+                    "category": {"type": ["string", "null"]},
+                },
+                "required": ["label", "keywords", "category"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    "required": ["budget_rupees", "items"],
+    "additionalProperties": False,
+}
+
+
+def decompose_basket_request(message: str, allowed_categories: list[str]) -> dict:
+    """Split a multi-object budgeted request into per-object sub-queries.
+
+    Returns the raw {"budget_rupees", "items"} dict - constraint.py validates
+    it into BasketSlotSpecs. Raises LLMError like every other call here."""
+
+    payload = _chat_completion(
+        _DECOMPOSE_SYSTEM_PROMPT,
+        {"message": message, "allowed_categories": allowed_categories},
+        _DECOMPOSE_SCHEMA,
+    )
+    items = payload.get("items")
+    if not isinstance(items, list) or not items:
+        raise LLMError("DECOMPOSE_SCHEMA_INVALID")
+    return payload
 
 
 def summarize_comparison(comparison: Comparison) -> str:

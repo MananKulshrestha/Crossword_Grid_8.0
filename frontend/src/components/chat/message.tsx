@@ -5,6 +5,7 @@ import { ProductGrid } from "@/components/chat/product-card";
 import { CompareTable } from "@/components/chat/compare-table";
 import { CartView } from "@/components/chat/cart-view";
 import { AvailabilityView } from "@/components/chat/availability-view";
+import { BasketView } from "@/components/chat/basket-view";
 import { Followups } from "@/components/chat/followups";
 
 export function MessageBubble({ msg, titleFor, onFollowup }: {
@@ -37,7 +38,7 @@ export function MessageBubble({ msg, titleFor, onFollowup }: {
           </div>
         ) : (
           <>
-            {msg.text && (
+            {msg.text && !turn?.basket && (
               <div className="rounded-2xl rounded-tl-sm border border-border bg-card px-4 py-2.5 text-sm leading-6 shadow-sm">
                 {msg.text}
               </div>
@@ -54,6 +55,7 @@ export function MessageBubble({ msg, titleFor, onFollowup }: {
             {turn?.product_details?.found && turn.product_details.entry && (
               <ProductGrid entries={[turn.product_details.entry]} />
             )}
+            {turn?.basket && <BasketView basket={turn.basket} />}
             {turn?.comparison && <CompareTable comparison={turn.comparison} titleFor={titleFor} />}
             {turn?.availability && <AvailabilityView availability={turn.availability} />}
             {turn?.cart && <CartView cart={turn.cart} />}

@@ -18,12 +18,14 @@ from __future__ import annotations
 
 import uuid
 
-from . import catalog, cart, enhancer, followups, llm, memory
+from . import catalog, cart, constraint, enhancer, followups, llm, memory, translate
 from .catalog import CatalogError, RerankerError
+from .constraint import ConstraintError
 from .contracts import (
     Action,
     CartOperationDraft,
     Reference,
+    RerankerRequest,
     Role,
     SearchEntry,
     TraceStep,
@@ -33,6 +35,7 @@ from .contracts import (
     UpdateCartRequest,
 )
 from .llm import LLMError
+from .translate import TranslateError
 
 
 class _Tracer:
@@ -119,18 +122,107 @@ def _resolve_entry(
     return None
 
 
+def _translate_back(text: str, target_language: str, tracer: _Tracer) -> str:
+    try:
+        translated = translate.from_english(text, target_language)
+    except TranslateError as exc:
+        tracer.record("translate_from_english", {"text": text, "target_language": target_language},
+                       {"error": str(exc)}, ok=False)
+        return text
+    tracer.record("translate_from_english", {"text": text, "target_language": target_language},
+                   {"translated": translated})
+    return translated
+
+
 def handle_turn(request: TurnRequest) -> TurnResult:
     tracer = _Tracer()
 
+    source_language = "en"
+    message = request.message
+    try:
+        translated, source_language = translate.to_english(request.message)
+        if source_language != "en":
+            message = translated
+        tracer.record("translate_to_english", {"message": request.message},
+                       {"language": source_language, "translated": message})
+    except TranslateError as exc:
+        tracer.record("translate_to_english", {"message": request.message}, {"error": str(exc)}, ok=False)
+
+    if request.mode == "constrain":
+        result = _handle_constraint_turn(request, message, tracer)
+    else:
+        result = _handle_turn(request, message, tracer)
+
+    if source_language != "en":
+        result.message = _translate_back(result.message, source_language, tracer)
+        if result.comparison is not None and result.comparison.summary:
+            result.comparison.summary = _translate_back(result.comparison.summary, source_language, tracer)
+
+    result.trace = tracer.steps
+    return result
+
+
+def _handle_constraint_turn(request: TurnRequest, message: str, tracer: _Tracer) -> TurnResult:
+    """Constrain mode: decompose into N objects, one SQL fan-out per object,
+    then pick the best-scoring combination that fits the shared budget.
+
+    Deliberately bypasses the query extractor, enhancer and reranker - this
+    lane answers a combinatorial question, not a retrieval one, and keeping
+    it off the shared path means the search/cart/compare lanes are untouched.
+    """
+
+    if memory.get_session(request.session_id) is None:
+        memory.create_session(request.session_id)
+    memory.append_turn(request.session_id, Role.USER, message)
+
+    try:
+        basket = constraint.solve(message)
+    except LLMError as exc:
+        tracer.record("constraint_solver", {"message": message}, {"error": str(exc)}, ok=False)
+        return _error(tracer, "Could not break the request into items and a budget.", str(exc))
+    except CatalogError as exc:
+        tracer.record("constraint_solver", {"message": message}, {"error": str(exc)}, ok=False)
+        return _error(tracer, "The catalog is unavailable.", str(exc))
+    except ConstraintError as exc:
+        tracer.record("constraint_solver", {"message": message}, {"error": str(exc)}, ok=False)
+        if str(exc) == "BASKET_INFEASIBLE":
+            return _error(tracer, "No combination of those items fits that budget.", str(exc))
+        return _error(tracer, "Could not find catalog products for that request.", str(exc))
+
+    tracer.record("constraint_solver", {"message": message}, basket.model_dump(mode="json"))
+
+    entries = [slot.entry for slot in basket.slots]
+    # Record the basket as this turn's results so ordinal references ("add
+    # the second one") keep working exactly as they do after a search.
+    memory.set_last_results(
+        request.session_id,
+        entries,
+        RerankerRequest(soft_query_text=message, hard_constraints={}, top_n=len(entries)),
+    )
+
+    result = TurnResult(
+        status=TurnStatus.OK,
+        message=basket.explanation or f"Basket of {len(basket.slots)} item(s).",
+        action=Action.CONSTRAINT_BASKET,
+        basket=basket,
+    )
+    session = memory.get_session(request.session_id)
+    result.followups = followups.build(result, session)
+    memory.append_turn(request.session_id, Role.ASSISTANT, result.message)
+    result.trace = tracer.steps
+    return result
+
+
+def _handle_turn(request: TurnRequest, message: str, tracer: _Tracer) -> TurnResult:
     session = memory.get_session(request.session_id)
     if session is None:
         session = memory.create_session(request.session_id)
 
-    memory.append_turn(request.session_id, Role.USER, request.message)
+    memory.append_turn(request.session_id, Role.USER, message)
 
-    history_in = {"message": request.message, "history_len": len(session.chat_history)}
+    history_in = {"message": message, "history_len": len(session.chat_history)}
     try:
-        extraction = llm.extract_query(request.message, session.chat_history)
+        extraction = llm.extract_query(message, session.chat_history)
     except LLMError as exc:
         tracer.record("query_extractor", history_in, {"error": str(exc)}, ok=False)
         return _error(tracer, "Could not interpret the message.", str(exc))
@@ -151,13 +243,13 @@ def handle_turn(request: TurnRequest) -> TurnResult:
         return result
 
     enhance_in = {
-        "message": request.message,
+        "message": message,
         "extraction": extraction.model_dump(mode="json"),
         "prior_reranker_request": (
             session.last_reranker_request.model_dump(mode="json") if session.last_reranker_request else None
         ),
     }
-    reranker_request = enhancer.build_reranker_request(request.message, extraction, session)
+    reranker_request = enhancer.build_reranker_request(message, extraction, session)
     tracer.record("query_enhancer", enhance_in, reranker_request.model_dump(mode="json"))
 
     action = extraction.action

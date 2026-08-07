@@ -1,7 +1,7 @@
 import { api } from "./client";
 import type { CreateSessionResponse, TurnResult } from "./types";
 
-export type SearchMode = "fast" | "deep";
+export type SearchMode = "fast" | "deep" | "constrain";
 
 export const chatApi = {
   createSession: async () => (await api.post<CreateSessionResponse>("/v1/sessions")).data,

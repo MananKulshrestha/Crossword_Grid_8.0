@@ -54,7 +54,7 @@ def get_session(session_id: str):
 def post_turn(session_id: str, body: TurnBody) -> TurnResult:
     if memory.get_session(session_id) is None:
         raise HTTPException(status_code=404, detail="SESSION_NOT_FOUND")
-    mode = "fast" if body.mode == "fast" else "deep"
+    mode = body.mode if body.mode in ("fast", "constrain") else "deep"
     request = TurnRequest(session_id=session_id, message=body.message, mode=mode)
     result = orchestrator.handle_turn(request)
     if result.status == TurnStatus.ERROR:

@@ -8,7 +8,8 @@ export type Action =
   | "COMPARE"
   | "CHECK_AVAILABILITY"
   | "SHOW_CART"
-  | "UPDATE_CART";
+  | "UPDATE_CART"
+  | "CONSTRAINT_BASKET";
 
 export interface SearchEntry {
   sku_id: string;
@@ -77,6 +78,24 @@ export interface CartSnapshot {
   items: CartItem[];
 }
 
+export interface BasketSlot {
+  label: string;
+  entry: SearchEntry;
+  candidate_count: number;
+  best_available_score: number;
+  chosen_score: number;
+}
+
+export interface Basket {
+  slots: BasketSlot[];
+  budget_paise?: number | null;
+  total_paise: number;
+  headroom_paise?: number | null;
+  naive_total_paise?: number | null;
+  unfilled: string[];
+  explanation?: string | null;
+}
+
 export interface FollowUpSuggestion {
   label: string;
   action: Action;
@@ -101,6 +120,7 @@ export interface TurnResult {
   comparison?: Comparison | null;
   availability?: Availability | null;
   cart?: CartSnapshot | null;
+  basket?: Basket | null;
   followups: FollowUpSuggestion[];
   error_code?: string | null;
   trace: TraceStep[];

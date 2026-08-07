@@ -23,6 +23,17 @@ def build(result: TurnResult, session_state: SessionState) -> list[FollowUpSugge
                                 params={"ordinal": 1})
         )
 
+    if result.action == Action.CONSTRAINT_BASKET and result.basket and result.basket.slots:
+        suggestions.append(
+            FollowUpSuggestion(label="Add the whole basket to cart", action=Action.UPDATE_CART,
+                                params={"all": True})
+        )
+        if len(result.basket.slots) >= 2:
+            suggestions.append(
+                FollowUpSuggestion(label="Compare the first two picks", action=Action.COMPARE,
+                                    params={"ordinals": [1, 2]})
+            )
+
     if result.action == Action.PRODUCT_DETAILS and result.product_details and result.product_details.found:
         suggestions.append(
             FollowUpSuggestion(label="Add this to cart", action=Action.UPDATE_CART, params={})
